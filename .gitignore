@@ -1,0 +1,13 @@
+# Local secrets -- real credentials/config, never committed. .env.example is the
+# tracked template; see PROJECT_PLAN.md Sec 4.7/7.
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated test artifacts (screenshots, logs) -- see reports/output/.gitkeep, which
+# this leaves tracked since only the two subdirs below are ignored.
+reports/output/screenshots/
+reports/output/logs/

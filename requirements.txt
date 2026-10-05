@@ -1,0 +1,7 @@
+﻿selenium==4.50.0
+pytest
+fastapi
+uvicorn
+requests
+python-dotenv
+loguru
