@@ -20,8 +20,10 @@ attaching only to a window that is genuinely new.
 """
 
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator, Optional
 
 import requests
@@ -40,18 +42,86 @@ def _run_powershell(command: str, timeout: int = 20) -> str:
     return result.stdout.strip()
 
 
+# Confirmed via live testing (2026-10-05): enumerating browser windows MUST use real
+# Win32 window enumeration (EnumWindows), NOT Get-Process's MainWindowHandle property --
+# that property reports only ONE window per process object, and the OS routinely opens
+# the sign-in window inside an ALREADY-RUNNING browser process (reusing it) rather than
+# spawning a new one. The new window was consistently invisible to the old
+# Get-Process-based check for exactly this reason -- not a timing issue, a structural
+# one: no number of retries or longer timeouts would ever have found it.
+#
+# Written to a real .ps1 file and invoked via -File, not passed inline via -Command --
+# confirmed via testing that embedding this C# in a double-quoted here-string
+# (@" ... "@) passed as a -Command string breaks, since the C# source's own double
+# quotes (e.g. "user32.dll") terminate the here-string early. A single-quoted
+# here-string fixes that, but -File sidesteps the whole class of escaping problems and
+# is what's actually verified working.
+_ENUM_WINDOWS_SCRIPT = '''param([string]$NamesCsv)
+$Names = $NamesCsv -split ','
+
+Add-Type @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+public class DdaWindowEnumerator {
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processId);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    public static List<string> GetVisibleWindows() {
+        var results = new List<string>();
+        EnumWindowsProc callback = (hWnd, lParam) => {
+            if (IsWindowVisible(hWnd)) {
+                int pid;
+                GetWindowThreadProcessId(hWnd, out pid);
+                results.Add(pid + ":" + hWnd.ToInt64().ToString("X"));
+            }
+            return true;
+        };
+        EnumWindows(callback, IntPtr.Zero);
+        return results;
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+$ids = (Get-Process -Name $Names -ErrorAction SilentlyContinue).Id
+[DdaWindowEnumerator]::GetVisibleWindows() | ForEach-Object {
+    $parts = $_ -split ':'
+    if ($ids -contains [int]$parts[0]) { $parts[1] }
+}
+'''
+
+_enum_windows_script_path: Optional[Path] = None
+
+
+def _get_enum_windows_script_path() -> Path:
+    global _enum_windows_script_path
+    if _enum_windows_script_path is None:
+        path = Path(tempfile.gettempdir()) / "dda_list_browser_windows.ps1"
+        path.write_text(_ENUM_WINDOWS_SCRIPT, encoding="utf-8")
+        _enum_windows_script_path = path
+    return _enum_windows_script_path
+
+
 def list_browser_window_hwnds() -> set:
     """Snapshot of every currently-open top-level window handle (hex) across all
     supported browser processes, regardless of which one opened it or what it shows.
     Call this BEFORE triggering a sign-in (or any) action that is expected to open a new
     browser window, so the new window can be told apart from ones already open.
     """
-    names = ",".join(f"'{name}'" for name in BROWSER_PROCESS_NAMES)
-    output = _run_powershell(
-        f"Get-Process -Name {names} -ErrorAction SilentlyContinue | "
-        "Where-Object { $_.MainWindowHandle -ne 0 } | "
-        "ForEach-Object { '{0:X}' -f $_.MainWindowHandle.ToInt64() }"
+    script_path = _get_enum_windows_script_path()
+    names_csv = ",".join(BROWSER_PROCESS_NAMES)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path), "-NamesCsv", names_csv],
+        capture_output=True, text=True, timeout=20,
     )
+    output = result.stdout.strip()
     return {line.strip() for line in output.splitlines() if line.strip()}
 
 
