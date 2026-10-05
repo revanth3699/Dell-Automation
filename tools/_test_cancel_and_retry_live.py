@@ -1,10 +1,12 @@
 """
-Live test of the cancel-and-retry path, requested directly by the user (2026-10-05):
-wrong OTP -> deliberately cancel (via the app's own "Sign in to MyDell to continue"
-modal's Cancel button, NOT UAC) -> app shows "There was a problem signing in" with its
-own Retry button -> click Retry -> whole browser-based sequence runs again
-(email/password, same as before) -> this time submit the CORRECT OTP -> rest of the flow
-(trust-network, pairing-discovery, wait-for-source) proceeds normally.
+Live test of the cancel-and-retry path. Sequence confirmed directly by the user
+(2026-10-06): wrong OTP -> deliberately click the OTP page's OWN Cancel button (below
+Verify, in the browser -- NOT the app-side waiting modal, and NOT UAC, both of which
+proved unreliable to trigger on demand in earlier attempts) -> app shows "There was a
+problem signing in" with its own Retry button -> click Retry -> whole browser-based
+sequence runs again (email/password, same as before) -> this time submit the CORRECT
+OTP -> rest of the flow (trust-network, pairing-discovery, wait-for-source) proceeds
+normally.
 
 Reuses SignInFlow's real sub-components/methods directly (not a reimplementation) --
 only the deliberate cancel point is hand-orchestrated here, since that's a test-only
@@ -13,7 +15,7 @@ tools/signin_flow_test_plan.md's exclusion list: clicking Cancel is a real destr
 user choice, deliberately never automated as part of normal operation).
 
 Confirms (or refutes) two previously-unconfirmed assumptions in one run:
-1. The SignInWaitingModal locators (components/target/common_dialogs.py) are correct.
+1. The OtpStep.cancel() locator (locators/target/otp_step.py) is correct.
 2. Cancelling there actually produces the SignInFailedDialog, as assumed by
    SignInFlow._wait_for_auth_outcome()'s whole design.
 
@@ -37,7 +39,6 @@ from factory.prerequisites import ensure_target_prerequisites
 from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, OtpStep
-from components.target.common_dialogs import SignInWaitingModal
 
 
 def _require_env(name: str) -> str:
@@ -68,7 +69,6 @@ driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path)
 log(f"Attached. session_id={driver.session_id}")
 
 flow = SignInFlow(driver, username=username, password=password, otp=otp)
-sign_in_waiting_modal = SignInWaitingModal(driver)
 deadline = time.monotonic() + 300.0
 
 try:
@@ -108,13 +108,13 @@ try:
         else:
             log("WARNING: expected error banner did not appear after wrong OTP.")
 
-        log("Deliberately cancelling via the app's 'Sign in to MyDell to continue' "
-            "modal instead of entering the correct OTP...")
-        if not sign_in_waiting_modal.cancel():
-            log("SignInWaitingModal not found / Cancel not clicked -- cannot proceed "
-                "(locator may be wrong; see locators/target/sign_in_waiting_modal.py).")
+        log("Deliberately clicking the OTP page's own Cancel button instead of "
+            "entering the correct OTP...")
+        if not otp_step.cancel():
+            log("OTP Cancel button not found/clicked -- cannot proceed "
+                "(locator may be wrong; see locators/target/otp_step.py).")
             sys.exit(1)
-        log("Clicked Cancel on the app's waiting modal.")
+        log("Clicked Cancel on the OTP page.")
 
     log("Browser window closed (via our own cleanup on exiting the with-block). "
         "Waiting for the app's 'There was a problem signing in' dialog...")

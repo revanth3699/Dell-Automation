@@ -18,7 +18,7 @@ independently confirmed live.
 from components.base_component import BaseComponent
 from locators.target.email_step import EMAIL_CONTINUE_BUTTON_LOCATOR, EMAIL_FIELD_LOCATOR
 from locators.target.error_banner import ERROR_BANNER_LOCATOR
-from locators.target.otp_step import OTP_BOX_NAMES, OTP_VERIFY_BUTTON_LOCATOR, otp_box_locator
+from locators.target.otp_step import OTP_BOX_NAMES, OTP_VERIFY_BUTTON_LOCATOR, OTP_CANCEL_BUTTON_LOCATOR, otp_box_locator
 from locators.target.password_step import PASSWORD_FIELD_LOCATOR, PASSWORD_SIGNIN_BUTTON_LOCATOR
 from locators.target.restore_pages_dialog import RESTORE_PAGES_CLOSE_BUTTON_LOCATOR
 
@@ -118,6 +118,7 @@ class OtpStep:
             for name in OTP_BOX_NAMES
         ]
         self._verify_button = BaseComponent(browser_session, *OTP_VERIFY_BUTTON_LOCATOR, "OtpVerifyButton")
+        self._cancel_button = BaseComponent(browser_session, *OTP_CANCEL_BUTTON_LOCATOR, "OtpCancelButton")
         self._error_banner = BaseComponent(browser_session, *ERROR_BANNER_LOCATOR, "OtpErrorBanner", timeout=8.0)
 
     def is_showing(self, timeout: float) -> bool:
@@ -137,3 +138,16 @@ class OtpStep:
             box.type_text(digit)
         self._verify_button.click()
         return self._error_banner.exists(timeout=timeout)
+
+    def cancel(self, timeout: float = 2.0) -> bool:
+        """Clicks the OTP page's own Cancel button (below Verify) -- confirmed directly
+        by the user (2026-10-06) as the deliberate way to force a real sign-in
+        cancellation for testing the cancel-and-retry path, rather than relying on real
+        UAC behavior (unreliable to trigger on demand -- see
+        tools/_test_cancel_and_retry_live.py). Returns whether it was present at all
+        (same pattern as TrustNetworkDialog.accept()).
+        """
+        if not self._cancel_button.exists(timeout=timeout):
+            return False
+        self._cancel_button.click()
+        return True
