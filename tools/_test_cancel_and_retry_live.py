@@ -1,12 +1,12 @@
 """
 Live test of the cancel-and-retry path. Sequence confirmed directly by the user
 (2026-10-06): wrong OTP -> deliberately click the OTP page's OWN Cancel button (below
-Verify, in the browser -- NOT the app-side waiting modal, and NOT UAC, both of which
-proved unreliable to trigger on demand in earlier attempts) -> app shows "There was a
-problem signing in" with its own Retry button -> click Retry -> whole browser-based
-sequence runs again (email/password, same as before) -> this time submit the CORRECT
-OTP -> rest of the flow (trust-network, pairing-discovery, wait-for-source) proceeds
-normally.
+Verify, in the browser) -> this STILL triggers a Windows UAC prompt (a human must
+approve it -- automation cannot see or interact with it, same secure-desktop constraint
+as the normal success path) -> once approved, the app shows "There was a problem signing
+in" with its own Retry button -> click Retry -> whole browser-based sequence runs again,
+submitting CORRECT values straight away this time (no repeated wrong-value checks) ->
+rest of the flow (trust-network, pairing-discovery, wait-for-source) proceeds normally.
 
 Reuses SignInFlow's real sub-components/methods directly (not a reimplementation) --
 only the deliberate cancel point is hand-orchestrated here, since that's a test-only
@@ -38,7 +38,7 @@ from factory.driver_factory import DriverFactory, MachineRole
 from factory.prerequisites import ensure_target_prerequisites
 from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds
 from flows.target.authentication.sign_in_flow import SignInFlow
-from components.target.browser_sign_in_page import RestorePagesDialog, OtpStep
+from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 
 
 def _require_env(name: str) -> str:
@@ -117,8 +117,11 @@ try:
         log("Clicked Cancel on the OTP page.")
 
     log("Browser window closed (via our own cleanup on exiting the with-block). "
-        "Waiting for the app's 'There was a problem signing in' dialog...")
-    outcome = flow._wait_for_auth_outcome(remaining=60.0)
+        "Confirmed directly by the user (2026-10-06): cancelling here still triggers a "
+        "Windows UAC prompt -- automation cannot see or interact with it (secure "
+        "desktop). Please approve it manually if it appears; waiting for the app's "
+        "'There was a problem signing in' dialog with real patience...")
+    outcome = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
     log(f"Outcome after cancel: {outcome!r}")
 
     if outcome != "failed":
@@ -137,12 +140,29 @@ try:
         sys.exit(1)
     log("New browser window opened after Retry.")
 
+    # Confirmed directly by the user (2026-10-06): on this retry pass, submit correct
+    # values straight away -- don't repeat the wrong-value negative checks. They were
+    # already proven once on the first pass, and password/OTP both carry a confirmed
+    # 6-attempt account lockout; there's no reason to burn more of that budget redoing
+    # a check this run isn't about.
     with browser_driver(known_hwnds, timeout=20.0) as browser_session:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
-        flow._handle_email_step_if_present(browser_session, 20.0)
-        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0)
+        email_step = EmailStep(browser_session)
+        if email_step.is_showing(timeout=20.0):
+            log("Submitting the correct email...")
+            email_step.submit(username)
+        else:
+            log("Email step not present on retry -- continuing (may have been skipped).")
+
+        restore_pages_dialog.dismiss_if_present()
+        password_step = PasswordStep(browser_session)
+        if password_step.is_showing(timeout=20.0):
+            log("Submitting the correct password...")
+            password_step.submit(password)
+        else:
+            log("Password step not present on retry -- continuing (may have been skipped).")
 
         otp_step = OtpStep(browser_session)
         if otp_step.is_showing(timeout=20.0):

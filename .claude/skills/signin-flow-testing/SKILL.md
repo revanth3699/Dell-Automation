@@ -25,13 +25,23 @@ accident:
   sign-in was cancelled or failed. Always race it against the "There was a problem
   signing in" / "Sign-in failed. Please try again." dialog; on failure, click that
   dialog's own Retry button and repeat the whole Email→Password→OTP sequence, never
-  just the OTP step.
+  just the OTP step. On the retry pass, submit correct values straight away -- don't
+  repeat the wrong-value negative checks (confirmed by the user, 2026-10-06); they were
+  already proven once, and password/OTP's confirmed 6-attempt lockout is no reason to
+  burn more of that budget on a check this pass isn't about.
+- **Cancelling still triggers a real Windows UAC prompt, confirmed by the user
+  (2026-10-06) -- it's not a UAC-free shortcut.** After clicking Cancel (the OTP page's
+  own Cancel button, below Verify -- confirmed reliable; the app-side waiting modal and
+  real UAC-as-the-trigger both proved unreliable to invoke on demand), a human still has
+  to approve UAC before the "There was a problem signing in" dialog appears. Give that
+  wait the full remaining time budget, not a short fixed window, same reasoning as the
+  success path's own UAC wait.
 - **Don't click any dialog's Cancel button as part of `SignInFlow.run()`'s normal
-  production path** (the "Sign in to MyDell to continue" wait modal, the sign-in-failed
-  dialog, the confirm-accounts dialog) -- these are genuine destructive user choices.
-  The one deliberate exception: `tools/_test_cancel_and_retry_live.py` clicks the
-  waiting modal's Cancel button on purpose, to force-exercise the cancel-and-retry path
-  for real (requested directly by the user, 2026-10-05) -- that's a dedicated test
+  production path** (the "Sign in to MyDell to continue" wait modal, the OTP page's
+  Cancel button, the sign-in-failed dialog, the confirm-accounts dialog) -- these are
+  genuine destructive user choices. The one deliberate exception:
+  `tools/_test_cancel_and_retry_live.py` clicks the OTP page's Cancel button on purpose,
+  to force-exercise the cancel-and-retry path for real -- that's a dedicated test
   script, not something baked into `run()` itself.
 - When a new screen or error state shows up that isn't in the plan yet, update
   `tools/signin_flow_test_plan.md` in the same change -- don't let the code and the
