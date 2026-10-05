@@ -11,6 +11,8 @@ since it's only needed for that launch mode.
 """
 
 import importlib.util
+import json
+import os
 import shutil
 import socket
 import subprocess
@@ -229,6 +231,56 @@ def ensure_python_packages() -> None:
     subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True)
 
 
+_BROWSER_PROFILE_PREFERENCES_PATHS = [
+    r"Google\Chrome\User Data\Default\Preferences",
+    r"Microsoft\Edge\User Data\Default\Preferences",
+]
+
+
+def _mark_browser_profile_as_cleanly_exited(preferences_path: Path) -> None:
+    """Patches a Chromium-based browser's profile Preferences file so it believes its
+    last session exited normally, preventing the "Chrome didn't shut down correctly" /
+    "Restore pages?" dialog on next launch -- confirmed to otherwise interfere with
+    automation by stealing keyboard focus mid-typing (see
+    components/target/browser_sign_in_page.py's RestorePagesDialog).
+
+    Necessary because our own failure cleanup force-kills the app/browser rather than
+    closing it gracefully (see SignInFlow._cleanup_after_failure()), which is exactly
+    what sets Chromium's own crash-detection flags in the first place. A launch flag
+    (e.g. --restore-last-session=false) isn't an option here: the Dell app launches the
+    OS-default browser internally, not this automation, so there's no launch command to
+    add flags to -- the profile's own saved state is the only lever available.
+
+    Only touches the two keys that control this specific dialog; every other preference
+    (history, passwords, bookmarks, etc.) is read back unchanged and rewritten as-is.
+    Silently does nothing if the file doesn't exist or can't be parsed as JSON -- this
+    is a best-effort convenience, not a required prerequisite step.
+    """
+    if not preferences_path.exists():
+        return
+    try:
+        data = json.loads(preferences_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    profile = data.setdefault("profile", {})
+    if profile.get("exit_type") == "Normal" and profile.get("exited_cleanly") is True:
+        return  # already clean -- don't rewrite the file for no reason
+    profile["exit_type"] = "Normal"
+    profile["exited_cleanly"] = True
+    try:
+        preferences_path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass  # e.g. file locked because the browser is still running -- skip, not fatal
+
+
+def ensure_browsers_exit_cleanly() -> None:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if not local_app_data:
+        return
+    for relative_path in _BROWSER_PROFILE_PREFERENCES_PATHS:
+        _mark_browser_profile_as_cleanly_exited(Path(local_app_data) / relative_path)
+
+
 def ensure_target_prerequisites() -> str:
     """Runs all Target-PC prerequisite checks, auto-installing/fixing what it can.
     Returns the resolved WinAppDriver executable path. Raises RuntimeError if a step
@@ -238,5 +290,6 @@ def ensure_target_prerequisites() -> str:
     winappdriver_path = ensure_winappdriver_installed()
     ensure_winappdriver_running(winappdriver_path)
     ensure_python_packages()
+    ensure_browsers_exit_cleanly()
     print("All Target PC prerequisites OK.")
     return winappdriver_path
