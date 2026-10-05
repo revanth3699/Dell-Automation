@@ -16,8 +16,17 @@ Confirms (or refutes) two previously-unconfirmed assumptions in one run:
 1. The SignInWaitingModal locators (components/target/common_dialogs.py) are correct.
 2. Cancelling there actually produces the SignInFailedDialog, as assumed by
    SignInFlow._wait_for_auth_outcome()'s whole design.
+
+Confirmed requirement: this must work consistently across machines, not just the one it
+was first written on -- build path and credentials are environment-variable only (same
+convention as tools/run_sign_in_flow.py), never hardcoded. Set these before running:
+    DDA_TARGET_BUILD_PATH         (path to DellDataAssistant.TargetPc.exe)
+    DDA_TARGET_SIGNIN_USERNAME
+    DDA_TARGET_SIGNIN_PASSWORD
+    DDA_TARGET_OTP_STATIC_VALUE
 """
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -30,6 +39,22 @@ from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, OtpStep
 from components.target.common_dialogs import SignInWaitingModal
 
+
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        raise SystemExit(
+            f"Missing required environment variable {name} -- see this file's module "
+            "docstring. Set it (e.g. in .env) and re-run."
+        )
+    return value
+
+
+build_path = _require_env("DDA_TARGET_BUILD_PATH")
+username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
+password = _require_env("DDA_TARGET_SIGNIN_PASSWORD")
+otp = _require_env("DDA_TARGET_OTP_STATIC_VALUE")
+
 ensure_target_prerequisites()
 
 t0 = time.monotonic()
@@ -39,13 +64,10 @@ def log(msg: str) -> None:
     print(f"[{time.monotonic() - t0:.1f}s] {msg}")
 
 
-driver = DriverFactory.get_app_driver(
-    MachineRole.TARGET,
-    build_path=r"C:\Users\revan\Downloads\027df3321\Release\DellDataAssistant.TargetPc.exe",
-)
+driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path)
 log(f"Attached. session_id={driver.session_id}")
 
-flow = SignInFlow(driver, username="sospigorda@necub.com", password="Dell@123", otp="123456")
+flow = SignInFlow(driver, username=username, password=password, otp=otp)
 sign_in_waiting_modal = SignInWaitingModal(driver)
 deadline = time.monotonic() + 300.0
 
