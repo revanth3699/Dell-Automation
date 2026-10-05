@@ -1,0 +1,155 @@
+"""
+Live test of the cancel-and-retry path, requested directly by the user (2026-10-05):
+wrong OTP -> deliberately cancel (via the app's own "Sign in to MyDell to continue"
+modal's Cancel button, NOT UAC) -> app shows "There was a problem signing in" with its
+own Retry button -> click Retry -> whole browser-based sequence runs again
+(email/password, same as before) -> this time submit the CORRECT OTP -> rest of the flow
+(trust-network, pairing-discovery, wait-for-source) proceeds normally.
+
+Reuses SignInFlow's real sub-components/methods directly (not a reimplementation) --
+only the deliberate cancel point is hand-orchestrated here, since that's a test-only
+maneuver that has no place in SignInFlow.run()'s normal production path (see
+tools/signin_flow_test_plan.md's exclusion list: clicking Cancel is a real destructive
+user choice, deliberately never automated as part of normal operation).
+
+Confirms (or refutes) two previously-unconfirmed assumptions in one run:
+1. The SignInWaitingModal locators (components/target/common_dialogs.py) are correct.
+2. Cancelling there actually produces the SignInFailedDialog, as assumed by
+   SignInFlow._wait_for_auth_outcome()'s whole design.
+"""
+
+import sys
+import time
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from factory.driver_factory import DriverFactory, MachineRole
+from factory.prerequisites import ensure_target_prerequisites
+from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds
+from flows.target.authentication.sign_in_flow import SignInFlow
+from components.target.browser_sign_in_page import RestorePagesDialog, OtpStep
+from components.target.common_dialogs import SignInWaitingModal
+
+ensure_target_prerequisites()
+
+t0 = time.monotonic()
+
+
+def log(msg: str) -> None:
+    print(f"[{time.monotonic() - t0:.1f}s] {msg}")
+
+
+driver = DriverFactory.get_app_driver(
+    MachineRole.TARGET,
+    build_path=r"C:\Users\revan\Downloads\027df3321\Release\DellDataAssistant.TargetPc.exe",
+)
+log(f"Attached. session_id={driver.session_id}")
+
+flow = SignInFlow(driver, username="sospigorda@necub.com", password="Dell@123", otp="123456")
+sign_in_waiting_modal = SignInWaitingModal(driver)
+deadline = time.monotonic() + 300.0
+
+try:
+    if flow._already_signed_in():
+        log("App is already signed in -- this test needs a FRESH sign-in to reach the "
+            "OTP step. Sign out in the app first, then rerun.")
+        sys.exit(1)
+
+    known_hwnds = list_browser_window_hwnds()
+    opened_browser = flow._click_sign_in_with_retry(known_hwnds)
+    if not opened_browser:
+        log("Sign-in click didn't open a browser (already-authenticated session "
+            "detected) -- this test needs the full browser-based flow. Sign out and rerun.")
+        sys.exit(1)
+
+    log("Browser opened. Driving to the OTP step for the deliberate-cancel pass...")
+
+    with browser_driver(known_hwnds, timeout=20.0) as browser_session:
+        restore_pages_dialog = RestorePagesDialog(browser_session)
+        restore_pages_dialog.dismiss_if_present()
+
+        flow._handle_email_step_if_present(browser_session, 20.0)
+        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0)
+
+        otp_step = OtpStep(browser_session)
+        if not otp_step.is_showing(timeout=20.0):
+            log("OTP step never appeared -- aborting test (unexpected state).")
+            sys.exit(1)
+
+        restore_pages_dialog.dismiss_if_present()
+        time.sleep(1.0)
+
+        wrong_otp = "".join(str((int(d) + 1) % 10) for d in flow.otp)
+        log("Submitting deliberately wrong OTP...")
+        if otp_step.submit_and_expect_error(wrong_otp):
+            log("Wrong-OTP error banner confirmed.")
+        else:
+            log("WARNING: expected error banner did not appear after wrong OTP.")
+
+        log("Deliberately cancelling via the app's 'Sign in to MyDell to continue' "
+            "modal instead of entering the correct OTP...")
+        if not sign_in_waiting_modal.cancel():
+            log("SignInWaitingModal not found / Cancel not clicked -- cannot proceed "
+                "(locator may be wrong; see locators/target/sign_in_waiting_modal.py).")
+            sys.exit(1)
+        log("Clicked Cancel on the app's waiting modal.")
+
+    log("Browser window closed (via our own cleanup on exiting the with-block). "
+        "Waiting for the app's 'There was a problem signing in' dialog...")
+    outcome = flow._wait_for_auth_outcome(remaining=60.0)
+    log(f"Outcome after cancel: {outcome!r}")
+
+    if outcome != "failed":
+        log("Did not detect the sign-in-failed dialog after cancelling -- the cancel "
+            "mechanism or the dialog locator may not be what we assumed. Stopping here.")
+        sys.exit(1)
+
+    log("Clicking Retry on the sign-in-failed dialog...")
+    known_hwnds = list_browser_window_hwnds()
+    if not flow.sign_in_failed_dialog.retry():
+        log("Retry button not found/clicked -- aborting.")
+        sys.exit(1)
+
+    if not flow._wait_for_new_browser(known_hwnds, timeout=30.0):
+        log("Clicking Retry never opened a new browser window -- aborting.")
+        sys.exit(1)
+    log("New browser window opened after Retry.")
+
+    with browser_driver(known_hwnds, timeout=20.0) as browser_session:
+        restore_pages_dialog = RestorePagesDialog(browser_session)
+        restore_pages_dialog.dismiss_if_present()
+
+        flow._handle_email_step_if_present(browser_session, 20.0)
+        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0)
+
+        otp_step = OtpStep(browser_session)
+        if otp_step.is_showing(timeout=20.0):
+            restore_pages_dialog.dismiss_if_present()
+            time.sleep(1.0)
+            log("Submitting the CORRECT OTP this time...")
+            otp_step.submit(flow.otp)
+        else:
+            log("OTP step not present on retry -- continuing (may have been skipped).")
+
+    log("OTP submitted (correct value). Waiting for the real post-auth outcome...")
+    outcome2 = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+    log(f"Outcome after correct OTP: {outcome2!r}")
+
+    if outcome2 != "success":
+        log("Did not reach success after the correct OTP on retry -- stopping.")
+        sys.exit(1)
+
+    flow._wait_for_trust_network_and_accept(remaining=deadline - time.monotonic())
+    flow._confirm_reached_pairing_discovery(remaining=deadline - time.monotonic())
+    log("SUCCESS: cancel-and-retry flow completed end-to-end, reached pairing-discovery screen.")
+
+    found = flow.wait_for_source_pc()
+    log(f"Source PC found: {found}")
+
+except BaseException:
+    # Same "any exception closes the driver and the app immediately" requirement as
+    # SignInFlow.run() itself -- this script drives SignInFlow's internals directly
+    # rather than through run(), so it needs the same safety net explicitly.
+    flow.log.error("Cancel-and-retry test failed -- cleaning up")
+    flow._cleanup_after_failure()
+    raise

@@ -11,6 +11,7 @@ from typing import Optional
 from components.base_component import BaseComponent
 from locators.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
+from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR
 
 
@@ -63,6 +64,39 @@ class SignInFailedDialog:
         if not self._heading.exists(timeout=timeout):
             return False
         self._retry_button.click()
+        return True
+
+
+class SignInWaitingModal:
+    """"Sign in to MyDell to continue" -- shown in the app (not the browser) while the
+    external browser-based sign-in is in progress: "We've opened your web browser so you
+    can sign in and continue...", a "Having trouble? Retry" link, a "Waiting for
+    sign-in..." status, and a Cancel button. Confirmed to exist from the project's
+    original reference walkthrough; this is the deliberate, user-confirmed way to force a
+    real sign-in cancellation for testing the cancel-and-retry path (see
+    tools/_test_cancel_and_retry_live.py) -- NOT something a flow clicks as part of normal
+    operation (see tools/signin_flow_test_plan.md's exclusion list).
+
+    The Cancel button's exact accessible name is unconfirmed live -- see
+    locators/target/sign_in_waiting_modal.py.
+    """
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(app_session, *SIGN_IN_WAITING_HEADING_LOCATOR, "SignInWaitingHeading")
+        self._cancel_button = BaseComponent(
+            app_session, *SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR, "SignInWaitingCancelButton"
+        )
+
+    def is_showing(self, timeout: float = 2.0) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def cancel(self, timeout: float = 2.0) -> bool:
+        """Clicks Cancel if the modal is showing. Returns whether it was present at all
+        (same pattern as TrustNetworkDialog.accept()).
+        """
+        if not self._heading.exists(timeout=timeout):
+            return False
+        self._cancel_button.click()
         return True
 
 
