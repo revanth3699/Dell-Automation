@@ -46,8 +46,14 @@ Password Step ("Verify Your Identity")                                     [buil
 
 OTP Step ("Two-Step Verification", 6 boxes)                                [built]
  depends on: Password Step advanced (field gone)
- actions: [neg] submit wrong 6-digit code once → expect error banner
-          [pos] submit real code → Verify
+ FIRST whole-flow attempt only (run_negative_check=True):
+   actions: [neg] submit wrong 6-digit code once → expect error banner
+            → click the OTP page's OWN Cancel button (below Verify) --
+              NEVER submits the real code in this same pass
+   → RACE (see below), which resolves to FAILURE by design
+ RETRY attempt(s) (run_negative_check=False):
+   actions: [pos] submit real code directly → Verify
+   → RACE, expected SUCCESS
  → RACE (see section 3)
 
 RACE: transition screen vs sign-in-failed dialog                           [built]
@@ -55,8 +61,17 @@ RACE: transition screen vs sign-in-failed dialog                           [buil
  │   migration assistant") → SUCCESS → Trust-Network Dialog
  └─ "There was a problem signing in" / "Sign-in failed. Please
      try again." (Cancel / Retry buttons)        → FAILURE
-         → click Retry → back to Email Step (whole sequence repeats,
-           NOT just OTP) → capped at MAX_AUTH_RETRIES = 3 total
+         → click Retry (still requires a human to approve a REAL
+           Windows UAC prompt first, same as the success path) → back
+           to Email Step, submitting CORRECT values directly this time
+           (no repeated negative checks on email/password either) →
+           capped at MAX_AUTH_RETRIES = 3 total
+
+ Confirmed directly by the user (2026-10-06): there is no separate
+ "cancel path" distinct from "retry on failure" -- the OTP negative
+ check's deliberate Cancel and a genuine failure both resolve through
+ this exact same RACE and the exact same Retry button. The first
+ whole-flow attempt is EXPECTED to land on FAILURE every run, by design.
 
 Trust-Network Dialog ("Connect to a trusted network")                      [built]
  depends on: RACE resolved to success, OR an already-signed-in shortcut
@@ -92,7 +107,8 @@ Confirm-Accounts Dialog ("Let's make sure we're connecting the
 | 2 | Click Sign In | External browser opens, OR app skips straight to a transition screen | `_click_sign_in_with_retry()` |
 | 3 | Browser: type email, click Continue | Email field disappears | `EmailStep.submit()` |
 | 4 | Browser: type password, click Sign In | Password field disappears | `PasswordStep.submit()` |
-| 5 | Browser: type OTP, click Verify | OTP boxes disappear OR sign-in-failed dialog | `OtpStep.submit()` + `_wait_for_auth_outcome()` |
+| 5a | Browser: type WRONG OTP, click Verify, click Cancel (1st attempt only) | Error banner, then sign-in-failed dialog | `OtpStep.submit_and_expect_error()` + `OtpStep.cancel()` |
+| 5b | (human) approve UAC → click Retry → repeat 3-5 with correct values | New browser, correct email/password/OTP submitted directly | `_run_fresh_auth_with_retry()`'s 2nd attempt |
 | 6 | (human) approve Windows UAC prompt | "...getting things ready" / "Starting the migration assistant" | `MigrationPreparationTransition.wait_until_any_showing()` |
 | 7 | App shows trust dialog | "Connect to a trusted network" | `TrustNetworkDialog.accept()` |
 | 8 | App searches for Source | "We're looking for your other PC" | `PairingDiscoveryScreen.wait_until_showing()` — **`SignInFlow.run()` ends here** |
@@ -108,14 +124,20 @@ Confirm-Accounts Dialog ("Let's make sure we're connecting the
 | Email | wrong email | `"We are unable to match the details you entered with our records"` | single attempt only (no lockout risk, but no reason to hammer it either) |
 | Password | wrong password | same prefix + `"Your account will be locked if an incorrect password is entered 6 times..."` | **single attempt only** — explicit 6-attempt lockout warning |
 | OTP | wrong code | same prefix + `"Your account will be locked in case of 6 incorrect attempts."` | **single attempt only** — same lockout warning |
-| Post-OTP | sign-in cancelled/failed | `"There was a problem signing in"` / `"Sign-in failed. Please try again."` | click **Retry**, repeat whole Email→OTP sequence, capped at `MAX_AUTH_RETRIES = 3` |
+| Post-OTP | sign-in cancelled/failed (triggered BY DESIGN every run via OTP's Cancel, or genuinely) | `"There was a problem signing in"` / `"Sign-in failed. Please try again."` | click **Retry** (requires real UAC approval first), repeat whole Email→OTP sequence with correct values, capped at `MAX_AUTH_RETRIES = 3` |
 | Pairing code | wrong code | **unconfirmed — no screenshot of this failure state yet** | not automatable until confirmed |
 
-Design rule this plan enforces: **never retry a wrong-value submission in place.**
-Email/password/OTP each get exactly one deliberately-wrong attempt before the real value
-is submitted — looping a wrong value would either waste time for no benefit (email) or
-burn down the confirmed 6-attempt lockout for no reason (password/OTP). This is why the
-negative check is woven into the *same* pass as the positive one, not a separate full run.
+Design rules this plan enforces:
+- **Never retry a wrong-value submission in place.** Email/password get exactly one
+  deliberately-wrong attempt before the real value is submitted, in the SAME pass —
+  looping a wrong value would either waste time for no benefit (email) or burn down the
+  confirmed 6-attempt lockout for no reason (password).
+- **OTP is the one exception, by design, confirmed 2026-10-06**: its wrong-value attempt
+  is followed by clicking Cancel, never the correct code in the same pass. The correct
+  code is submitted only on the retry pass that follows, alongside correct email/password
+  (no repeated negative checks there either). This means the first whole-flow attempt
+  deliberately fails every run -- not a separate "cancel path", the SAME retry-on-failure
+  mechanism, exercised on purpose instead of waiting for a genuine failure.
 
 ## 4. Automation coverage status
 
@@ -123,8 +145,8 @@ negative check is woven into the *same* pass as the positive one, not a separate
 |---|---|
 | Already-signed-in shortcuts (3 screens) | Built, live-tested |
 | "No browser opens" already-authenticated variant | Built, live-tested |
-| Email/Password/OTP positive + negative | Built; negative paths not yet independently live-tested (browser profile has retained a session on every run so far) |
-| Post-OTP success-vs-failure race + whole-flow retry | Built this session; not yet exercised live (hard to trigger a real cancellation on demand) |
+| Email/Password/OTP positive + negative | Built; negative paths confirmed live (error banners matched on wrong email/password/OTP) |
+| Post-OTP success-vs-failure race + whole-flow retry (now triggered by design, every run, via OTP's Cancel) | Built; every live run today got blocked before completing a full cycle -- once by UAC never appearing, once by a CAPTCHA (likely from today's volume of attempts on one test account). Control-flow logic itself verified via `tools/_test_auth_retry_logic.py` (mock, both outcomes pass). |
 | Trust-network dialog | Built, live-tested |
 | Pairing-discovery reach + wait-for-source | Built, live-tested |
 | Pairing-code entry (positive) | Built; box locators are positional, not confirmed by name |
@@ -134,9 +156,10 @@ negative check is woven into the *same* pass as the positive one, not a separate
 
 ## 5. Explicitly excluded from this plan
 
-- Clicking any dialog's **Cancel** button (Welcome screen's "Sign in to MyDell to
-  continue" modal, the sign-in-failed dialog, confirm-accounts dialog) — these are
-  real, destructive user choices (cancel the migration), not something automation
-  should trigger while verifying the happy/error paths a real user takes.
+- Clicking **Cancel** on the Welcome screen's "Sign in to MyDell to continue" modal, the
+  sign-in-failed dialog, or the confirm-accounts dialog — these are real, destructive
+  user choices (cancel the migration), not something automation should trigger. (The OTP
+  page's own Cancel button is the one exception, and is NOT excluded — it's the
+  by-design trigger for the negative-path check above, confirmed directly by the user.)
 - Source PC's own side of pairing (showing its code) — blocked on Source PC build access.
 - Anything past the confirm-accounts dialog (file selection, transfer, completion).

@@ -16,33 +16,34 @@ apply where, and a live coverage status table (built vs. gap vs. explicitly excl
 Key rules that plan encodes, worth repeating here since they're easy to violate by
 accident:
 
-- **Never retry a wrong-value submission in place.** Email gets one deliberately-wrong
-  attempt before the real value; password and OTP must be single-attempt-only, full
-  stop -- both have a confirmed 6-incorrect-attempts account lockout warned about in
-  their own error text.
+- **Never retry a wrong-value submission in place.** Email/password get one
+  deliberately-wrong attempt before the real value, in the SAME pass -- both have a
+  confirmed 6-incorrect-attempts account lockout warned about in their own error text.
+- **OTP is the one deliberate exception, confirmed by the user (2026-10-06): its
+  wrong-value attempt is followed by clicking the OTP page's own Cancel button (below
+  Verify), never the correct code in that same pass.** This is `SignInFlow.run()`'s own
+  default behavior now (`_handle_otp_step`'s `run_negative_check` parameter,
+  `_run_fresh_auth_with_retry`'s attempt-0 gating) -- NOT a separate test-only maneuver.
+  Every run's first whole-flow attempt deliberately fails by design; the retry pass that
+  follows submits correct email/password/OTP directly (no repeated negative checks
+  anywhere on that pass).
 - **The post-OTP transition screen ("...getting things ready" / "Starting the migration
   assistant") is not a reliable success signal by itself.** It can appear even when
   sign-in was cancelled or failed. Always race it against the "There was a problem
   signing in" / "Sign-in failed. Please try again." dialog; on failure, click that
   dialog's own Retry button and repeat the whole Email→Password→OTP sequence, never
-  just the OTP step. On the retry pass, submit correct values straight away -- don't
-  repeat the wrong-value negative checks (confirmed by the user, 2026-10-06); they were
-  already proven once, and password/OTP's confirmed 6-attempt lockout is no reason to
-  burn more of that budget on a check this pass isn't about.
-- **Cancelling still triggers a real Windows UAC prompt, confirmed by the user
-  (2026-10-06) -- it's not a UAC-free shortcut.** After clicking Cancel (the OTP page's
-  own Cancel button, below Verify -- confirmed reliable; the app-side waiting modal and
-  real UAC-as-the-trigger both proved unreliable to invoke on demand), a human still has
-  to approve UAC before the "There was a problem signing in" dialog appears. Give that
-  wait the full remaining time budget, not a short fixed window, same reasoning as the
-  success path's own UAC wait.
-- **Don't click any dialog's Cancel button as part of `SignInFlow.run()`'s normal
-  production path** (the "Sign in to MyDell to continue" wait modal, the OTP page's
-  Cancel button, the sign-in-failed dialog, the confirm-accounts dialog) -- these are
-  genuine destructive user choices. The one deliberate exception:
-  `tools/_test_cancel_and_retry_live.py` clicks the OTP page's Cancel button on purpose,
-  to force-exercise the cancel-and-retry path for real -- that's a dedicated test
-  script, not something baked into `run()` itself.
+  just the OTP step. **There is no separate "cancel path" distinct from "retry on
+  failure"** -- the OTP negative check's deliberate Cancel and a genuine failure both
+  resolve through this exact same race and the exact same Retry button.
+- **Cancelling still triggers a real Windows UAC prompt -- it's not a UAC-free
+  shortcut.** After clicking Cancel, a human still has to approve UAC before the
+  "There was a problem signing in" dialog appears. Give that wait the full remaining
+  time budget, not a short fixed window, same reasoning as the success path's own UAC
+  wait.
+- **The only Cancel buttons still excluded from `SignInFlow.run()`'s normal production
+  path** are the "Sign in to MyDell to continue" wait modal, the sign-in-failed
+  dialog's own Cancel, and the confirm-accounts dialog's Cancel -- those remain genuine
+  destructive user choices, never automated.
 - When a new screen or error state shows up that isn't in the plan yet, update
   `tools/signin_flow_test_plan.md` in the same change -- don't let the code and the
   plan drift apart.

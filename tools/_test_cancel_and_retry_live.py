@@ -8,6 +8,13 @@ in" with its own Retry button -> click Retry -> whole browser-based sequence run
 submitting CORRECT values straight away this time (no repeated wrong-value checks) ->
 rest of the flow (trust-network, pairing-discovery, wait-for-source) proceeds normally.
 
+NOTE: this exact sequence is now SignInFlow.run()'s own default behavior every run (see
+_handle_otp_step's run_negative_check parameter and _run_fresh_auth_with_retry's
+attempt-0 gating in flows/target/authentication/sign_in_flow.py) -- there is no longer a
+separate "cancel path" distinct from "retry on failure". This script is now mostly
+redundant with just running tools/_test_full_signin.py; kept as a more verbose, isolated
+diagnostic for this mechanism specifically, not because run() needs a separate test for it.
+
 Reuses SignInFlow's real sub-components/methods directly (not a reimplementation) --
 only the deliberate cancel point is hand-orchestrated here, since that's a test-only
 maneuver that has no place in SignInFlow.run()'s normal production path (see
@@ -90,8 +97,8 @@ try:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
-        flow._handle_email_step_if_present(browser_session, 20.0)
-        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0)
+        flow._handle_email_step_if_present(browser_session, 20.0, run_negative_check=True)
+        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0, run_negative_check=True)
 
         otp_step = OtpStep(browser_session)
         if not otp_step.is_showing(timeout=20.0):

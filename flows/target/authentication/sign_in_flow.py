@@ -29,6 +29,16 @@ own Retry button) layered back over the Welcome screen. _run_fresh_auth_with_ret
 races these two outcomes and, on failure, clicks Retry and repeats the whole
 browser-based email/password/OTP sequence from scratch, up to MAX_AUTH_RETRIES times.
 
+Confirmed directly by the user (2026-10-06): this is not just a contingency for genuine
+failures -- the OTP step's own negative-path check (below) deliberately drives this same
+path on EVERY run's first attempt. Wrong OTP -> confirm the error banner -> click the
+OTP page's own Cancel button (never the correct code in that same pass) -> this still
+requires real UAC approval -> "There was a problem signing in" appears -> Retry -> a
+second attempt submits correct values directly (no repeated negative checks) and
+completes normally. There is no separate "cancel path" from "retry on failure" -- clicking
+Cancel for the negative-path demo and recovering from a real failure both land on the
+exact same Retry button and the exact same retry loop.
+
 Four already-authenticated shortcuts are checked/handled before assuming a fresh
 browser-based sign-in is needed -- confirmed via live testing that the app can have a
 valid session even when the plain "Welcome to Dell" screen is showing (not just
@@ -344,8 +354,15 @@ class SignInFlow:
         repeats the whole browser-based sequence, up to MAX_AUTH_RETRIES times total,
         since the user confirmed a cancelled/failed sign-in must be retried from scratch,
         not patched up mid-flow.
+
+        Confirmed directly by the user (2026-10-06): the OTP step's negative-path check
+        (see _handle_otp_step) deliberately cancels instead of submitting the correct
+        code on the FIRST attempt only -- so this loop's first iteration is EXPECTED to
+        come back "failed" and retry, every run, by design. run_negative_check is only
+        True on attempt 0; every subsequent attempt submits correct values directly.
         """
         for attempt in range(self.MAX_AUTH_RETRIES):
+            run_negative_check = attempt == 0
             self.log.info("Attaching WinAppDriver session to the new sign-in browser window")
             # browser_driver() yields the session and guarantees it's closed + quit on
             # exit (success or exception) -- see factory/browser_driver_factory.py.
@@ -354,15 +371,18 @@ class SignInFlow:
                 restore_pages_dialog = RestorePagesDialog(browser_session)
                 restore_pages_dialog.dismiss_if_present()
 
-                self._handle_email_step_if_present(browser_session, step_timeout)
-                self._handle_password_step_if_present(browser_session, restore_pages_dialog, step_timeout)
-                self._handle_otp_step(browser_session, restore_pages_dialog, step_timeout)
+                self._handle_email_step_if_present(browser_session, step_timeout, run_negative_check)
+                self._handle_password_step_if_present(
+                    browser_session, restore_pages_dialog, step_timeout, run_negative_check
+                )
+                self._handle_otp_step(browser_session, restore_pages_dialog, step_timeout, run_negative_check)
             self.log.success("Closed the sign-in browser window after OTP submission")
 
             self.log.info(
-                "OTP submitted. A Windows User Access Control (UAC) prompt may appear "
-                "now -- automation cannot see or interact with it (it runs on the "
-                "secure desktop). Please approve it manually if it appears; waiting..."
+                "OTP submitted (or deliberately cancelled). A Windows User Access "
+                "Control (UAC) prompt may appear now -- automation cannot see or "
+                "interact with it (it runs on the secure desktop). Please approve it "
+                "manually if it appears; waiting..."
             )
             outcome = self._wait_for_auth_outcome(remaining=deadline - time.monotonic())
 
@@ -375,10 +395,18 @@ class SignInFlow:
                     "appeared within the time budget after OTP submission"
                 )
 
-            self.log.error(
-                f"Sign-in failed or was cancelled (attempt {attempt + 1}/{self.MAX_AUTH_RETRIES}) "
-                "-- clicking Retry and restarting the browser-based sequence"
-            )
+            if run_negative_check:
+                self.log.success(
+                    "Negative-path check complete -- deliberately cancelled after the "
+                    "wrong-OTP demo, as designed. Clicking Retry to continue with "
+                    "correct values."
+                )
+            else:
+                self.log.error(
+                    f"Sign-in genuinely failed or was cancelled (attempt {attempt + 1}/"
+                    f"{self.MAX_AUTH_RETRIES}) -- clicking Retry and restarting the "
+                    "browser-based sequence"
+                )
             known_hwnds = list_browser_window_hwnds()  # re-snapshot before Retry opens a new window
             if not self.sign_in_failed_dialog.retry():
                 raise SignInError("Sign-in-failed dialog disappeared before Retry could be clicked")
@@ -413,7 +441,7 @@ class SignInFlow:
             time.sleep(0.5)
         return "timeout"
 
-    def _handle_email_step_if_present(self, browser_session, timeout: float) -> None:
+    def _handle_email_step_if_present(self, browser_session, timeout: float, run_negative_check: bool) -> None:
         # Bug fixed here, confirmed via live testing (2026-10-05): this used a hardcoded
         # 3.0s regardless of the caller's timeout, which ignored the parameter entirely.
         # 3.0s is not enough time for the real Dell OIDC page (an external network round
@@ -432,19 +460,24 @@ class SignInFlow:
         # deliberately wrong value first and confirm the app's own "unable to match the
         # details" error banner (see dell screens flow.pdf) appears before ever trying
         # the real username. Single attempt only -- see EmailStep.submit_and_expect_error.
-        wrong_username = self.username + "wrongtest"
-        self.log.info("Email step: submitting a deliberately wrong value to verify the error message")
-        if email_step.submit_and_expect_error(wrong_username):
-            self.log.success("Email step: error banner matched after the wrong value")
-        else:
-            self.log.error("Email step: expected error banner did not appear after the wrong value")
+        # Only run once per whole-flow attempt sequence (run_negative_check is False on
+        # the retry pass after a cancellation) -- already proven, no reason to repeat it.
+        if run_negative_check:
+            wrong_username = self.username + "wrongtest"
+            self.log.info("Email step: submitting a deliberately wrong value to verify the error message")
+            if email_step.submit_and_expect_error(wrong_username):
+                self.log.success("Email step: error banner matched after the wrong value")
+            else:
+                self.log.error("Email step: expected error banner did not appear after the wrong value")
 
         self.log.info("Email step: submitting the correct username")
         if not email_step.submit(self.username):
             raise SignInError("Email step did not advance after retries -- Continue click never took effect")
         self.log.success("Email step: advanced past the email page")
 
-    def _handle_password_step_if_present(self, browser_session, restore_pages_dialog, timeout: float) -> None:
+    def _handle_password_step_if_present(
+        self, browser_session, restore_pages_dialog, timeout: float, run_negative_check: bool
+    ) -> None:
         # Same bug/fix as _handle_email_step_if_present above -- use the real timeout
         # budget, not a hardcoded 3.0s, since this page also needs a fresh navigation
         # (Email's Continue click) to render before this check can mean anything.
@@ -455,22 +488,38 @@ class SignInFlow:
             return
         self.log.info("Password step: field present")
 
-        # Same negative-path check as the email step -- single attempt only. This step's
+        # Same negative-path check as the email step -- single attempt only, and same
+        # run_negative_check gating (only on the first whole-flow attempt). This step's
         # own confirmed error text explicitly warns the account locks after 6 incorrect
-        # attempts, which is exactly why submit_and_expect_error() never retries.
-        wrong_password = self.password + "Wrong1!"
-        self.log.info("Password step: submitting a deliberately wrong value to verify the error message")
-        if password_step.submit_and_expect_error(wrong_password):
-            self.log.success("Password step: error banner matched after the wrong value")
-        else:
-            self.log.error("Password step: expected error banner did not appear after the wrong value")
+        # attempts, which is exactly why submit_and_expect_error() never retries AND why
+        # this never repeats on a retry pass.
+        if run_negative_check:
+            wrong_password = self.password + "Wrong1!"
+            self.log.info("Password step: submitting a deliberately wrong value to verify the error message")
+            if password_step.submit_and_expect_error(wrong_password):
+                self.log.success("Password step: error banner matched after the wrong value")
+            else:
+                self.log.error("Password step: expected error banner did not appear after the wrong value")
 
         self.log.info("Password step: submitting the correct password")
         if not password_step.submit(self.password):
             raise SignInError("Password step did not advance after retries -- Sign In click never took effect")
         self.log.success("Password step: advanced past the password page")
 
-    def _handle_otp_step(self, browser_session, restore_pages_dialog, timeout: float) -> None:
+    def _handle_otp_step(
+        self, browser_session, restore_pages_dialog, timeout: float, run_negative_check: bool
+    ) -> None:
+        """On the negative-check pass (run_negative_check=True, the first whole-flow
+        attempt): submits a deliberately wrong code, confirms the error banner, then
+        clicks the OTP page's own Cancel button instead of ever submitting the correct
+        code in this same pass -- confirmed directly by the user (2026-10-06). This
+        deliberately drives _run_fresh_auth_with_retry()'s outcome race to "failed" and
+        back through the Retry button, which is the SAME recovery path a genuine
+        failure takes -- there is no separate "cancel path", by design.
+
+        On a retry pass (run_negative_check=False), submits the correct code directly --
+        the negative check has already been proven once this run.
+        """
         otp_step = OtpStep(browser_session)
         if not otp_step.is_showing(timeout=timeout):
             self.log.info("OTP step: boxes not present -- already past this step somehow, skipping")
@@ -486,33 +535,30 @@ class SignInFlow:
         restore_pages_dialog.dismiss_if_present()
         time.sleep(1.0)
 
-        # Same negative-path check as the email/password steps -- single attempt only,
-        # same 6-attempt account-lockout reasoning. Each digit is rotated by one (mod 10)
-        # so the wrong code is always the same length and never accidentally equals the
-        # real one.
-        wrong_otp = "".join(str((int(digit) + 1) % 10) for digit in self.otp)
-        self.log.info("OTP step: submitting a deliberately wrong code to verify the error message")
-        if otp_step.submit_and_expect_error(wrong_otp):
-            self.log.success("OTP step: error banner matched after the wrong code")
-        else:
-            self.log.error("OTP step: expected error banner did not appear after the wrong code")
+        if run_negative_check:
+            # Same 6-attempt account-lockout reasoning as email/password -- single
+            # attempt only. Each digit is rotated by one (mod 10) so the wrong code is
+            # always the same length and never accidentally equals the real one.
+            wrong_otp = "".join(str((int(digit) + 1) % 10) for digit in self.otp)
+            self.log.info("OTP step: submitting a deliberately wrong code to verify the error message")
+            if otp_step.submit_and_expect_error(wrong_otp):
+                self.log.success("OTP step: error banner matched after the wrong code")
+            else:
+                self.log.error("OTP step: expected error banner did not appear after the wrong code")
+
+            self.log.info(
+                "OTP step: deliberately cancelling instead of submitting the correct "
+                "code -- the retry mechanism (the same path a genuine failure takes) "
+                "will complete this with correct values on the next pass"
+            )
+            if not otp_step.cancel():
+                raise SignInError("OTP Cancel button not found/clicked after the negative check")
+            self.log.info("OTP step: clicked Cancel")
+            return
 
         self.log.info("OTP step: submitting the correct code")
         otp_step.submit(self.otp)
         self.log.success("OTP step: code submitted")
-
-        # Bug fixed here, confirmed via live testing (2026-10-05): this used to retry
-        # submission up to 3 times based on a BROWSER-side "did the boxes disappear"
-        # check (wait_until_submitted) -- but every single type/click in all 3 attempts
-        # logged SUCCESS, meaning the very first submission almost certainly worked, and
-        # this check was simply too unreliable/impatient to ever confirm it, causing
-        # needless resubmission into an already-succeeding page (which is itself what
-        # caused the earlier 500 errors). The real, reliable confirmation that OTP
-        # succeeded lives on the APP side, not the browser: _wait_for_uac_approval()
-        # (called right after this method returns) polls for the "Starting the migration
-        # assistant" transition screen with a generous budget. Submit once and let that
-        # be the actual confirmation instead of a flakier browser-side check
-        # second-guessing (and resubmitting into) a page that may already be mid-transition.
 
     def _wait_for_uac_approval(self, remaining: float) -> None:
         # Not capped to a short timeout (same reasoning as _wait_for_trust_network_and_accept
