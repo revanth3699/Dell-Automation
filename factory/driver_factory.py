@@ -147,8 +147,16 @@ class WinAppDriverElement:
             # reads already match, so this returns immediately.
             self._wait_for_text_to_settle(timeout=1.0)
 
+            # Bug fixed here, confirmed directly by the user (2026-10-06): WinAppDriver's
+            # /clear endpoint was observed leaving stale text in place before new text was
+            # typed -- it likely clears the underlying DOM value directly without firing
+            # real key events, so a React-controlled input's own internal state can stay
+            # out of sync with what /clear did, the same class of problem that already
+            # forced char-by-char typing below instead of one bulk /value call. Ctrl+A
+            # then Backspace simulates genuine keyboard input instead, which the field's
+            # own event handlers actually see.
             try:
-                self._session._post(f"/element/{self.id}/clear", {})
+                self._select_all_and_delete()
             except Exception:
                 pass
             for ch in text:
@@ -164,6 +172,20 @@ class WinAppDriverElement:
             f"send_keys verification failed after {max_attempts} attempts: "
             f"expected {text!r}, field actually contains {last_actual!r}"
         )
+
+    _CONTROL_KEY = ""
+    _BACKSPACE_KEY = ""
+
+    def _select_all_and_delete(self) -> None:
+        """Sends Ctrl+A then Backspace as real key events -- see send_keys()'s comment
+        for why this replaces WinAppDriver's /clear endpoint. The value array
+        [CONTROL, "a", CONTROL] is the standard WebDriver convention for "press Ctrl,
+        send 'a' while held, release Ctrl" in one call; Backspace follows as its own
+        call once the selection has actually taken effect.
+        """
+        self._session._post(f"/element/{self.id}/value", {"value": [self._CONTROL_KEY, "a", self._CONTROL_KEY]})
+        time.sleep(0.1)
+        self._session._post(f"/element/{self.id}/value", {"value": [self._BACKSPACE_KEY]})
 
     def _wait_for_text_to_settle(self, timeout: float, poll_interval: float = 0.2) -> None:
         deadline = time.monotonic() + timeout
