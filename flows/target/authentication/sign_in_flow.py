@@ -414,8 +414,16 @@ class SignInFlow:
         return "timeout"
 
     def _handle_email_step_if_present(self, browser_session, timeout: float) -> None:
+        # Bug fixed here, confirmed via live testing (2026-10-05): this used a hardcoded
+        # 3.0s regardless of the caller's timeout, which ignored the parameter entirely.
+        # 3.0s is not enough time for the real Dell OIDC page (an external network round
+        # trip to www-poc.dell.com) to finish rendering right after a fresh browser
+        # attach -- the check gave up before the field even existed yet, wrongly
+        # concluded "already authenticated, skip", and left the real page sitting
+        # untouched on the real email step while the flow moved on to check for
+        # password/OTP elements that were never going to appear either.
         email_step = EmailStep(browser_session)
-        if not email_step.is_showing(timeout=3.0):
+        if not email_step.is_showing(timeout=timeout):
             self.log.info("Email step: field not present -- browser profile already has a session, skipping")
             return
         self.log.info("Email step: field present")
@@ -437,9 +445,12 @@ class SignInFlow:
         self.log.success("Email step: advanced past the email page")
 
     def _handle_password_step_if_present(self, browser_session, restore_pages_dialog, timeout: float) -> None:
+        # Same bug/fix as _handle_email_step_if_present above -- use the real timeout
+        # budget, not a hardcoded 3.0s, since this page also needs a fresh navigation
+        # (Email's Continue click) to render before this check can mean anything.
         restore_pages_dialog.dismiss_if_present()
         password_step = PasswordStep(browser_session)
-        if not password_step.is_showing(timeout=3.0):
+        if not password_step.is_showing(timeout=timeout):
             self.log.info("Password step: field not present -- already authenticated in this browser profile, skipping")
             return
         self.log.info("Password step: field present")
