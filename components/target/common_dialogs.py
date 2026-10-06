@@ -10,7 +10,7 @@ from typing import Optional
 
 from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, CLOSE_APPS_HEADING_LOCATOR
-from locators.target.migration_preparation_transition import TRANSITION_PHRASES
+from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR, TRUST_NETWORK_HEADING_LOCATOR
