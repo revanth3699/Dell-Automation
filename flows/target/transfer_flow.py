@@ -45,6 +45,15 @@ screenshot showing exactly this (the dialog over the still-visible "ready to mov
 screen, Migrate now already clicked). The wait for the progress screen was a single
 is_showing() call with no handling for this at all, so it would just burn the whole
 timeout and fail. Now races the close-apps dialog here too, same as everywhere else.
+
+Bug fixed here, confirmed live (2026-10-07): click_at_center() on "Migrate now"
+reported success (no exception) but confirmed via screenshot that the button visually
+never actually activated -- the same silent-click-doesn't-register class of problem,
+just surviving even the click_at_center() workaround this time. Rather than trust a
+single click, the wait for "We're moving your files and settings" now periodically
+re-clicks "Migrate now" (every RECLICK_INTERVAL_SECONDS) for as long as neither it nor
+the close-apps dialog has appeared -- since the button is presumably still right there
+on the unchanged "ready to move" screen if the first click didn't take.
 """
 
 import time
@@ -56,6 +65,8 @@ from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
 from components.target.transfer_progress_screen import TransferProgressScreen
 from components.target.transfer_receive_screen import TransferReceiveScreen
 from factory.logger_factory import LoggerFactory
+
+RECLICK_INTERVAL_SECONDS = 3.0
 
 
 class TransferFlowError(Exception):
@@ -101,6 +112,7 @@ class TargetTransferFlow:
 
                 self.log.info('Waiting for "We\'re moving your files and settings"...')
                 progress_deadline = time.monotonic() + progress_screen_timeout
+                last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
                     if self.transfer_progress_screen.is_showing(timeout=0.5):
                         self.log.success(
@@ -113,6 +125,16 @@ class TargetTransferFlow:
                             "\"We need to close all other applications\" appeared "
                             "after clicking Migrate now -- clicked Close Application"
                         )
+                    elif time.monotonic() - last_click >= RECLICK_INTERVAL_SECONDS:
+                        # Confirmed live (2026-10-07): the first click can report
+                        # success without the button actually activating -- still on
+                        # "ready to move" with nothing else blocking, so re-click it.
+                        self.log.warning(
+                            "Still on \"Your files are ready to move\" -- Migrate now "
+                            "may not have registered, clicking it again"
+                        )
+                        self.transfer_receive_screen.start_transfer()
+                        last_click = time.monotonic()
                 raise TransferFlowError(
                     '"We\'re moving your files and settings" never appeared within '
                     f"{progress_screen_timeout:.0f}s after clicking Migrate now"

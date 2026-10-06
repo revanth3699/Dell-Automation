@@ -13,17 +13,27 @@ from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, 
 from locators.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
-from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR
+from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR, TRUST_NETWORK_HEADING_LOCATOR
 
 
 class TrustNetworkDialog:
-    """"Connect to a trusted network" dialog, confirmed appearing after sign-in."""
+    """"Connect to a trusted network" dialog, confirmed appearing after sign-in.
+
+    Simplified here, per explicit user direction (2026-10-07): checks the dialog's own
+    heading ("Connect to a trusted network") rather than the button directly -- the
+    button can be visible but disabled while the dialog shows "Trusting this
+    network..." mid-transition (confirmed via a live screenshot showing both Cancel and
+    Trust Network greyed out during that moment), so finding it existing wasn't the
+    same as it actually being clickable. Same heading-then-button pattern already used
+    by ConfirmAccountsDialog/SignInFailedDialog.
+    """
 
     def __init__(self, app_session):
+        self._heading = BaseComponent(app_session, *TRUST_NETWORK_HEADING_LOCATOR, "TrustNetworkHeading")
         self._button = BaseComponent(app_session, *TRUST_NETWORK_BUTTON_LOCATOR, "TrustNetworkButton")
 
     def is_showing(self, timeout: float = 2.0) -> bool:
-        return self._button.exists(timeout=timeout)
+        return self._heading.exists(timeout=timeout)
 
     def accept(self, timeout: float = 2.0) -> bool:
         """Clicks "Trust Network" if the dialog is showing. Returns whether it was
@@ -35,7 +45,7 @@ class TrustNetworkDialog:
         if that fresh lookup is at all flaky, the click alone could take many seconds.
         Passes a short timeout here since presence was just confirmed above.
         """
-        if not self._button.exists(timeout=timeout):
+        if not self._heading.exists(timeout=timeout):
             return False
         self._button.click(timeout=2.0)
         return True
