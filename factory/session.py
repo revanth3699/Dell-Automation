@@ -98,6 +98,66 @@ def _find_main_window_hwnd(process_name: str = TARGET_PROCESS_NAME) -> Optional[
     return output or None
 
 
+# Confirmed live (2026-10-06): WinAppDriver's /screenshot endpoint is a real screen
+# capture, not scoped to the session's own app window -- if that window is occluded or
+# not focused, the "screenshot" captures whatever IS actually visible/foreground instead
+# (confirmed directly: it captured this very automation's own terminal/editor window's
+# content, not the Dell app, during an unattended run). UI Automation reads (get_text(),
+# .rect, etc.) are unaffected -- they read the accessibility tree regardless of on-screen
+# visibility -- only the OCR-fallback screenshot path needs this. Same embedded-C#-via-
+# PowerShell approach as _ENUM_WINDOWS_SCRIPT above, and for the same reason (confirmed
+# working via -File; inline -Command with this much embedded C# has not been retested
+# here and the existing script already solved the escaping problem).
+_ACTIVATE_WINDOW_SCRIPT = '''param([string]$HwndHex)
+$Hwnd = [IntPtr]::new([Convert]::ToInt64($HwndHex, 16))
+
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+
+public class DdaWindowActivator {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+}
+'@ -ErrorAction SilentlyContinue
+
+if ([DdaWindowActivator]::IsIconic($Hwnd)) {
+    [DdaWindowActivator]::ShowWindow($Hwnd, 9) | Out-Null  # SW_RESTORE
+}
+[DdaWindowActivator]::SetForegroundWindow($Hwnd) | Out-Null
+'''
+
+_activate_window_script_path: Optional[Path] = None
+
+
+def _get_activate_window_script_path() -> Path:
+    global _activate_window_script_path
+    if _activate_window_script_path is None:
+        path = Path(tempfile.gettempdir()) / "dda_activate_window.ps1"
+        path.write_text(_ACTIVATE_WINDOW_SCRIPT, encoding="utf-8")
+        _activate_window_script_path = path
+    return _activate_window_script_path
+
+
+def bring_window_to_foreground(hwnd_hex: str) -> None:
+    """Restores (if minimized) and foregrounds the given top-level window, so a
+    subsequent get_screenshot_as_png() call actually captures it instead of whatever
+    else is currently visible. See the module-level comment above this function for why
+    this exists -- call it only right before an OCR-reliant screenshot, not before every
+    interaction, since stealing focus is disruptive and UIA reads don't need it.
+    """
+    script_path = _get_activate_window_script_path()
+    subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path), "-HwndHex", hwnd_hex],
+        capture_output=True, text=True, timeout=10,
+    )
+    time.sleep(0.2)  # small settle delay for the activation/redraw to actually land
+
+
 def is_uac_prompt_showing() -> bool:
     """Detects whether a Windows UAC elevation prompt is currently showing, WITHOUT
     touching the secure desktop the prompt itself runs on (which is categorically

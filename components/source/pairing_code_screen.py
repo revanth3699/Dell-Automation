@@ -45,8 +45,14 @@ from loguru import logger
 from PIL import Image
 
 from components.base_component import BaseComponent
+from factory.config import SOURCE_PROCESS_NAME
 from factory.ocr import recognize_text
-from locators.source.pairing_code_screen import CANCEL_BUTTON_LOCATOR, CODE_BOX_LOCATORS, HEADING_LOCATOR
+from factory.session import _find_main_window_hwnd, bring_window_to_foreground
+from locators.source.pairing_code_screen import (
+    CANCEL_BUTTON_LOCATOR,
+    CODE_BOX_LOCATORS,
+    HEADING_LOCATOR,
+)
 
 
 class PairingCodeScreen:
@@ -63,28 +69,86 @@ class PairingCodeScreen:
         return self._heading.exists(timeout=timeout)
 
     def _read_via_uia(self) -> tuple:
-        """Returns ({position: digit}, {position: rect}) for whichever of the 6 boxes
-        are currently exposed in the UIA tree -- normally 5 of 6, sometimes all 6.
-        Never raises for a missing box; that's the expected, confirmed-real case this
-        whole class works around. Rects are captured alongside digits so a missing
-        box's on-screen location can be interpolated later (_read_via_cropped_ocr)."""
+        """Returns ({position: digit}, {position: rect}, {position: element_id}) for
+        whichever of the 6 boxes are currently exposed in the UIA tree -- normally 5 of
+        6, sometimes all 6. Never raises for a missing box; that's the expected,
+        confirmed-real case this whole class works around. Rects are captured alongside
+        digits so a missing box's on-screen location can be interpolated later
+        (_read_via_neighbor_crop_ocr). element_ids let read_code() detect a code
+        rotation happening mid-read (see its own docstring): the app recreates each
+        box's underlying UIA element on rotation, so the same position returning a
+        different element_id between two reads means the digits are no longer
+        describing the same on-screen code, not just a flaky re-read.
+
+        Confirmed live (2026-10-07) on a SECOND machine: an earlier version called
+        box.exists() (itself a full find) and THEN box._find() again as a separate,
+        second lookup to actually read text/rect -- on that machine, the second find
+        (or the get_text()/rect calls after it) silently failed every time, for every
+        box, even though exists() had just confirmed each one really was there a
+        moment earlier (visible in the logs: 'exists(): True' every read, yet zero
+        digits ever captured). A single find per box, with the failure actually
+        logged instead of swallowed by a bare except, fixes both the redundant
+        round-trip and the silent-failure visibility gap.
+        """
         digits = {}
         rects = {}
+        element_ids = {}
         for i, box in enumerate(self._boxes):
-            if not box.exists(timeout=0.3):
-                continue
             try:
                 element = box._find()
-                text = element.get_text()
-                rect = element.rect
-            except Exception:
+            except TimeoutError:
+                continue  # not present this read -- the expected, real case
+            except Exception as exc:
+                logger.debug(f"VerificationCodeBox{i}: _find() raised unexpectedly: {exc}")
                 continue
+
+            element_ids[i] = element.id
+
+            try:
+                text = element.get_text()
+            except Exception as exc:
+                logger.debug(f"VerificationCodeBox{i}: get_text() failed after a successful find -- {exc}")
+                continue
+
             if text and text.isdigit() and len(text) == 1:
                 digits[i] = text
-                rects[i] = rect
-        return digits, rects
+            else:
+                logger.debug(f"VerificationCodeBox{i}: found but text was {text!r}, not a single digit")
+                continue
+
+            # Confirmed live (2026-10-07) on a THIRD machine: the /rect endpoint can
+            # return 501 Not Implemented on some WinAppDriver installs/versions, every
+            # single time, for every box -- confirmed by the exact error message, not
+            # guessed. A missing rect must NOT discard a digit we already successfully
+            # read via get_text() above; rects are only ever needed by the neighbor-crop
+            # OCR fallback (to interpolate a missing box's on-screen position) -- if
+            # this machine's WinAppDriver can't supply any rects at all, that one
+            # fallback tier degrades gracefully to unavailable, but whole-screenshot OCR
+            # (which needs no rects) still works, and the plain UIA digits read here are
+            # unaffected either way.
+            try:
+                rects[i] = element.rect
+            except Exception as exc:
+                logger.debug(f"VerificationCodeBox{i}: .rect failed (digit {text!r} still kept) -- {exc}")
+        return digits, rects, element_ids
+
+    def _bring_app_to_foreground(self) -> None:
+        """Confirmed live (2026-10-06): the screenshot behind both OCR tiers is a real
+        screen capture, not scoped to this app's window -- if something else is focused
+        or on top (confirmed: it captured this automation's own terminal/editor window
+        instead), OCR reads garbage that has nothing to do with the actual code. Called
+        right before every OCR-reliant screenshot, not elsewhere -- UIA reads don't need
+        visibility, and foregrounding is disruptive enough that it should only happen
+        when actually about to be relied on.
+        """
+        hwnd_hex = _find_main_window_hwnd(SOURCE_PROCESS_NAME)
+        if hwnd_hex:
+            bring_window_to_foreground(hwnd_hex)
+        else:
+            logger.debug("_bring_app_to_foreground: could not find the Source app's window handle")
 
     def _read_via_ocr(self) -> Optional[str]:
+        self._bring_app_to_foreground()
         png_bytes = self._session.get_screenshot_as_png()
         tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_ocr.png"
         tmp_path.write_bytes(png_bytes)
@@ -150,6 +214,7 @@ class PairingCodeScreen:
         lo_rect = rects.get(lo) or interpolated.get(lo) or pos_rect
         hi_rect = rects.get(hi) or interpolated.get(hi) or pos_rect
 
+        self._bring_app_to_foreground()
         png_bytes = self._session.get_screenshot_as_png()
         image = Image.open(io.BytesIO(png_bytes))
         pad = 10
@@ -193,10 +258,37 @@ class PairingCodeScreen:
         be missing at once, and that WHICH position(s) are missing can either shift
         between rotations (seen on one machine) or stay fixed (seen on another).
         Retries a few times before giving up, in case a read lands exactly mid-rotation
-        (all 6 boxes briefly inconsistent) or an OCR cross-check disagrees."""
+        (all 6 boxes briefly inconsistent) or an OCR cross-check disagrees.
+
+        Confirmed live (2026-10-06): the code rotates roughly every ~60s, and this
+        method's own retry loop can itself take long enough (double-digit seconds, once
+        the OCR/neighbor-crop fallbacks are involved) to straddle a rotation boundary.
+        When that happens, one attempt's UIA digits are read from before the rotation
+        and the next attempt's OCR is reading the screen after it -- they will never
+        agree, no matter how many attempts remain, because they're not describing the
+        same code. Comparing each box's element_id between consecutive attempts detects
+        exactly this (the app recreates each box's element on rotation): when it
+        changes, the prior attempt's partial digits are discarded immediately rather
+        than wasted on an unwinnable OCR cross-check against stale data.
+        """
         last_digits: dict = {}
+        last_element_ids: dict = {}
         for attempt in range(attempts):
-            digits, rects = self._read_via_uia()
+            digits, rects, element_ids = self._read_via_uia()
+
+            rotated_mid_read = any(
+                last_element_ids.get(pos) not in (None, eid) for pos, eid in element_ids.items()
+            )
+            last_element_ids = element_ids
+            if rotated_mid_read:
+                logger.debug(
+                    "PairingCodeScreen: code rotated mid-read (a box's element_id "
+                    "changed since the last attempt) -- discarding and retrying fresh"
+                )
+                last_digits = digits
+                time.sleep(retry_delay)
+                continue
+
             if len(digits) == 6:
                 code = "".join(digits[i] for i in range(6))
                 logger.success(f"PairingCodeScreen: read code via UIA alone: {code}")

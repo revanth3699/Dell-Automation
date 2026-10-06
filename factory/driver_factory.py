@@ -161,7 +161,26 @@ class WinAppDriverElement:
 
     @property
     def rect(self) -> dict:
-        return self._session._get(f"/element/{self.id}/rect")
+        # Confirmed live (2026-10-06), on multiple machines: WinAppDriver's combined
+        # W3C /rect endpoint returns 501 Not Implemented for every element, every call,
+        # on some installs -- but WinAppDriver is a JSONWireProtocol-era server, not a
+        # pure W3C one, and the older separate /location and /size endpoints are a
+        # distinct code path server-side that may still work where /rect doesn't. Try
+        # /rect first (cheap, one call); only fall back to assembling the equivalent
+        # from /location + /size on a 501, rather than always paying for two requests.
+        try:
+            return self._session._get(f"/element/{self.id}/rect")
+        except requests.HTTPError as exc:
+            if exc.response is None or exc.response.status_code != 501:
+                raise
+            location = self._session._get(f"/element/{self.id}/location")
+            size = self._session._get(f"/element/{self.id}/size")
+            return {
+                "x": location["x"],
+                "y": location["y"],
+                "width": size["width"],
+                "height": size["height"],
+            }
 
 
 class WinAppDriverSession:
