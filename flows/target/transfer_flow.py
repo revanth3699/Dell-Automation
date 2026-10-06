@@ -17,10 +17,17 @@ method's wait. That 5s check isn't removed (harmless if it already caught it), b
 start_transfer() now also races the confirm dialog against "Your files are ready to
 move" for its entire wait, so a late-appearing dialog gets clicked instead of silently
 blocking everything with nothing to watch for it.
+
+Also races "We need to close all other applications" (confirmed from a user-supplied
+screenshot, 2026-10-06) the same way -- shown when other apps (Control Panel, a
+browser, etc.) are open and blocking migration. Unlike the confirm-accounts dialog this
+isn't gated to "only once": it's checked and accepted every cycle, since there's no
+confirmed guarantee it can't reappear if another conflicting app gets detected later.
 """
 
 import time
 
+from components.target.common_dialogs import CloseAppsDialog
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
 from components.target.transfer_receive_screen import TransferReceiveScreen
 from factory.logger_factory import LoggerFactory
@@ -34,6 +41,7 @@ class TargetTransferFlow:
     def __init__(self, app_session):
         self.transfer_receive_screen = TransferReceiveScreen(app_session)
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
+        self.close_apps_dialog = CloseAppsDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def start_transfer(self, screen_timeout: float = 300.0) -> None:
@@ -41,8 +49,8 @@ class TargetTransferFlow:
         preceding "preparing your files" step can genuinely take a few minutes per its
         own on-screen text, so this defaults much longer than a normal screen
         transition -- then clicks "Bring everything over for me" to start the
-        transfer. Races the account-mismatch confirm dialog the whole time too (see
-        module docstring) and clicks Continue if it shows up.
+        transfer. Races the account-mismatch confirm dialog and the close-other-apps
+        dialog the whole time too (see module docstring) and clicks through either.
         """
         self.log.info('Waiting for "Your files are ready to move" (Target is preparing/scanning files)...')
         deadline = time.monotonic() + screen_timeout
@@ -58,6 +66,11 @@ class TargetTransferFlow:
                     "preparing-files wait -- clicked Continue"
                 )
                 confirmed_accounts = True
+            if self.close_apps_dialog.accept(timeout=0.1):
+                self.log.success(
+                    "\"We need to close all other applications\" appeared -- clicked "
+                    "Close Application"
+                )
         raise TransferFlowError(
             f'"Your files are ready to move" screen never appeared within {screen_timeout:.0f}s'
         )

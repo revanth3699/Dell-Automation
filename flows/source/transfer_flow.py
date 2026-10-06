@@ -1,28 +1,29 @@
 """SourceTransferFlow.wait_for_transfer_to_start(): confirms Source progresses through
 the post-pairing sequence after Target starts the transfer -- "We've successfully
 linked your PCs." (brief, confirmed from a user-supplied screenshot, 2026-10-06, but not
-confirmed to always appear) -> "We're searching this PC for your files and settings."
--> "Are you ready to start your migration?" (confirmed directly by the user, 2026-10-06:
-none of these need a click -- just text assertions confirming the sequence actually
-happens, not stuck). The first screen is checked with a short, bounded timeout; if it's
-not seen in time, this falls straight through to the searching-files check instead of
-treating that as a failure -- it's a brief confirmation, not a required gate.
+confirmed to always appear) -> "Are you ready to start your migration?" (confirmed
+directly by the user, 2026-10-06: neither needs a click -- just text assertions
+confirming the sequence actually happens, not stuck). The first screen is checked with
+a short, bounded timeout; if it's not seen in time, this falls straight through to the
+next check instead of treating that as a failure -- it's a brief confirmation, not a
+required gate.
+
+"We're searching this PC for your files and settings." is deliberately NOT checked here
+(omitted per explicit user direction, 2026-10-06) -- confirmed live that waiting on it
+depends entirely on Target's own pace (it only appears once Target clicks through its
+"preparing your files" step, which can take minutes), making it a weak, slow gate rather
+than a useful assertion.
 
 Confirmed live (2026-10-06): Source's own pairing finishes the instant the code is
-accepted, well before Target necessarily reaches this point -- Target still has its own
-"preparing your files" step to get through first (can take "a few minutes" per its own
-on-screen text, see flows/target/transfer_flow.py), and "We're searching this PC..."
-here only appears once Target clicks through to start the transfer. A multi-minute gap
-before it shows up is therefore expected, not broken on its own.
+accepted, well before Target necessarily reaches this point.
 
 Bug fixed here, confirmed live (2026-10-06): each wait used to be a single
-is_searching()/is_ready_to_migrate() call with a long timeout -- BaseComponent.exists()
-polls internally every 0.5s but only logs once, after the ENTIRE timeout either
-succeeds or fails, so there was zero visible output for up to screen_timeout seconds.
-That's indistinguishable from actually being stuck, especially stacked on top of
-Target's own silent multi-minute wait. Now polls explicitly with a short per-check
-timeout so exists()'s own debug log fires every cycle, giving live visibility into
-whether this is still alive and searching rather than frozen.
+is_searching()/is_ready_to_migrate()-style call with a long timeout -- BaseComponent.
+exists() polls internally every 0.5s but only logs once, after the ENTIRE timeout
+either succeeds or fails, so there was zero visible output for up to screen_timeout
+seconds. That's indistinguishable from actually being stuck. Now polls explicitly with
+a short per-check timeout so exists()'s own debug log fires every cycle, giving live
+visibility into whether this is still alive rather than frozen.
 """
 
 import time
@@ -53,14 +54,6 @@ class SourceTransferFlow:
                 f"{linked_success_timeout:.0f}s -- continuing to the next screen anyway "
                 "(not every run shows it)"
             )
-
-        self.log.info('Waiting for "We\'re searching this PC for your files and settings."...')
-        if not self._poll_until_showing(self.transfer_progress_screen.is_searching, screen_timeout):
-            raise RuntimeError(
-                f'"We\'re searching this PC for your files and settings." never '
-                f"appeared within {screen_timeout:.0f}s"
-            )
-        self.log.success("Searching-files screen confirmed")
 
         self.log.info('Waiting for "Are you ready to start your migration?"...')
         if not self._poll_until_showing(self.transfer_progress_screen.is_ready_to_migrate, screen_timeout):

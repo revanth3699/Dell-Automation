@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 from components.base_component import BaseComponent
+from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, CLOSE_APPS_HEADING_LOCATOR
 from locators.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
@@ -97,6 +98,32 @@ class SignInWaitingModal:
         if not self._heading.exists(timeout=timeout):
             return False
         self._cancel_button.click()
+        return True
+
+
+class CloseAppsDialog:
+    """"We need to close all other applications" -- shown when the app detects other
+    running applications (e.g. Control Panel, a browser) blocking migration. Confirmed
+    from a user-supplied screenshot (2026-10-06). Can appear unpredictably during a long
+    wait (same as ConfirmAccountsDialog), not tied to one specific prior step.
+    """
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(app_session, *CLOSE_APPS_HEADING_LOCATOR, "CloseAppsHeading")
+        self._close_application_button = BaseComponent(
+            app_session, *CLOSE_APPLICATION_BUTTON_LOCATOR, "CloseApplicationButton"
+        )
+
+    def is_showing(self, timeout: float = 2.0) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def accept(self, timeout: float = 2.0) -> bool:
+        """Clicks "Close Application" if the dialog is showing. Returns whether it was
+        present at all (same pattern as TrustNetworkDialog.accept()).
+        """
+        if not self._heading.exists(timeout=timeout):
+            return False
+        self._close_application_button.click()
         return True
 
 
