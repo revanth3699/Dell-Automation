@@ -77,6 +77,24 @@ accident:
   file invoked with `-File`, not inline `-Command` text -- the C# source's own double
   quotes break a double-quoted PowerShell here-string). Build on that function; don't
   reintroduce the `MainWindowHandle` approach.
+- **A genuinely new top-level window is NOT guaranteed, even past the EnumWindows fix.**
+  Confirmed live (2026-10-06): the OS sometimes opens the Dell sign-in page as a new TAB
+  inside an ALREADY-RUNNING browser window instead of a new window -- the email field
+  was visibly showing (browser autofill even prefilled it), but automation never typed
+  into it, because no hwnd was ever "new" relative to the pre-click snapshot, so the
+  snapshot-diff check waited out its full timeout and `_click_sign_in_with_retry`
+  wrongly concluded no browser had opened. Fixed in
+  `find_new_browser_window_hwnd()`: it now falls back to matching by window/tab title
+  (confirmed "Sign In | Dell US", see `SIGN_IN_WINDOW_TITLE_KEYWORDS` in
+  `factory/config.py`) across ALL currently open browser windows, not just new ones,
+  whenever the new-hwnd check finds nothing. This fixes all three call sites at once
+  (`_click_sign_in_with_retry`, `_wait_for_new_browser`,
+  `attach_to_new_sign_in_browser`) since they all go through this one function.
+- **Disable browser autofill proactively, same pattern as the Restore-pages fix.**
+  `factory/prerequisites.py`'s `_disable_autofill_suggestions()` patches the Chrome/Edge
+  profile's `Preferences` JSON (`autofill.profile_enabled` / `autofill.credit_card_enabled`
+  set to `false`) before each run, so a saved email/address never gets silently
+  prefilled into a field in place of the username automation actually types.
 - **Nothing in `tools/` may hardcode a build path or credentials.** Confirmed directly
   by the user (2026-10-06): this must run consistently on any machine, not just the one
   it was written on. `tools/run_sign_in_flow.py` is the reference pattern (env-var

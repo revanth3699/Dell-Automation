@@ -37,6 +37,17 @@ BROWSER_PROCESS_NAMES = [
     if name.strip()
 ]
 
+# Confirmed window/tab title for the Dell sign-in page: "Sign In | Dell US" (see
+# PROJECT_PLAN.md Sec 5.3c). All keywords here must appear in a window's title
+# (case-insensitive) for it to be recognized as the sign-in page -- used as a fallback
+# when the OS reuses an already-running browser window instead of opening a new one, so
+# no new top-level window handle ever appears for the usual snapshot-diff check to find.
+SIGN_IN_WINDOW_TITLE_KEYWORDS = [
+    kw.strip().lower()
+    for kw in os.environ.get("DDA_SIGN_IN_TITLE_KEYWORDS", "sign in,dell").split(",")
+    if kw.strip()
+]
+
 WINAPPDRIVER_INSTALL_PATHS = [
     path.strip()
     for path in os.environ.get(

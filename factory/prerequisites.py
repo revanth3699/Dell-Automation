@@ -273,12 +273,39 @@ def _mark_browser_profile_as_cleanly_exited(preferences_path: Path) -> None:
         pass  # e.g. file locked because the browser is still running -- skip, not fatal
 
 
+def _disable_autofill_suggestions(preferences_path: Path) -> None:
+    """Disables Chromium's address/payment autofill suggestions for the profile the Dell
+    sign-in page opens in, so the email field never gets silently prefilled with a saved
+    value instead of the username our automation types. Only touches the two autofill
+    keys; every other preference is read back unchanged and rewritten as-is. Silently
+    does nothing if the file doesn't exist or can't be parsed -- best-effort, not a
+    required prerequisite step.
+    """
+    if not preferences_path.exists():
+        return
+    try:
+        data = json.loads(preferences_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    autofill = data.setdefault("autofill", {})
+    if autofill.get("profile_enabled") is False and autofill.get("credit_card_enabled") is False:
+        return  # already disabled -- don't rewrite the file for no reason
+    autofill["profile_enabled"] = False
+    autofill["credit_card_enabled"] = False
+    try:
+        preferences_path.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        pass  # e.g. file locked because the browser is still running -- skip, not fatal
+
+
 def ensure_browsers_exit_cleanly() -> None:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if not local_app_data:
         return
     for relative_path in _BROWSER_PROFILE_PREFERENCES_PATHS:
-        _mark_browser_profile_as_cleanly_exited(Path(local_app_data) / relative_path)
+        preferences_path = Path(local_app_data) / relative_path
+        _mark_browser_profile_as_cleanly_exited(preferences_path)
+        _disable_autofill_suggestions(preferences_path)
 
 
 def ensure_target_prerequisites() -> str:

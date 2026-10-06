@@ -17,6 +17,16 @@ every downstream presence check (email/password/OTP fields) report "not found" e
 though the real sign-in page was sitting in a different window the whole time. Fixed by
 snapshotting the set of already-open browser windows before clicking Sign In, then
 attaching only to a window that is genuinely new.
+
+Confirmed via a live run (2026-10-06): the "genuinely new window" assumption itself isn't
+always true -- the OS sometimes opens the Dell sign-in page as a new TAB inside an
+ALREADY-RUNNING browser window instead of spawning a new top-level window. No hwnd is
+ever "new" in that case (automation saw the email field as prefilled by the browser's own
+autofill but never typed into it), so the snapshot-diff check alone waited out its full
+timeout and incorrectly concluded no browser had opened. Fixed by also matching on the
+window/tab's own title -- confirmed title "Sign In | Dell US" (see PROJECT_PLAN.md Sec
+5.3c) -- across ALL currently open browser windows, not just new ones, as a fallback
+alongside (not instead of) the new-hwnd check.
 """
 
 import subprocess
@@ -24,12 +34,12 @@ import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator, List, Optional, Tuple
 
 import requests
 
 from components.base_component import BaseComponent
-from factory.config import BROWSER_PROCESS_NAMES, WINAPPDRIVER_URL
+from factory.config import BROWSER_PROCESS_NAMES, SIGN_IN_WINDOW_TITLE_KEYWORDS, WINAPPDRIVER_URL
 from factory.driver_factory import WinAppDriverSession
 from factory.wait_utils import poll_until
 
@@ -63,6 +73,7 @@ Add-Type @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public class DdaWindowEnumerator {
     [DllImport("user32.dll")]
@@ -71,6 +82,8 @@ public class DdaWindowEnumerator {
     private static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")]
     private static extern int GetWindowThreadProcessId(IntPtr hWnd, out int processId);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -80,7 +93,9 @@ public class DdaWindowEnumerator {
             if (IsWindowVisible(hWnd)) {
                 int pid;
                 GetWindowThreadProcessId(hWnd, out pid);
-                results.Add(pid + ":" + hWnd.ToInt64().ToString("X"));
+                var sb = new StringBuilder(512);
+                GetWindowText(hWnd, sb, sb.Capacity);
+                results.Add(pid + ":" + hWnd.ToInt64().ToString("X") + ":" + sb.ToString());
             }
             return true;
         };
@@ -92,8 +107,8 @@ public class DdaWindowEnumerator {
 
 $ids = (Get-Process -Name $Names -ErrorAction SilentlyContinue).Id
 [DdaWindowEnumerator]::GetVisibleWindows() | ForEach-Object {
-    $parts = $_ -split ':'
-    if ($ids -contains [int]$parts[0]) { $parts[1] }
+    $parts = $_ -split ':', 3
+    if ($ids -contains [int]$parts[0]) { $_ }
 }
 '''
 
@@ -109,11 +124,9 @@ def _get_enum_windows_script_path() -> Path:
     return _enum_windows_script_path
 
 
-def list_browser_window_hwnds() -> set:
-    """Snapshot of every currently-open top-level window handle (hex) across all
-    supported browser processes, regardless of which one opened it or what it shows.
-    Call this BEFORE triggering a sign-in (or any) action that is expected to open a new
-    browser window, so the new window can be told apart from ones already open.
+def list_browser_windows_with_titles() -> List[Tuple[str, str]]:
+    """Every currently-open top-level window (hwnd_hex, title) pair across all supported
+    browser processes, regardless of which one opened it or what it shows.
     """
     script_path = _get_enum_windows_script_path()
     names_csv = ",".join(BROWSER_PROCESS_NAMES)
@@ -121,18 +134,50 @@ def list_browser_window_hwnds() -> set:
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path), "-NamesCsv", names_csv],
         capture_output=True, text=True, timeout=20,
     )
-    output = result.stdout.strip()
-    return {line.strip() for line in output.splitlines() if line.strip()}
+    windows = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(":", 2)
+        if len(parts) >= 2:
+            windows.append((parts[1], parts[2] if len(parts) > 2 else ""))
+    return windows
+
+
+def list_browser_window_hwnds() -> set:
+    """Snapshot of every currently-open top-level window handle (hex) across all
+    supported browser processes, regardless of which one opened it or what it shows.
+    Call this BEFORE triggering a sign-in (or any) action that is expected to open a new
+    browser window, so the new window can be told apart from ones already open.
+    """
+    return {hwnd for hwnd, _ in list_browser_windows_with_titles()}
+
+
+def _title_matches_sign_in_page(title: str) -> bool:
+    lowered = title.lower()
+    return all(keyword in lowered for keyword in SIGN_IN_WINDOW_TITLE_KEYWORDS)
 
 
 def find_new_browser_window_hwnd(known_hwnds: set) -> Optional[str]:
-    """Returns the hex hwnd of a browser window not present in known_hwnds, or None.
-    Picks arbitrarily among new windows if somehow more than one appeared at once --
-    not expected in practice (one sign-in click opens exactly one window).
+    """Returns the hex hwnd of the sign-in browser window, or None if it hasn't shown up
+    yet. Prefers a window not present in known_hwnds (the common case: a genuinely new
+    top-level window). Falls back to matching by window/tab title (confirmed "Sign In |
+    Dell US", see SIGN_IN_WINDOW_TITLE_KEYWORDS) across ALL currently open browser
+    windows -- confirmed via live testing (2026-10-06) that the OS sometimes reuses an
+    already-running browser window (opens a new tab in it) instead of spawning a new one,
+    in which case no hwnd is ever "new" even though the real sign-in page is genuinely
+    showing. Picks arbitrarily if somehow more than one candidate matches at once -- not
+    expected in practice (one sign-in click opens exactly one window/tab).
     """
-    current = list_browser_window_hwnds()
-    new = current - known_hwnds
-    return next(iter(new), None)
+    windows = list_browser_windows_with_titles()
+    new_hwnds = [hwnd for hwnd, _ in windows if hwnd not in known_hwnds]
+    if new_hwnds:
+        return new_hwnds[0]
+    for hwnd, title in windows:
+        if _title_matches_sign_in_page(title):
+            return hwnd
+    return None
 
 
 def attach_to_browser_window(hwnd_hex: str) -> WinAppDriverSession:
