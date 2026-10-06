@@ -37,6 +37,14 @@ transfer speed) appears. start_transfer() now polls for it to confirm the transf
 genuinely started, rather than returning right after the click with no confirmation
 anything actually happened. Tracking progress/completion from there is separate, not
 yet built.
+
+Bug fixed here, confirmed live (2026-10-06): the close-apps dialog can ALSO appear
+AFTER clicking Migrate now, layered over "Your files are ready to move" while waiting
+for "We're moving your files and settings" to show up -- confirmed via a live
+screenshot showing exactly this (the dialog over the still-visible "ready to move"
+screen, Migrate now already clicked). The wait for the progress screen was a single
+is_showing() call with no handling for this at all, so it would just burn the whole
+timeout and fail. Now races the close-apps dialog here too, same as everywhere else.
 """
 
 import time
@@ -92,13 +100,23 @@ class TargetTransferFlow:
                 self.transfer_receive_screen.start_transfer()
 
                 self.log.info('Waiting for "We\'re moving your files and settings"...')
-                if not self.transfer_progress_screen.is_showing(timeout=progress_screen_timeout):
-                    raise TransferFlowError(
-                        '"We\'re moving your files and settings" never appeared within '
-                        f"{progress_screen_timeout:.0f}s after clicking Migrate now"
-                    )
-                self.log.success("Transfer in progress -- \"We're moving your files and settings\" confirmed")
-                return
+                progress_deadline = time.monotonic() + progress_screen_timeout
+                while time.monotonic() < progress_deadline:
+                    if self.transfer_progress_screen.is_showing(timeout=0.5):
+                        self.log.success(
+                            "Transfer in progress -- \"We're moving your files and "
+                            "settings\" confirmed"
+                        )
+                        return
+                    if self.close_apps_dialog.accept(timeout=0.1):
+                        self.log.success(
+                            "\"We need to close all other applications\" appeared "
+                            "after clicking Migrate now -- clicked Close Application"
+                        )
+                raise TransferFlowError(
+                    '"We\'re moving your files and settings" never appeared within '
+                    f"{progress_screen_timeout:.0f}s after clicking Migrate now"
+                )
             if not confirmed_accounts and self.confirm_accounts_dialog.accept(timeout=0.1):
                 self.log.success(
                     "Account-mismatch confirm dialog appeared during the "
