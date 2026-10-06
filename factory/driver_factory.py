@@ -43,6 +43,21 @@ class WinAppDriverElement:
     def click(self) -> None:
         self._session._post(f"/element/{self.id}/click", {})
 
+    def click_at_center(self) -> None:
+        """A real simulated mouse click at this element's center, instead of click()'s
+        UIA Invoke-pattern /element/{id}/click. Confirmed live (2026-10-06): that
+        Invoke call can return success (no exception, no error) for a WebView2/
+        React-rendered icon button ("Migrate now") without the underlying onClick
+        handler actually firing -- a known class of issue where the accessibility
+        bridge's invoke action isn't wired to the real DOM click listener. Uses the
+        classic two-step JSONWireProtocol sequence (moveto an element centers the
+        mouse there with no offset given, then click() fires at wherever the mouse
+        currently is) rather than the W3C Invoke pattern, which is the standard
+        workaround for exactly this.
+        """
+        self._session._post("/moveto", {"element": self.id})
+        self._session._post("/click", {"button": 0})
+
     def send_keys(self, text: str, verify: bool = True, max_attempts: int = 3) -> None:
         # Confirmed bug: sending the whole string in one /value call against a
         # React-controlled input (e.g. the sign-in email field) only sticks the LAST

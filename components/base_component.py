@@ -75,6 +75,24 @@ class BaseComponent:
         self._screenshot("click")
 
     @retry(attempts=2, delay=0.5)
+    def _click_at_center_once(self) -> None:
+        self._find().click_at_center()
+
+    def click_at_center(self) -> None:
+        """Same as click(), but uses a real simulated mouse click at the element's
+        center (WinAppDriverElement.click_at_center()) instead of the UIA Invoke
+        pattern -- see that method's docstring for why. Use this when click() reports
+        success but the on-screen control doesn't actually respond."""
+        try:
+            self._click_at_center_once()
+        except Exception as exc:
+            self._screenshot("click_at_center_FAILED")
+            logger.error(f"click_at_center failed on {self.name!r}: {exc}")
+            raise ComponentActionError(f"click_at_center failed on {self.name!r}: {exc}") from exc
+        logger.success(f"click_at_center succeeded on {self.name!r}")
+        self._screenshot("click_at_center")
+
+    @retry(attempts=2, delay=0.5)
     def _type_once(self, text: str) -> None:
         self._find().send_keys(text)
 

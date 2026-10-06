@@ -1,8 +1,12 @@
 """SourceTransferFlow.wait_for_transfer_to_start(): confirms Source progresses through
-the post-pairing sequence after Target starts the transfer -- "We're searching this PC
-for your files and settings." then "Are you ready to start your migration?" (confirmed
-directly by the user, 2026-10-06: both auto-advance on their own, nothing to click --
-just text assertions confirming the sequence actually happens, not stuck).
+the post-pairing sequence after Target starts the transfer -- "We've successfully
+linked your PCs." (brief, confirmed from a user-supplied screenshot, 2026-10-06, but not
+confirmed to always appear) -> "We're searching this PC for your files and settings."
+-> "Are you ready to start your migration?" (confirmed directly by the user, 2026-10-06:
+none of these need a click -- just text assertions confirming the sequence actually
+happens, not stuck). The first screen is checked with a short, bounded timeout; if it's
+not seen in time, this falls straight through to the searching-files check instead of
+treating that as a failure -- it's a brief confirmation, not a required gate.
 
 Confirmed live (2026-10-06): Source's own pairing finishes the instant the code is
 accepted, well before Target necessarily reaches this point -- Target still has its own
@@ -32,26 +36,36 @@ class SourceTransferFlow:
         self.transfer_progress_screen = TransferProgressScreen(app_session)
         self.log = LoggerFactory.get_logger("source")
 
-    def _poll_until_showing(self, check, timeout: float, what: str) -> None:
+    def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if check(timeout=1.0):
-                return
-        raise RuntimeError(f"{what} never appeared within {timeout:.0f}s")
+                return True
+        return False
 
-    def wait_for_transfer_to_start(self, screen_timeout: float = 600.0) -> None:
+    def wait_for_transfer_to_start(self, screen_timeout: float = 600.0, linked_success_timeout: float = 15.0) -> None:
+        self.log.info('Checking for "We\'ve successfully linked your PCs."...')
+        if self._poll_until_showing(self.transfer_progress_screen.is_linked_success, linked_success_timeout):
+            self.log.success("Linked-success confirmation seen")
+        else:
+            self.log.info(
+                '"We\'ve successfully linked your PCs." not seen within '
+                f"{linked_success_timeout:.0f}s -- continuing to the next screen anyway "
+                "(not every run shows it)"
+            )
+
         self.log.info('Waiting for "We\'re searching this PC for your files and settings."...')
-        self._poll_until_showing(
-            self.transfer_progress_screen.is_searching,
-            screen_timeout,
-            '"We\'re searching this PC for your files and settings."',
-        )
+        if not self._poll_until_showing(self.transfer_progress_screen.is_searching, screen_timeout):
+            raise RuntimeError(
+                f'"We\'re searching this PC for your files and settings." never '
+                f"appeared within {screen_timeout:.0f}s"
+            )
         self.log.success("Searching-files screen confirmed")
 
         self.log.info('Waiting for "Are you ready to start your migration?"...')
-        self._poll_until_showing(
-            self.transfer_progress_screen.is_ready_to_migrate,
-            screen_timeout,
-            '"Are you ready to start your migration?"',
-        )
+        if not self._poll_until_showing(self.transfer_progress_screen.is_ready_to_migrate, screen_timeout):
+            raise RuntimeError(
+                f'"Are you ready to start your migration?" never appeared within '
+                f"{screen_timeout:.0f}s"
+            )
         self.log.success("Ready-to-migrate screen confirmed")
