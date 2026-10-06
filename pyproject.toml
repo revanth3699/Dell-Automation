@@ -1,0 +1,24 @@
+[project]
+name = "dell-automation"
+version = "0.1.0"
+description = "Python UI automation framework for Dell Data Assistant (Target/Source PC-to-PC migration)"
+requires-python = ">=3.12"
+dependencies = [
+    "selenium==4.50.0",
+    "pytest",
+    "fastapi",
+    "pydantic",
+    "uvicorn",
+    "requests",
+    "python-dotenv",
+    "loguru",
+    "Pillow",
+]
+
+[dependency-groups]
+dev = [
+    "ruff",
+]
+
+[tool.uv]
+package = false
