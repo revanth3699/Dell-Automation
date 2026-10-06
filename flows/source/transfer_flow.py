@@ -62,3 +62,26 @@ class SourceTransferFlow:
                 f"{screen_timeout:.0f}s"
             )
         self.log.success("Ready-to-migrate screen confirmed")
+
+    def wait_for_migration_to_complete(
+        self, migrating_timeout: float = 60.0, summary_timeout: float = 1800.0
+    ) -> None:
+        """Call after wait_for_transfer_to_start() returns. Confirmed from user-supplied
+        screenshots (2026-10-07): "We're migrating your data now." (confirms migration
+        actually started) -> "Your migration summary is ready." (confirms it finished --
+        defaults to 30 minutes since this is genuinely data-size-dependent, same
+        reasoning as the Target-side timeout). The first needs no click; the second has
+        a "Close" button, clicked per explicit user direction, 2026-10-07.
+        """
+        self.log.info('Waiting for "We\'re migrating your data now."...')
+        if not self._poll_until_showing(self.transfer_progress_screen.is_migrating, migrating_timeout):
+            raise RuntimeError(f'"We\'re migrating your data now." never appeared within {migrating_timeout:.0f}s')
+        self.log.success("Migrating-data screen confirmed")
+
+        self.log.info('Waiting for "Your migration summary is ready."...')
+        if not self._poll_until_showing(self.transfer_progress_screen.is_summary_ready, summary_timeout):
+            raise RuntimeError(
+                f'"Your migration summary is ready." never appeared within {summary_timeout:.0f}s'
+            )
+        self.log.success("Migration summary ready -- migration complete -- clicking Close")
+        self.transfer_progress_screen.close_summary()

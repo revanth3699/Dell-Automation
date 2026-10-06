@@ -29,10 +29,15 @@ class TrustNetworkDialog:
         """Clicks "Trust Network" if the dialog is showing. Returns whether it was
         present at all, so callers can distinguish "already past this dialog" from
         "accepted it just now" without a separate is_showing() call.
+
+        Confirmed live (2026-10-07): click() previously re-found the button with its
+        full default timeout (10s) even though exists() just confirmed it's there --
+        if that fresh lookup is at all flaky, the click alone could take many seconds.
+        Passes a short timeout here since presence was just confirmed above.
         """
         if not self._button.exists(timeout=timeout):
             return False
-        self._button.click()
+        self._button.click(timeout=2.0)
         return True
 
 

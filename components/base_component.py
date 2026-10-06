@@ -64,13 +64,26 @@ class BaseComponent:
     def _click_once(self) -> None:
         self._find().click()
 
-    def click(self) -> None:
+    def click(self, timeout: Optional[float] = None) -> None:
+        """Confirmed live (2026-10-07): a caller that already confirmed the element
+        exists a moment earlier (e.g. a dialog's accept() checking its own heading
+        first) still had click() re-find it with the component's full default timeout
+        (10s) -- if that particular lookup is at all flaky, the click alone can take
+        many seconds even though the element was just there. timeout, same optional-
+        override pattern as get_text(), lets a caller that just confirmed presence use
+        a short one here instead of silently eating the default.
+        """
+        original_timeout = self.timeout
+        if timeout is not None:
+            self.timeout = timeout
         try:
             self._click_once()
         except Exception as exc:
             self._screenshot("click_FAILED")
             logger.error(f"click failed on {self.name!r}: {exc}")
             raise ComponentActionError(f"click failed on {self.name!r}: {exc}") from exc
+        finally:
+            self.timeout = original_timeout
         logger.success(f"click succeeded on {self.name!r}")
         self._screenshot("click")
 
@@ -78,17 +91,23 @@ class BaseComponent:
     def _click_at_center_once(self) -> None:
         self._find().click_at_center()
 
-    def click_at_center(self) -> None:
+    def click_at_center(self, timeout: Optional[float] = None) -> None:
         """Same as click(), but uses a real simulated mouse click at the element's
         center (WinAppDriverElement.click_at_center()) instead of the UIA Invoke
         pattern -- see that method's docstring for why. Use this when click() reports
-        success but the on-screen control doesn't actually respond."""
+        success but the on-screen control doesn't actually respond. Same timeout
+        override as click() (see its docstring)."""
+        original_timeout = self.timeout
+        if timeout is not None:
+            self.timeout = timeout
         try:
             self._click_at_center_once()
         except Exception as exc:
             self._screenshot("click_at_center_FAILED")
             logger.error(f"click_at_center failed on {self.name!r}: {exc}")
             raise ComponentActionError(f"click_at_center failed on {self.name!r}: {exc}") from exc
+        finally:
+            self.timeout = original_timeout
         logger.success(f"click_at_center succeeded on {self.name!r}")
         self._screenshot("click_at_center")
 

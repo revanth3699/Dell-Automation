@@ -116,7 +116,9 @@ class RoleRunner:
             coordination_client = CoordinationClient()
             flow = SourcePairingFlow(session.app, run_id=run_id, coordination_client=coordination_client)
             flow.run()
-            SourceTransferFlow(session.app).wait_for_transfer_to_start()
+            transfer_flow = SourceTransferFlow(session.app)
+            transfer_flow.wait_for_transfer_to_start()
+            transfer_flow.wait_for_migration_to_complete()
         except BaseException:
             session.close()
             raise

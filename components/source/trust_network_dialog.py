@@ -19,8 +19,14 @@ class TrustNetworkDialog:
     def accept(self, timeout: float = 2.0) -> bool:
         """Clicks "Yes, continue" if the dialog is showing. Returns whether it was
         present at all, so callers can distinguish "already past this dialog" from
-        "accepted it just now" without a separate is_showing() call."""
+        "accepted it just now" without a separate is_showing() call.
+
+        Confirmed live (2026-10-07), same fix as the Target-side TrustNetworkDialog:
+        click() previously re-found the button with its full default timeout (10s)
+        even though exists() just confirmed the dialog's heading is there. Passes a
+        short timeout here instead.
+        """
         if not self._heading.exists(timeout=timeout):
             return False
-        self._yes_continue_button.click()
+        self._yes_continue_button.click(timeout=2.0)
         return True
