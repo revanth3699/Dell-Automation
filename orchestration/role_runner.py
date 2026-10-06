@@ -40,8 +40,10 @@ from factory.coordination_client import CoordinationClient
 from factory.prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.source.pairing_flow import SourcePairingFlow
+from flows.source.transfer_flow import SourceTransferFlow
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow
+from flows.target.transfer_flow import TargetTransferFlow
 
 
 class RoleRunnerError(Exception):
@@ -98,6 +100,7 @@ class RoleRunner:
             # TargetPairingFlow.enter_pairing_code_from_coordination_service(), which
             # waits for that screen first and only then calls CoordinationClient.wait_for().
             TargetPairingFlow(session.app).enter_pairing_code_from_coordination_service(run_id)
+            TargetTransferFlow(session.app).start_transfer()
         except BaseException:
             session.close()
             raise
@@ -111,6 +114,7 @@ class RoleRunner:
             coordination_client = CoordinationClient()
             flow = SourcePairingFlow(session.app, run_id=run_id, coordination_client=coordination_client)
             flow.run()
+            SourceTransferFlow(session.app).wait_for_transfer_to_start()
         except BaseException:
             session.close()
             raise
