@@ -19,7 +19,8 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    (`DDA_TARGET_BUILD_PATH` / `DDA_SOURCE_BUILD_PATH`, and `DDA_COORDINATION_SERVICE_URL`
    once you know which machine hosts the Coordination Service). Credentials
    (`DDA_TARGET_SIGNIN_USERNAME` etc.) are real environment variables only -- never put
-   them in `.env`.
+   them in `.env`. See **Environment variables** below for exactly what each machine
+   needs.
 4. Run anything through uv, e.g.:
    ```
    uv run python -m orchestration.role_runner --role target --run-id <id>
@@ -34,3 +35,26 @@ installs WinAppDriver via `winget` if it's missing (one admin approval prompt), 
 Developer Mode if it's off (another admin prompt), and starts WinAppDriver itself,
 elevated. Nothing needs to be installed by hand beyond uv and this repo's own
 dependencies.
+
+## Environment variables
+
+Target PC and Source PC are two independent machines, each running their own
+`role_runner` invocation -- they don't need the same `.env`, just the ones relevant to
+their own role (plus `DDA_COORDINATION_SERVICE_URL`, which both must agree on). See
+`.env.example` for the full file with defaults and comments.
+
+| Variable | Target PC | Source PC | Notes |
+|---|---|---|---|
+| `DDA_TARGET_BUILD_PATH` | **Required** | not used | Path to `DellDataAssistant.TargetPc.exe` on this machine (no installer exists for this build). |
+| `DDA_SOURCE_BUILD_PATH` | not used | **Required** | Path to the *already-installed* `DellDataAssistant.exe` (the Source build is a self-extracting installer -- point at what it produces, not the original downloaded installer). |
+| `DDA_TARGET_SIGNIN_USERNAME` | **Required** | not used | Real environment variable only -- never put credentials in `.env`. |
+| `DDA_TARGET_SIGNIN_PASSWORD` | **Required** | not used | Same as above. |
+| `DDA_TARGET_OTP_STATIC_VALUE` | **Required** | not used | Same as above. |
+| `DDA_COORDINATION_SERVICE_URL` | **Required** | **Required** | Must point to wherever the Coordination Service is actually hosted (either machine, or a third host) -- both processes for a given `--run-id` must agree on this address. |
+| `DDA_WINAPPDRIVER_HOST` / `DDA_WINAPPDRIVER_PORT` | default OK | default OK | Only change if WinAppDriver needs to run on a non-default host/port. |
+| `DDA_TARGET_EXE_NAME` / `DDA_TARGET_PROCESS_NAME` | default OK | not used | Only change if a different Target build/process name is in play. |
+| `DDA_SOURCE_EXE_NAME` / `DDA_SOURCE_PROCESS_NAME` | not used | default OK | Only change if a different Source build/process name is in play. |
+| `DDA_BROWSER_PROCESS_NAMES` | default OK | not used | Target-only -- Source has no browser-based sign-in step. Comma-separated, checked in order (the OS default browser varies per machine). |
+| `DDA_WINAPPDRIVER_INSTALL_PATHS` | default OK | default OK | Semicolon-separated search paths used by the auto-install check. |
+| `DDA_NODE_INSTALL_PATHS` | default OK | not used | Only needed for the GlassFloor mock-server dev launch mode, not a normal run. |
+| `DDA_MOCK_SERVER_PORT` | default OK | not used | Same as above -- dev-only. |
