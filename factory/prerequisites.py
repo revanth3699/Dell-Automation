@@ -157,17 +157,30 @@ def ensure_winappdriver_running(winappdriver_path: str, startup_timeout: float =
 
 
 def kill_winappdriver() -> bool:
-    """Best-effort stop of any running WinAppDriver instance. Returns whether it is
-    confirmed stopped afterward (port no longer open) -- checked rather than assumed.
+    """Stops any running WinAppDriver instance. Returns whether it is confirmed stopped
+    afterward (port no longer open) -- checked rather than assumed.
 
-    Caveat, confirmed by the same UIPI mechanism noted in ensure_winappdriver_running()
-    and PROJECT_PLAN.md Sec 5.1: WinAppDriver normally runs elevated (started via
-    Start-Process -Verb RunAs), and a non-elevated process cannot terminate a
-    higher-integrity one. If the caller isn't itself elevated, the Stop-Process call
-    below will silently fail to actually kill it -- that's why this re-tests the port
-    afterward instead of trusting the command's own exit status.
+    Bug fixed here, confirmed live (2026-10-07): WinAppDriver normally runs elevated
+    (started via Start-Process -Verb RunAs), and a non-elevated process cannot
+    terminate a higher-integrity one (the same UIPI mechanism noted in
+    ensure_winappdriver_running() and PROJECT_PLAN.md Sec 5.1) -- confirmed directly:
+    a plain non-elevated kill attempt during this same project silently did nothing,
+    every time, for exactly this reason. This used to just re-test the port and report
+    failure; now it retries via an elevated Stop-Process (one more admin prompt, same
+    mechanism already used to start WinAppDriver elevated in the first place) when the
+    plain attempt didn't actually work, so cleanup on error/interrupt is guaranteed
+    rather than silently incomplete.
     """
     _run_powershell("Stop-Process -Name WinAppDriver -Force -ErrorAction SilentlyContinue")
+    time.sleep(1.0)
+    if not check_winappdriver_running():
+        return True
+    _run_powershell(
+        "Start-Process powershell -Verb RunAs -ArgumentList "
+        "'-NoProfile','-Command','Stop-Process -Name WinAppDriver -Force "
+        "-ErrorAction SilentlyContinue' -Wait",
+        timeout=60,
+    )
     time.sleep(1.0)
     return not check_winappdriver_running()
 
@@ -318,5 +331,5 @@ def ensure_target_prerequisites() -> str:
     ensure_winappdriver_running(winappdriver_path)
     ensure_python_packages()
     ensure_browsers_exit_cleanly()
-    print("All Target PC prerequisites OK.")
+    print("PC checks OK.")
     return winappdriver_path

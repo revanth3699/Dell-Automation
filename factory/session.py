@@ -74,17 +74,44 @@ def _run_powershell(command: str, timeout: int = 20) -> str:
     return result.stdout.strip()
 
 
+def _is_process_running(exe_name: str) -> bool:
+    output = _run_powershell(
+        "if (Get-CimInstance Win32_Process | Where-Object { "
+        f"$_.CommandLine -like '*{exe_name}*' -or $_.Name -eq '{exe_name}' "
+        "}) { 'yes' }"
+    )
+    return output == "yes"
+
+
 def _kill_existing_instances(exe_name: str) -> None:
     """Kills every process whose command line mentions exe_name -- not just the one with
     a visible window. Confirmed necessary: the app's single-instance lock silently
     swallows a new launch's CLI args if ANY matching instance (visible or hidden) is
     already running. See PROJECT_PLAN.md Sec 5.3a.
+
+    Bug fixed here, confirmed live (2026-10-07): the Dell app runs elevated (confirmed
+    via Phase 0 -- it requires admin elevation), so a non-elevated Stop-Process call
+    here was silently failing to actually kill it, every time, same UIPI mechanism
+    documented on kill_winappdriver(). Now verifies the plain kill actually worked and
+    retries elevated (one more admin prompt) if not, so error/interrupt cleanup is
+    guaranteed rather than silently incomplete.
     """
     _run_powershell(
         f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{exe_name}*' "
         f"-or $_.Name -eq '{exe_name}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId "
         f"-Force -ErrorAction SilentlyContinue }}",
         timeout=30,
+    )
+    time.sleep(1)
+    if not _is_process_running(exe_name):
+        return
+    _run_powershell(
+        "Start-Process powershell -Verb RunAs -ArgumentList "
+        "'-NoProfile','-Command','Get-CimInstance Win32_Process | Where-Object { "
+        f"$_.CommandLine -like \"*{exe_name}*\" -or $_.Name -eq \"{exe_name}\" }} "
+        "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+        "-ErrorAction SilentlyContinue }' -Wait",
+        timeout=60,
     )
     time.sleep(1)
 
