@@ -23,6 +23,13 @@ screenshot, 2026-10-06) the same way -- shown when other apps (Control Panel, a
 browser, etc.) are open and blocking migration. Unlike the confirm-accounts dialog this
 isn't gated to "only once": it's checked and accepted every cycle, since there's no
 confirmed guarantee it can't reappear if another conflicting app gets detected later.
+
+Also, per explicit user direction (2026-10-06): the moment "Your files are ready to
+move" is detected, the close-apps dialog is checked AGAIN, directly, right before
+clicking "Migrate now" -- not just relying on the background race above. Same reasoning
+as the confirm-accounts dialog surprising us by appearing layered OVER a screen we
+thought was clear: a dialog detected one poll cycle earlier isn't a guarantee nothing
+new appeared in the moment right before the click itself.
 """
 
 import time
@@ -57,6 +64,15 @@ class TargetTransferFlow:
         confirmed_accounts = False
         while time.monotonic() < deadline:
             if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
+                # Confirmed necessary, same reasoning as the confirm-accounts dialog:
+                # check for the close-apps dialog one more time, right here, before
+                # clicking -- it can appear layered over this exact screen, and a check
+                # from an earlier poll cycle doesn't guarantee it's still clear now.
+                while self.close_apps_dialog.accept(timeout=0.1):
+                    self.log.success(
+                        "\"We need to close all other applications\" appeared right "
+                        "before clicking Migrate now -- clicked Close Application"
+                    )
                 self.log.success('Files ready to move -- starting transfer ("Bring everything over for me")')
                 self.transfer_receive_screen.start_transfer()
                 return
