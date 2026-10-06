@@ -97,8 +97,8 @@ try:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
-        flow._handle_email_step_if_present(browser_session, 20.0, run_negative_check=True)
-        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0, run_negative_check=True)
+        flow._handle_email_step_if_present(browser_session, 20.0)
+        flow._handle_password_step_if_present(browser_session, restore_pages_dialog, 20.0)
 
         otp_step = OtpStep(browser_session)
         if not otp_step.is_showing(timeout=20.0):

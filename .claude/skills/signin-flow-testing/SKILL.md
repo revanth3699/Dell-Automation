@@ -16,17 +16,24 @@ apply where, and a live coverage status table (built vs. gap vs. explicitly excl
 Key rules that plan encodes, worth repeating here since they're easy to violate by
 accident:
 
-- **Never retry a wrong-value submission in place.** Email/password get one
-  deliberately-wrong attempt before the real value, in the SAME pass -- both have a
-  confirmed 6-incorrect-attempts account lockout warned about in their own error text.
-- **OTP is the one deliberate exception, confirmed by the user (2026-10-06): its
-  wrong-value attempt is followed by clicking the OTP page's own Cancel button (below
-  Verify), never the correct code in that same pass.** This is `SignInFlow.run()`'s own
-  default behavior now (`_handle_otp_step`'s `run_negative_check` parameter,
-  `_run_fresh_auth_with_retry`'s attempt-0 gating) -- NOT a separate test-only maneuver.
-  Every run's first whole-flow attempt deliberately fails by design; the retry pass that
-  follows submits correct email/password/OTP directly (no repeated negative checks
-  anywhere on that pass).
+- **Email and password get NO wrong-value attempt in the default flow at all, as of
+  2026-10-06.** They used to get one deliberately-wrong attempt before the real value,
+  but running that on every single default run accumulated enough incorrect attempts
+  across repeated live runs to trip the test account's real 6-attempt lockout -- it
+  actually happened. `_handle_email_step_if_present`/`_handle_password_step_if_present`
+  now always submit the correct value directly, no `run_negative_check` parameter at
+  all. That negative check still exists, but only in the separate, deliberately-invoked
+  `tools/adhoc/test_negative_path_error_messages.py` script -- run it by hand only when
+  specifically re-verifying error-message wording, never as part of routine testing.
+- **OTP is the one exception that still gets a wrong-value attempt in the default flow,
+  confirmed by the user (2026-10-06): its wrong-value attempt is followed by clicking
+  the OTP page's own Cancel button (below Verify), never the correct code in that same
+  pass.** This stays in `SignInFlow.run()`'s own default behavior (`_handle_otp_step`'s
+  `run_negative_check` parameter, `_run_fresh_auth_with_retry`'s attempt-0 gating) because
+  it isn't purely a negative-path check -- it's also how the cancel-and-retry mechanism
+  itself gets exercised every run. Every run's first whole-flow attempt deliberately
+  fails by design; the retry pass that follows submits correct email/password/OTP
+  directly (no repeated negative checks anywhere on that pass).
 - **The post-OTP transition screen ("...getting things ready" / "Starting the migration
   assistant") is not a reliable success signal by itself.** It can appear even when
   sign-in was cancelled or failed. Always race it against the "There was a problem
@@ -78,3 +85,8 @@ accident:
   same env-var convention (`DDA_TARGET_BUILD_PATH`, `DDA_TARGET_SIGNIN_USERNAME`,
   `DDA_TARGET_SIGNIN_PASSWORD`, `DDA_TARGET_OTP_STATIC_VALUE` -- see `.env.example`).
   Any new throwaway test script must do the same, not hardcode `r"C:\Users\...\"`.
+- **`tools/adhoc/` is for deliberately-invoked, non-routine checks only** -- currently
+  just `test_negative_path_error_messages.py`. Anything placed there must NOT be run as
+  part of normal/routine testing (that's the whole point: it exists so a lockout-risking
+  check has a home outside the default flow). Follow the same env-var and
+  `except BaseException` cleanup conventions as every other script here.

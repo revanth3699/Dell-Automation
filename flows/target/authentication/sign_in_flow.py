@@ -57,14 +57,17 @@ each step below via a post-condition check + bounded retry loop, since a generic
 "always double-click" approach could cause double-submits on steps where an extra click
 has side effects.
 
-Negative-path check, requested directly by the user (2026-10-05): each of the
-email/password/OTP steps first submits a deliberately wrong value and confirms the app's
-"unable to match the details you entered with our records" error banner appears (exact
-wording per step confirmed from a user-supplied flow diagram, dell screens flow.pdf),
-before submitting the real value. Always single-attempt for the wrong value -- the
-password and OTP error banners both explicitly warn the account locks after 6 incorrect
-attempts, so this must never retry a wrong submission (see
-components/target/browser_sign_in_page.py's submit_and_expect_error()).
+Confirmed directly by the user (2026-10-06): email and password submit the correct value
+directly every run -- NOT a wrong-then-right negative check. An earlier version ran that
+check on every single routine run for all three steps, which (combined with OTP's own
+deliberate wrong-value-then-cancel below, already happening every run by design)
+accumulated enough incorrect password/OTP attempts across repeated runs to trip the
+account's real 6-attempt lockout. OTP keeps its wrong-value-then-cancel specifically
+because it's also how the cancel-and-retry mechanism gets exercised, not purely a
+negative-path check. The full negative-path validation (all three steps, each wrong
+value confirmed against its error banner, exact wording from "dell screens flow.pdf")
+moved to tools/adhoc/ -- invoked deliberately when verifying error messages, never as
+part of this default path.
 """
 
 import time
@@ -371,10 +374,8 @@ class SignInFlow:
                 restore_pages_dialog = RestorePagesDialog(browser_session)
                 restore_pages_dialog.dismiss_if_present()
 
-                self._handle_email_step_if_present(browser_session, step_timeout, run_negative_check)
-                self._handle_password_step_if_present(
-                    browser_session, restore_pages_dialog, step_timeout, run_negative_check
-                )
+                self._handle_email_step_if_present(browser_session, step_timeout)
+                self._handle_password_step_if_present(browser_session, restore_pages_dialog, step_timeout)
                 self._handle_otp_step(browser_session, restore_pages_dialog, step_timeout, run_negative_check)
             self.log.success("Closed the sign-in browser window after OTP submission")
 
@@ -441,7 +442,7 @@ class SignInFlow:
             time.sleep(0.5)
         return "timeout"
 
-    def _handle_email_step_if_present(self, browser_session, timeout: float, run_negative_check: bool) -> None:
+    def _handle_email_step_if_present(self, browser_session, timeout: float) -> None:
         # Bug fixed here, confirmed via live testing (2026-10-05): this used a hardcoded
         # 3.0s regardless of the caller's timeout, which ignored the parameter entirely.
         # 3.0s is not enough time for the real Dell OIDC page (an external network round
@@ -450,56 +451,42 @@ class SignInFlow:
         # concluded "already authenticated, skip", and left the real page sitting
         # untouched on the real email step while the flow moved on to check for
         # password/OTP elements that were never going to appear either.
+        #
+        # Confirmed directly by the user (2026-10-06): the wrong-value negative check
+        # that used to run here on every attempt moved OUT of the default flow -- it
+        # contributes to the SAME account as every other run today, and this step's
+        # error banner has no lockout risk of its own, but running it unconditionally on
+        # every single routine run was still unnecessary exposure. See tools/adhoc/ for
+        # the dedicated negative-path error-message validation (all three steps,
+        # deliberately invoked, not part of this default path).
         email_step = EmailStep(browser_session)
         if not email_step.is_showing(timeout=timeout):
             self.log.info("Email step: field not present -- browser profile already has a session, skipping")
             return
         self.log.info("Email step: field present")
 
-        # Negative-path check requested directly by the user (2026-10-05): submit a
-        # deliberately wrong value first and confirm the app's own "unable to match the
-        # details" error banner (see dell screens flow.pdf) appears before ever trying
-        # the real username. Single attempt only -- see EmailStep.submit_and_expect_error.
-        # Only run once per whole-flow attempt sequence (run_negative_check is False on
-        # the retry pass after a cancellation) -- already proven, no reason to repeat it.
-        if run_negative_check:
-            wrong_username = self.username + "wrongtest"
-            self.log.info("Email step: submitting a deliberately wrong value to verify the error message")
-            if email_step.submit_and_expect_error(wrong_username):
-                self.log.success("Email step: error banner matched after the wrong value")
-            else:
-                self.log.error("Email step: expected error banner did not appear after the wrong value")
-
         self.log.info("Email step: submitting the correct username")
         if not email_step.submit(self.username):
             raise SignInError("Email step did not advance after retries -- Continue click never took effect")
         self.log.success("Email step: advanced past the email page")
 
-    def _handle_password_step_if_present(
-        self, browser_session, restore_pages_dialog, timeout: float, run_negative_check: bool
-    ) -> None:
+    def _handle_password_step_if_present(self, browser_session, restore_pages_dialog, timeout: float) -> None:
         # Same bug/fix as _handle_email_step_if_present above -- use the real timeout
         # budget, not a hardcoded 3.0s, since this page also needs a fresh navigation
         # (Email's Continue click) to render before this check can mean anything.
+        #
+        # Confirmed directly by the user (2026-10-06): the wrong-value negative check
+        # moved OUT of this default path -- this step's own confirmed 6-attempt account
+        # lockout warning is exactly why running it on every single routine run (on top
+        # of OTP's own deliberate wrong-value-then-cancel below, which already happens
+        # every run by design) was contributing to real account lockouts. See
+        # tools/adhoc/ for the dedicated negative-path validation instead.
         restore_pages_dialog.dismiss_if_present()
         password_step = PasswordStep(browser_session)
         if not password_step.is_showing(timeout=timeout):
             self.log.info("Password step: field not present -- already authenticated in this browser profile, skipping")
             return
         self.log.info("Password step: field present")
-
-        # Same negative-path check as the email step -- single attempt only, and same
-        # run_negative_check gating (only on the first whole-flow attempt). This step's
-        # own confirmed error text explicitly warns the account locks after 6 incorrect
-        # attempts, which is exactly why submit_and_expect_error() never retries AND why
-        # this never repeats on a retry pass.
-        if run_negative_check:
-            wrong_password = self.password + "Wrong1!"
-            self.log.info("Password step: submitting a deliberately wrong value to verify the error message")
-            if password_step.submit_and_expect_error(wrong_password):
-                self.log.success("Password step: error banner matched after the wrong value")
-            else:
-                self.log.error("Password step: expected error banner did not appear after the wrong value")
 
         self.log.info("Password step: submitting the correct password")
         if not password_step.submit(self.password):

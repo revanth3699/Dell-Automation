@@ -34,14 +34,16 @@ Welcome Screen ("Let's make this Dell yours")                              [buil
 Email Step ("Sign In" page, Google Sign In + email field + Continue)       [built]
  depends on: browser attached to the NEW window (snapshot-diffed, not
  "first window found" -- see factory/browser_driver_factory.py)
- actions: [neg] submit wrong email once → expect error banner
-          [pos] clear, submit real email → Continue
+ actions: [pos] submit real email directly → Continue
+ (negative check moved to tools/adhoc/ -- see section 6; running it on
+ every routine run contributed to a real account lockout, confirmed
+ 2026-10-06)
  → Password Step
 
 Password Step ("Verify Your Identity")                                     [built]
  depends on: Email Step advanced (field gone)
- actions: [neg] submit wrong password once → expect error banner
-          [pos] clear, submit real password → Sign In
+ actions: [pos] submit real password directly → Sign In
+ (negative check moved to tools/adhoc/ -- same reasoning as Email Step)
  → OTP Step
 
 OTP Step ("Two-Step Verification", 6 boxes)                                [built]
@@ -121,23 +123,29 @@ Confirm-Accounts Dialog ("Let's make sure we're connecting the
 
 | Step | Wrong input | Expected error text (confirmed) | Retry policy |
 |---|---|---|---|
-| Email | wrong email | `"We are unable to match the details you entered with our records"` | single attempt only (no lockout risk, but no reason to hammer it either) |
-| Password | wrong password | same prefix + `"Your account will be locked if an incorrect password is entered 6 times..."` | **single attempt only** — explicit 6-attempt lockout warning |
-| OTP | wrong code | same prefix + `"Your account will be locked in case of 6 incorrect attempts."` | **single attempt only** — same lockout warning |
+| Email | wrong email | `"We are unable to match the details you entered with our records"` | **not exercised in the default flow at all** (see below) — confirmed only via `tools/adhoc/test_negative_path_error_messages.py` |
+| Password | wrong password | same prefix + `"Your account will be locked if an incorrect password is entered 6 times..."` | **not exercised in the default flow at all** — same adhoc-only script, explicit 6-attempt lockout warning is exactly why |
+| OTP | wrong code | same prefix + `"Your account will be locked in case of 6 incorrect attempts."` | exercised on the FIRST whole-flow attempt of every default run (by design, see below); single attempt only — same lockout warning |
 | Post-OTP | sign-in cancelled/failed (triggered BY DESIGN every run via OTP's Cancel, or genuinely) | `"There was a problem signing in"` / `"Sign-in failed. Please try again."` | click **Retry** (requires real UAC approval first), repeat whole Email→OTP sequence with correct values, capped at `MAX_AUTH_RETRIES = 3` |
 | Pairing code | wrong code | **unconfirmed — no screenshot of this failure state yet** | not automatable until confirmed |
 
 Design rules this plan enforces:
-- **Never retry a wrong-value submission in place.** Email/password get exactly one
-  deliberately-wrong attempt before the real value is submitted, in the SAME pass —
-  looping a wrong value would either waste time for no benefit (email) or burn down the
-  confirmed 6-attempt lockout for no reason (password).
+- **Restructured 2026-10-06, after a real account lockout traced to this exact cause**:
+  running the wrong-then-right negative check for email AND password on every single
+  default run accumulated incorrect attempts across many live runs and tripped the test
+  account's confirmed 6-attempt lockout. Email and password now submit the correct value
+  directly in the default flow, with NO wrong-value attempt at all — that check moved to
+  the dedicated, deliberately-invoked `tools/adhoc/test_negative_path_error_messages.py`
+  script (see section 6), run only when specifically re-verifying error-message wording,
+  never as part of routine testing.
 - **OTP is the one exception, by design, confirmed 2026-10-06**: its wrong-value attempt
-  is followed by clicking Cancel, never the correct code in the same pass. The correct
-  code is submitted only on the retry pass that follows, alongside correct email/password
-  (no repeated negative checks there either). This means the first whole-flow attempt
-  deliberately fails every run -- not a separate "cancel path", the SAME retry-on-failure
-  mechanism, exercised on purpose instead of waiting for a genuine failure.
+  (every default run, first whole-flow attempt only) is followed by clicking Cancel, never
+  the correct code in the same pass. This stays in the default flow because it isn't
+  purely a negative-path check — it's also how the cancel-and-retry mechanism itself gets
+  exercised. The correct code is submitted only on the retry pass that follows, alongside
+  correct email/password (no repeated negative checks there either). This means the first
+  whole-flow attempt deliberately fails every run -- not a separate "cancel path", the SAME
+  retry-on-failure mechanism, exercised on purpose instead of waiting for a genuine failure.
 
 ## 4. Automation coverage status
 
@@ -145,7 +153,9 @@ Design rules this plan enforces:
 |---|---|
 | Already-signed-in shortcuts (3 screens) | Built, live-tested |
 | "No browser opens" already-authenticated variant | Built, live-tested |
-| Email/Password/OTP positive + negative | Built; negative paths confirmed live (error banners matched on wrong email/password/OTP) |
+| Email/Password positive (default flow) | Built; correct value submitted directly, no wrong-value attempt (restructured 2026-10-06) |
+| Email/Password negative | Built, isolated to `tools/adhoc/test_negative_path_error_messages.py`; not yet re-run live since the restructure |
+| OTP positive + negative (default flow) | Built; negative path (wrong code → Cancel) confirmed live, exercised on every default run by design |
 | Post-OTP success-vs-failure race + whole-flow retry (now triggered by design, every run, via OTP's Cancel) | Built; every live run today got blocked before completing a full cycle -- once by UAC never appearing, once by a CAPTCHA (likely from today's volume of attempts on one test account). Control-flow logic itself verified via `tools/_test_auth_retry_logic.py` (mock, both outcomes pass). |
 | Trust-network dialog | Built, live-tested |
 | Pairing-discovery reach + wait-for-source | Built, live-tested |
@@ -163,3 +173,20 @@ Design rules this plan enforces:
   by-design trigger for the negative-path check above, confirmed directly by the user.)
 - Source PC's own side of pairing (showing its code) — blocked on Source PC build access.
 - Anything past the confirm-accounts dialog (file selection, transfer, completion).
+
+## 6. Adhoc negative-path validation (deliberately invoked only)
+
+`tools/adhoc/test_negative_path_error_messages.py`, added 2026-10-06. Runs the full
+wrong-then-right sequence for all three steps in one pass: wrong email → confirm error
+banner → correct email → Continue; wrong password → confirm error banner → correct
+password → Sign In; wrong OTP → confirm error banner → correct OTP → Verify; then
+completes the sign-in normally (trust-network, pairing-discovery) so it doesn't leave the
+app in a half-finished state. Same env-var convention and `except BaseException` cleanup
+safety net as every other script here.
+
+This exists specifically so the error-message text/locators can still be re-verified on
+demand, without that verification living in the default flow where it was burning down
+the account's 6-attempt lockout budget on every routine run. Invoke it by hand only when
+you specifically need to re-confirm these three banners are still correct — not as part
+of normal/routine testing, and not more than once in a short window on the same test
+account.
