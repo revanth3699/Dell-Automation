@@ -124,7 +124,7 @@ def ensure_webview2_accessibility_env_var() -> None:
     )
 
 
-def ensure_winappdriver_running(winappdriver_path: str, startup_timeout: float = 20.0) -> None:
+def ensure_winappdriver_running(winappdriver_path: str, startup_timeout: float = 90.0) -> None:
     """Starts WinAppDriver elevated. Idempotent: no-ops if something is already listening
     on the port.
 
@@ -140,6 +140,17 @@ def ensure_winappdriver_running(winappdriver_path: str, startup_timeout: float =
     else), this cannot cheaply verify it is elevated -- only that the port is open. A
     non-elevated pre-existing instance will still fail to expose the WebView2 tree per
     Sec 5.1; if that happens, stop it and let this function start one properly.
+
+    Bug fixed here, confirmed live (2026-10-07): Start-Process -Verb RunAs (without
+    -Wait) returns almost immediately -- it requests the elevation and the UAC consent
+    dialog appears asynchronously, it does not block until approved. The countdown
+    below used to start right then, at 20s, meaning a human taking more than ~20s to
+    notice and click the prompt (easy in practice) caused this to raise before
+    WinAppDriver was even granted elevation yet -- then re-running triggered a second,
+    genuinely new elevation request, confusingly looking like "it's asking for UAC
+    again" right after approving the first one. Raised to 90s, matching how every other
+    UAC-dependent wait in this codebase is already deliberately generous about human
+    reaction time (e.g. _wait_for_uac_approval()'s own docstring).
     """
     if check_winappdriver_running():
         return
