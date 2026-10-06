@@ -103,9 +103,16 @@ class RoleRunner:
             transfer_flow = TargetTransferFlow(session.app)
             transfer_flow.start_transfer()
             transfer_flow.wait_for_completion()
-        except BaseException:
+        finally:
+            # Bug fixed here, confirmed live (2026-10-07): this used to be
+            # except BaseException: session.close(); raise, which only ever closed
+            # WinAppDriver and the app on FAILURE -- a fully successful run just fell
+            # through and left both running indefinitely, with no cleanup at all,
+            # confirmed directly by the user's own question about this. finally runs
+            # on both success and failure; Session.close() is already safe to call
+            # unconditionally (every step inside it already handles "nothing to clean
+            # up" gracefully), so this needs no other change.
             session.close()
-            raise
 
     @staticmethod
     def _run_source(run_id: str) -> None:
@@ -119,9 +126,10 @@ class RoleRunner:
             transfer_flow = SourceTransferFlow(session.app)
             transfer_flow.wait_for_transfer_to_start()
             transfer_flow.wait_for_migration_to_complete()
-        except BaseException:
+        finally:
+            # See _run_target()'s matching comment -- finally guarantees cleanup on
+            # both success and failure, not just failure.
             session.close()
-            raise
 
 
 if __name__ == "__main__":
