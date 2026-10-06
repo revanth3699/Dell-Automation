@@ -85,6 +85,7 @@ import time
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
+from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
 from components.target.pairing_discovery_screen import PairingDiscoveryScreen
 from factory.config import TARGET_PROCESS_NAME
 from factory.logger_factory import LoggerFactory
@@ -131,6 +132,7 @@ class SignInFlow:
         self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
         self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
+        self.pairing_code_entry_screen = PairingCodeEntryScreen(self.app_session)
 
     def run(self, step_timeout: float = 20.0, overall_timeout: float = 300.0) -> None:
         # overall_timeout defaults much higher than the actual automated work needs --
@@ -690,10 +692,21 @@ class SignInFlow:
         button appears, click it and keep watching (with the same remaining budget) for
         pairing-discovery to follow; if pairing-discovery appears directly first, that's
         the confirmed end state immediately, no click needed either way.
+
+        Bug fixed here AGAIN, confirmed live (2026-10-06): the app can skip the
+        pairing-discovery screen entirely too, going straight to the pairing-code-entry
+        screen ("Let's connect your two PCs") -- observed directly via screenshot while
+        this loop kept polling only 'LookingForOtherPcHeading'/'TrustNetworkButton'
+        forever, neither of which was ever going to appear since the app had already
+        moved past that point. Now also races the code-entry screen directly; if it's
+        already showing, that's success too (downstream wait_for_source_pc() already
+        treats pairing-discovery not showing as "nothing to wait for", so this doesn't
+        need any other change to fall through correctly).
         """
         self.log.info(
             "Waiting for pairing-discovery ('We're looking for your other PC'), racing "
-            "the 'Connect to a trusted network' dialog in case it appears first"
+            "the 'Connect to a trusted network' dialog and the pairing-code-entry screen "
+            "in case either appears first"
         )
         deadline = time.monotonic() + max(remaining, 5.0)
         trust_network_accepted = False
@@ -707,6 +720,12 @@ class SignInFlow:
                         "Pairing-discovery screen confirmed (reached directly -- "
                         "trust-network dialog never appeared)"
                     )
+                return
+            if self.pairing_code_entry_screen.is_showing(timeout=0.1):
+                self.log.success(
+                    "Pairing-code-entry screen already showing -- pairing-discovery was "
+                    "skipped entirely (Source PC was found immediately)"
+                )
                 return
             if not trust_network_accepted and self.trust_network_dialog.accept(timeout=0.1):
                 self.log.success("Trust-network dialog accepted -- continuing to watch for pairing-discovery")

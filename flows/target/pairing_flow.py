@@ -82,6 +82,7 @@ class TargetPairingFlow:
         fetch_timeout: float = 600.0,
         screen_timeout: float = 30.0,
         advance_timeout: float = 30.0,
+        max_attempts: int = 3,
     ) -> None:
         """Same end result as enter_pairing_code(), but fetches the code from the
         Coordination Service (published by the independent Source-side process -- see
@@ -89,17 +90,43 @@ class TargetPairingFlow:
         caller to already have it.
 
         Fetches the code AFTER this screen is already showing, not before -- the code
-        on the Source side rotates roughly every ~60s (see SourcePairingFlow's own
-        docstring), so fetching as late as possible, right before typing, minimizes the
-        chance the code rotates out from under us mid-entry. fetch_timeout bounds the
+        on the Source side rotates every ~59s (confirmed directly by the user,
+        2026-10-06; see SourcePairingFlow's own docstring), so fetching as late as
+        possible, right before typing, minimizes the chance the code rotates out from
+        under us mid-entry. fetch_timeout bounds the
         wait for Source to have published ANY value yet (defaults to the app's own
         confirmed 10-minute pairing timeout); it is not a per-rotation budget.
+
+        Confirmed live (2026-10-06): fetching late isn't always enough on its own --
+        typing all 6 digits (each box's own deliberate click/settle/verify cycle, see
+        WinAppDriverElement.send_keys()) took ~11s in one observed run, long enough for
+        the fetched code to rotate out from under us before the app finishes validating
+        it, leaving the entry screen showing after advance_timeout with no further
+        progress. Retries the whole fetch+enter cycle up to max_attempts times on that
+        specific failure -- Source's publish loop republishes every
+        CODE_REPUBLISH_INTERVAL_SECONDS (5s), so a retry's fresh fetch is very likely to
+        return whatever code is CURRENTLY valid rather than the one that just expired.
         """
         coordination_client = coordination_client or CoordinationClient()
         self._wait_for_screen(screen_timeout)
 
-        self.log.info(f"Fetching current pairing code from Coordination Service (run_id={run_id!r})")
-        code = coordination_client.wait_for(run_id, PAIRING_CODE_KEY, timeout=fetch_timeout)
-        self.log.success(f"Fetched pairing code: {code}")
+        last_error: Optional[PairingError] = None
+        for attempt in range(1, max_attempts + 1):
+            self.log.info(
+                f"Fetching current pairing code from Coordination Service "
+                f"(run_id={run_id!r}, attempt {attempt}/{max_attempts})"
+            )
+            code = coordination_client.wait_for(run_id, PAIRING_CODE_KEY, timeout=fetch_timeout)
+            self.log.success(f"Fetched pairing code: {code}")
 
-        self._submit_code_and_confirm(code, advance_timeout)
+            try:
+                self._submit_code_and_confirm(code, advance_timeout)
+                return
+            except PairingError as exc:
+                last_error = exc
+                self.log.warning(
+                    f"Attempt {attempt}/{max_attempts} failed ({exc}) -- re-fetching "
+                    "the current code and retrying, in case it rotated on the Source "
+                    "side during entry"
+                )
+        raise last_error

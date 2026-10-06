@@ -11,8 +11,8 @@ whether this network was already trusted) -> "We're searching for your new PC."
 Target PC to become network-discoverable, confirmed by waiting 15s+ with no change) ->
 pairing-code screen ("Let's finish linking your PCs.").
 
-The pairing code rotates roughly every ~60s (confirmed via the app's own log
-timestamps). run() keeps re-reading and re-publishing the CURRENT code on a shorter
+The pairing code rotates every ~59s (confirmed directly by the user, 2026-10-06).
+run() keeps re-reading and re-publishing the CURRENT code on a shorter
 cadence than that rotation interval for as long as the pairing-code screen is showing,
 so the Target side always has a valid, not-yet-expired code to enter. The loop ends when
 the pairing-code screen stops showing (Target entered a correct code and pairing
@@ -31,9 +31,9 @@ from factory.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
 from factory.session import _find_main_window_hwnd
 
-# Confirmed via the app's own log timestamps (2026-10-06): the code regenerates roughly
-# every 60-63s. Re-read/re-publish well inside that window so the Target side is never
-# handed a code that's about to expire mid-entry.
+# Confirmed directly by the user (2026-10-06): the code regenerates every ~59s.
+# Re-read/re-publish well inside that window so the Target side is never handed a code
+# that's about to expire mid-entry.
 CODE_REPUBLISH_INTERVAL_SECONDS = 5.0
 
 

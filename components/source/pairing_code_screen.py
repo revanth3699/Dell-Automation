@@ -28,10 +28,10 @@ the UIA-confirmed digits before being trusted:
    path for that slot. The neighbor-crop result is self-verified against whichever
    digits are already known from UIA before being trusted.
 
-Code rotates roughly every ~60s (confirmed via the app's own log timestamps -- see
-tools/_phase0_source_spike.py's findings). Callers that need to keep a downstream
-consumer (e.g. the Coordination Service, see flows/source/pairing_flow.py) supplied with
-a currently-valid code must re-read and re-publish on that cadence, not read it once.
+Code rotates every ~59s (confirmed directly by the user, 2026-10-06). Callers that need
+to keep a downstream consumer (e.g. the Coordination Service, see
+flows/source/pairing_flow.py) supplied with a currently-valid code must re-read and
+re-publish on that cadence, not read it once.
 """
 
 import io
@@ -260,7 +260,7 @@ class PairingCodeScreen:
         Retries a few times before giving up, in case a read lands exactly mid-rotation
         (all 6 boxes briefly inconsistent) or an OCR cross-check disagrees.
 
-        Confirmed live (2026-10-06): the code rotates roughly every ~60s, and this
+        Confirmed live (2026-10-06): the code rotates every ~59s, and this
         method's own retry loop can itself take long enough (double-digit seconds, once
         the OCR/neighbor-crop fallbacks are involved) to straddle a rotation boundary.
         When that happens, one attempt's UIA digits are read from before the rotation
