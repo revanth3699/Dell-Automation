@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import requests
+from loguru import logger
 
 from components.base_component import BaseComponent
 from factory import capabilities as caps
@@ -455,15 +456,45 @@ class Session:
         failed Desktop, default browser and driver must exit all together... if a
         single step fails then everything must be closed." Idempotent: safe to call even
         if some/all of these are already gone (e.g. the app crashed on its own first).
+
+        Bug fixed here, confirmed live (2026-10-07): these three steps used to run
+        unprotected, one after another -- confirmed via a live traceback that a second
+        KeyboardInterrupt (the user pressing Ctrl+C again, e.g. right after seeing an
+        earlier crash/error) landing mid-cleanup (inside _kill_existing_instances()'s
+        own time.sleep()) aborted close() entirely before kill_winappdriver() was ever
+        reached, leaving WinAppDriver running despite the user explicitly interrupting.
+        Each step now runs independently, catching BaseException (so a repeat
+        KeyboardInterrupt during cleanup doesn't skip the remaining steps) and logging
+        a warning rather than aborting -- all three are always attempted. If any step
+        was interrupted, KeyboardInterrupt is re-raised once at the end, after every
+        cleanup step has had its chance, so Ctrl+C still ultimately stops the program.
         """
-        self.close_browser()
-        _kill_existing_instances(self._exe_name)
-        kill_winappdriver()
+        interrupted = False
+        for step_name, step in (
+            ("close_browser", self.close_browser),
+            ("_kill_existing_instances", lambda: _kill_existing_instances(self._exe_name)),
+            ("kill_winappdriver", kill_winappdriver),
+        ):
+            try:
+                step()
+            except KeyboardInterrupt:
+                interrupted = True
+                logger.warning(
+                    f"Session.close(): {step_name} was interrupted (Ctrl+C) -- "
+                    "continuing with the remaining cleanup steps anyway"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Session.close(): {step_name} failed ({exc}) -- continuing with "
+                    "the remaining cleanup steps anyway"
+                )
         self.app = None
         with self._lock:
             for role, sess in list(self._instances.items()):
                 if sess is self:
                     del self._instances[role]
+        if interrupted:
+            raise KeyboardInterrupt
 
     def __enter__(self) -> "Session":
         return self
