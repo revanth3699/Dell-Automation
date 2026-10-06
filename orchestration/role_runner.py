@@ -100,7 +100,9 @@ class RoleRunner:
             # TargetPairingFlow.enter_pairing_code_from_coordination_service(), which
             # waits for that screen first and only then calls CoordinationClient.wait_for().
             TargetPairingFlow(session.app).enter_pairing_code_from_coordination_service(run_id)
-            TargetTransferFlow(session.app).start_transfer()
+            transfer_flow = TargetTransferFlow(session.app)
+            transfer_flow.start_transfer()
+            transfer_flow.wait_for_completion()
         except BaseException:
             session.close()
             raise
