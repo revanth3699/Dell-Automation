@@ -11,3 +11,7 @@ __pycache__/
 # this leaves tracked since only the two subdirs below are ignored.
 reports/output/screenshots/
 reports/output/logs/
+
+# Coordination Service's own runtime state (published pairing codes etc.) -- generated
+# at runtime, never meant to be committed, same reasoning as reports/output/ above.
+coordination_service/state.json

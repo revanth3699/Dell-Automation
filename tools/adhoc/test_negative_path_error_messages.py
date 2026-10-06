@@ -32,9 +32,8 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from factory.driver_factory import DriverFactory, MachineRole
 from factory.prerequisites import ensure_target_prerequisites
-from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds
+from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 
@@ -63,10 +62,10 @@ def log(msg: str) -> None:
     print(f"[{time.monotonic() - t0:.1f}s] {msg}")
 
 
-driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path)
-log(f"Attached. session_id={driver.session_id}")
+session = Session.get(MachineRole.TARGET, build_path=build_path)
+log(f"Attached. session_id={session.app.session_id}")
 
-flow = SignInFlow(driver, username=username, password=password, otp=otp)
+flow = SignInFlow(session, username=username, password=password, otp=otp)
 deadline = time.monotonic() + 300.0
 
 try:
@@ -75,7 +74,7 @@ try:
             "reach the email/password/OTP steps. Sign out in the app first, then rerun.")
         sys.exit(1)
 
-    known_hwnds = list_browser_window_hwnds()
+    known_hwnds = session.snapshot_browser_windows()
     opened_browser = flow._click_sign_in_with_retry(known_hwnds)
     if not opened_browser:
         log("Sign-in click didn't open a browser (already-authenticated session "
@@ -84,7 +83,8 @@ try:
 
     log("Browser opened. Running negative-path checks for email, password, and OTP...")
 
-    with browser_driver(known_hwnds, timeout=20.0) as browser_session:
+    browser_session = session.attach_browser(known_hwnds, timeout=20.0)
+    try:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
@@ -132,16 +132,19 @@ try:
         else:
             log("OTP step not present -- skipping.")
 
-    log("Closed the sign-in browser window. Waiting for the real post-auth outcome...")
-    outcome = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
-    log(f"Outcome: {outcome!r}")
+        log("Keeping the sign-in browser open while waiting for UAC and the real "
+            "post-auth outcome...")
+        flow._wait_for_uac_prompt_resolution(remaining=deadline - time.monotonic())
+        outcome = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+    finally:
+        session.close_browser()
+    log(f"Closed the sign-in browser window. Outcome: {outcome!r}")
 
     if outcome != "success":
         log("Did not reach success after the negative-path checks -- stopping.")
         sys.exit(1)
 
-    flow._wait_for_trust_network_and_accept(remaining=deadline - time.monotonic())
-    flow._confirm_reached_pairing_discovery(remaining=deadline - time.monotonic())
+    flow._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
     log("SUCCESS: all three negative-path checks completed, reached pairing-discovery screen.")
 
 except BaseException:

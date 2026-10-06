@@ -29,7 +29,23 @@ WINAPPDRIVER_URL = f"http://{WINAPPDRIVER_HOST}:{WINAPPDRIVER_PORT}"
 TARGET_EXE_NAME = os.environ.get("DDA_TARGET_EXE_NAME", "DellDataAssistant.TargetPc.exe")
 TARGET_PROCESS_NAME = os.environ.get("DDA_TARGET_PROCESS_NAME", "DellDataAssistant.TargetPc")
 
+# Confirmed via live Phase 0 spike (2026-10-06): the Source PC's downloaded exe is a
+# self-extracting installer, not the real app -- running it installs to (and launches)
+# C:\Dell\DellDataAssistant\DellDataAssistant.exe, process name "DellDataAssistant".
+# DDA_SOURCE_BUILD_PATH should point at that ALREADY-INSTALLED exe directly, not the
+# original downloaded installer, so repeated runs don't re-trigger installation/UAC.
+SOURCE_EXE_NAME = os.environ.get("DDA_SOURCE_EXE_NAME", "DellDataAssistant.exe")
+SOURCE_PROCESS_NAME = os.environ.get("DDA_SOURCE_PROCESS_NAME", "DellDataAssistant")
+
 MOCK_SERVER_DEFAULT_PORT = int(os.environ.get("DDA_MOCK_SERVER_PORT", "8443"))
+
+# Address of the Coordination Service (coordination_service/app.py) -- the one channel
+# through which the independent Source and Target automation processes exchange
+# hand-off values (the pairing code, and later similar signals). Defaults to localhost
+# for same-machine dev/testing; set DDA_COORDINATION_SERVICE_URL to the service's real
+# LAN address (e.g. http://192.168.1.5:8000) when Source and Target run on separate
+# machines.
+COORDINATION_SERVICE_URL = os.environ.get("DDA_COORDINATION_SERVICE_URL", "http://127.0.0.1:8000")
 
 BROWSER_PROCESS_NAMES = [
     name.strip()

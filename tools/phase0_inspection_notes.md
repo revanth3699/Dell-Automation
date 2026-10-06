@@ -1,9 +1,10 @@
 # Phase 0 Inspection Notes — Target PC build
 
-Covers `C:\Users\revan\Downloads\027df3321\Release\DellDataAssistant.TargetPc.exe` only.
-Source PC build still blocked on codebase/build access (see plan's open item) — repeat this
-entire process against that build once it's available. Nothing below should be assumed to
-carry over to Source's UI without being re-verified there.
+Covers `C:\Users\revan\Downloads\027df3321\Release\DellDataAssistant.TargetPc.exe` only
+(Risk items 1-2 and everything through "Prerequisites update" below). Source PC build
+became available 2026-10-06 and its own Phase 0 findings are summarized in the final
+section of this file, with pointers to where the full detail actually lives (co-located
+with the code it explains, not duplicated here).
 
 ## Risk item 1: WebView2 UIA accessibility tree — RESOLVED, with two required conditions
 
@@ -404,3 +405,45 @@ WinAppDriver version that adds support).
 `factory/prerequisites.py` now automates: WinAppDriver elevated-launch requirement, Developer
 Mode, WinAppDriver install, Python packages, and (separately) Node.js for the mock-server mode.
 See PROJECT_PLAN.md Sec 4.9 and Sec 7 for the current state.
+
+## Source PC build — Phase 0 findings (2026-10-06)
+
+Covers the downloaded installer `Dell Data Assistant (2).exe`. Full detail lives
+co-located with the code each finding produced, not duplicated here -- this section is
+an index, not the source of truth.
+
+- **It's a self-extracting installer, not the app itself.** Running it installs to (and
+  launches) `C:\Dell\DellDataAssistant\DellDataAssistant.exe`, process name
+  `DellDataAssistant`. Point `DDA_SOURCE_BUILD_PATH` at the installed exe, not the
+  original downloaded installer, so repeated runs don't re-trigger installation/UAC. See
+  `factory/config.py`'s `SOURCE_EXE_NAME`/`SOURCE_PROCESS_NAME`.
+- **WebView2 UIA tree was rich immediately**, no elevation dance needed in the one
+  session tested -- but that test reused an already-elevated WinAppDriver instance from
+  a prior Target run, so this is NOT an independently confirmed "Source never needs
+  elevation" result. Re-verify from a cold WinAppDriver state before relying on it.
+- **Confirmed screen sequence**: Welcome ("Welcome to Dell Migrate.") -> "Let's get
+  started" -> trust-network dialog (conditional, confirmed only from a user screenshot,
+  not yet seen live) -> "We're searching for your new PC." (does NOT advance on a fixed
+  timeout -- confirmed by waiting 15s+ with no change; only advances once a real Target
+  becomes network-discoverable) -> "Let's finish linking your PCs." (pairing-code
+  screen). See `components/source/*.py` and `locators/source/*.py` for real locators.
+- **Real app bug, the core Source-side finding**: the pairing code's 6-box ListView only
+  ever exposes some of its 6 digit elements to UI Automation at a time (confirmed: as few
+  as 3 of 6; the whole element subtree, container included, is genuinely absent, not
+  just unreadable). The app's own logs redact the code value, so log-scraping can't
+  help. Full writeup, the OCR-based workaround (and why an isolated single-digit OCR
+  crop fails but a neighbor-aware crop succeeds), and self-verification approach are in
+  `components/source/pairing_code_screen.py`'s module docstring.
+- **The code rotates roughly every 60-63s**, confirmed via the app's own log timestamps.
+- **The WebView2 renderer crash already documented above for Target also affects
+  Source** -- observed directly, not just inferred from shared architecture.
+- **Running Source and Target on the SAME physical machine hits a real conflict**: both
+  depend on a shared `DellDataManager` backend process that only one instance of can run
+  at a time (the app itself shows "We need to close an application -- Currently running:
+  DellDataManager"). This is a genuine environmental constraint, not an automation bug --
+  confirmed working correctly across two separate physical machines instead (see
+  `coordination_service/README.md`).
+- **Coordination Service**: `factory/coordination_client.py` + `coordination_service/app.py`
+  relay the pairing code between the two independent Source/Target processes over plain
+  HTTP. Verified end-to-end across two real, separate Windows machines, address resolved
+  via plain Windows hostname (NetBIOS/LLMNR), no DNS server or static IP needed.

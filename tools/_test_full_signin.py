@@ -18,8 +18,8 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.driver_factory import DriverFactory, MachineRole
 from factory.prerequisites import ensure_target_prerequisites
+from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 
 
@@ -41,10 +41,10 @@ otp = _require_env("DDA_TARGET_OTP_STATIC_VALUE")
 ensure_target_prerequisites()
 
 t0 = time.monotonic()
-driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path)
-print(f"[{time.monotonic()-t0:.1f}s] Attached. session_id={driver.session_id}")
+session = Session.get(MachineRole.TARGET, build_path=build_path)
+print(f"[{time.monotonic()-t0:.1f}s] Attached. session_id={session.app.session_id}")
 
-flow = SignInFlow(driver, username=username, password=password, otp=otp)
+flow = SignInFlow(session, username=username, password=password, otp=otp)
 flow.run()
 print(f"[{time.monotonic()-t0:.1f}s] SUCCESS: sign-in flow completed, reached pairing-discovery screen.")
 

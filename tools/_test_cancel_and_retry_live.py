@@ -41,9 +41,8 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.driver_factory import DriverFactory, MachineRole
 from factory.prerequisites import ensure_target_prerequisites
-from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds
+from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 
@@ -72,10 +71,10 @@ def log(msg: str) -> None:
     print(f"[{time.monotonic() - t0:.1f}s] {msg}")
 
 
-driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path)
-log(f"Attached. session_id={driver.session_id}")
+session = Session.get(MachineRole.TARGET, build_path=build_path)
+log(f"Attached. session_id={session.app.session_id}")
 
-flow = SignInFlow(driver, username=username, password=password, otp=otp)
+flow = SignInFlow(session, username=username, password=password, otp=otp)
 deadline = time.monotonic() + 300.0
 
 try:
@@ -84,7 +83,7 @@ try:
             "OTP step. Sign out in the app first, then rerun.")
         sys.exit(1)
 
-    known_hwnds = list_browser_window_hwnds()
+    known_hwnds = session.snapshot_browser_windows()
     opened_browser = flow._click_sign_in_with_retry(known_hwnds)
     if not opened_browser:
         log("Sign-in click didn't open a browser (already-authenticated session "
@@ -93,7 +92,13 @@ try:
 
     log("Browser opened. Driving to the OTP step for the deliberate-cancel pass...")
 
-    with browser_driver(known_hwnds, timeout=20.0) as browser_session:
+    # Bug fixed here, confirmed directly by the user watching a live run (2026-10-06):
+    # this used to close the browser immediately after clicking Cancel, before ever
+    # waiting for the UAC prompt/outcome below -- which raced the real UAC prompt. Both
+    # waits now happen before the browser closes (finally), same fix as
+    # SignInFlow._run_fresh_auth_with_retry().
+    browser_session = session.attach_browser(known_hwnds, timeout=20.0)
+    try:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
@@ -123,13 +128,16 @@ try:
             sys.exit(1)
         log("Clicked Cancel on the OTP page.")
 
-    log("Browser window closed (via our own cleanup on exiting the with-block). "
-        "Confirmed directly by the user (2026-10-06): cancelling here still triggers a "
-        "Windows UAC prompt -- automation cannot see or interact with it (secure "
-        "desktop). Please approve it manually if it appears; waiting for the app's "
-        "'There was a problem signing in' dialog with real patience...")
-    outcome = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
-    log(f"Outcome after cancel: {outcome!r}")
+        log("Confirmed directly by the user (2026-10-06): cancelling here still "
+            "triggers a Windows UAC prompt -- automation cannot see or interact with "
+            "it (secure desktop), only detect it's showing (consent.exe). Please "
+            "approve it manually if it appears; keeping the browser open and waiting "
+            "with real patience...")
+        flow._wait_for_uac_prompt_resolution(remaining=deadline - time.monotonic())
+        outcome = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+    finally:
+        session.close_browser()
+    log(f"Browser window closed. Outcome after cancel: {outcome!r}")
 
     if outcome != "failed":
         log("Did not detect the sign-in-failed dialog after cancelling -- the cancel "
@@ -137,7 +145,7 @@ try:
         sys.exit(1)
 
     log("Clicking Retry on the sign-in-failed dialog...")
-    known_hwnds = list_browser_window_hwnds()
+    known_hwnds = session.snapshot_browser_windows()
     if not flow.sign_in_failed_dialog.retry():
         log("Retry button not found/clicked -- aborting.")
         sys.exit(1)
@@ -152,7 +160,8 @@ try:
     # already proven once on the first pass, and password/OTP both carry a confirmed
     # 6-attempt account lockout; there's no reason to burn more of that budget redoing
     # a check this run isn't about.
-    with browser_driver(known_hwnds, timeout=20.0) as browser_session:
+    browser_session = session.attach_browser(known_hwnds, timeout=20.0)
+    try:
         restore_pages_dialog = RestorePagesDialog(browser_session)
         restore_pages_dialog.dismiss_if_present()
 
@@ -180,16 +189,19 @@ try:
         else:
             log("OTP step not present on retry -- continuing (may have been skipped).")
 
-    log("OTP submitted (correct value). Waiting for the real post-auth outcome...")
-    outcome2 = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+        log("OTP submitted (correct value). Keeping browser open while waiting for UAC "
+            "and the real post-auth outcome...")
+        flow._wait_for_uac_prompt_resolution(remaining=deadline - time.monotonic())
+        outcome2 = flow._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+    finally:
+        session.close_browser()
     log(f"Outcome after correct OTP: {outcome2!r}")
 
     if outcome2 != "success":
         log("Did not reach success after the correct OTP on retry -- stopping.")
         sys.exit(1)
 
-    flow._wait_for_trust_network_and_accept(remaining=deadline - time.monotonic())
-    flow._confirm_reached_pairing_discovery(remaining=deadline - time.monotonic())
+    flow._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
     log("SUCCESS: cancel-and-retry flow completed end-to-end, reached pairing-discovery screen.")
 
     found = flow.wait_for_source_pc()

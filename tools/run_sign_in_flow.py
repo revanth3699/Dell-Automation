@@ -18,9 +18,13 @@ PROJECT_PLAN.md Sec 5.3a) and launches the app with the matching CLI args:
     python tools/run_sign_in_flow.py --with-mock-server \
         [--build-path PATH] [--mock-server-package PATH] [--secret my-secret-active]
 
-If --pairing-code is omitted, this waits (up to 10 min, matching the app's own
-PairingTimeoutInMilliseconds) for Source PC to be found and then stops -- entering the
-code is pairing-flow work you'd run separately once you have it.
+For automatic pairing against an independent Source-side run (see
+flows/source/pairing_flow.py's SourcePairingFlow and tools/_test_source_pairing_flow.py),
+pass --run-id matching whatever run_id Source is publishing to, instead of
+--pairing-code -- the code is then fetched from the Coordination Service right before
+entry, not supplied up front. If neither --pairing-code nor --run-id is given, this waits
+(up to 10 min, matching the app's own PairingTimeoutInMilliseconds) for Source PC to be
+found and then stops.
 
 Deliberately NOT wrapped in a main()/def-and-call structure -- confirmed via live testing
 (2026-10-05, reproduced independently by both the user and in-agent runs) that the
@@ -39,9 +43,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.driver_factory import DriverFactory, MachineRole
 from factory.mock_server import start_mock_server
 from factory.prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
+from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow
 
@@ -73,7 +77,9 @@ parser.add_argument("--mock-server-package", help="Path to the extracted GlassFl
 parser.add_argument("--secret", default="my-secret-active",
                      help="Mock server scenario secret (default: my-secret-active)")
 parser.add_argument("--port", type=int, default=8443, help="Mock server port (default: 8443)")
-parser.add_argument("--pairing-code", help="If given, also enters this pairing code after sign-in")
+parser.add_argument("--pairing-code", help="If given, enters this literal pairing code after sign-in")
+parser.add_argument("--run-id", help="If given (and --pairing-code isn't), fetches the current "
+                     "pairing code from the Coordination Service for this run_id instead")
 args = parser.parse_args()
 
 username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
@@ -98,18 +104,22 @@ if args.with_mock_server:
     app_arguments = [mock_server.secret, mock_server.cert_path, mock_server.server_address]
 
 print(f"Launching and attaching to: {build_path}")
-driver = DriverFactory.get_app_driver(MachineRole.TARGET, build_path=build_path, app_arguments=app_arguments)
-print(f"Attached. session_id={driver.session_id}")
+session = Session.get(MachineRole.TARGET, build_path=build_path, app_arguments=app_arguments)
+print(f"Attached. session_id={session.app.session_id}")
 
-sign_in_flow = SignInFlow(driver, username, password, otp)
+sign_in_flow = SignInFlow(session, username, password, otp)
 sign_in_flow.run()
 print("SignInFlow complete -- reached the pairing-discovery screen.")
 
 if args.pairing_code:
     print("Entering pairing code...")
-    TargetPairingFlow(driver).enter_pairing_code(args.pairing_code)
+    TargetPairingFlow(session.app).enter_pairing_code(args.pairing_code)
+    print("Pairing complete.")
+elif args.run_id:
+    print(f"Fetching pairing code from the Coordination Service for run_id={args.run_id!r}...")
+    TargetPairingFlow(session.app).enter_pairing_code_from_coordination_service(args.run_id)
     print("Pairing complete.")
 else:
-    print("No --pairing-code given -- waiting for Source PC to be found (up to 10 min)...")
+    print("No --pairing-code/--run-id given -- waiting for Source PC to be found (up to 10 min)...")
     if sign_in_flow.wait_for_source_pc():
-        print("Source PC found. Re-run with --pairing-code <code> to enter it automatically.")
+        print("Source PC found. Re-run with --pairing-code <code> or --run-id <id> to enter it automatically.")

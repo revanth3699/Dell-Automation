@@ -14,6 +14,7 @@ from typing import Optional
 from loguru import logger
 
 from factory.logger_factory import LoggerFactory
+from factory.retry import retry
 from factory.wait_utils import poll_until
 
 LoggerFactory.ensure_console()  # colored console logging works even before any flow
@@ -54,9 +55,18 @@ class BaseComponent:
             pass  # evidence capture must never mask the real failure
         return str(path)
 
+    # Confirmed via testing: an element found via _find() can become invalid by the time
+    # we act on it if the page transitions in between (e.g. password page -> OTP page) --
+    # WinAppDriver returns a plain 500 Internal Error for this, not a distinguishable
+    # "stale element" error. @retry re-finds the element each attempt (the whole method
+    # body re-runs), which covers it -- see factory/retry.py.
+    @retry(attempts=2, delay=0.5)
+    def _click_once(self) -> None:
+        self._find().click()
+
     def click(self) -> None:
         try:
-            self._with_stale_retry(lambda element: element.click())
+            self._click_once()
         except Exception as exc:
             self._screenshot("click_FAILED")
             logger.error(f"click failed on {self.name!r}: {exc}")
@@ -64,9 +74,13 @@ class BaseComponent:
         logger.success(f"click succeeded on {self.name!r}")
         self._screenshot("click")
 
+    @retry(attempts=2, delay=0.5)
+    def _type_once(self, text: str) -> None:
+        self._find().send_keys(text)
+
     def type_text(self, text: str) -> None:
         try:
-            self._with_stale_retry(lambda element: element.send_keys(text))
+            self._type_once(text)
         except Exception as exc:
             self._screenshot("type_FAILED")
             logger.error(f"type failed on {self.name!r}: {exc}")
@@ -74,29 +88,16 @@ class BaseComponent:
         logger.success(f"type succeeded on {self.name!r}")
         self._screenshot("type")
 
-    def _with_stale_retry(self, action, attempts: int = 2):
-        # Confirmed via testing: an element found via _find() can become invalid by the
-        # time we act on it if the page transitions in between (e.g. password page ->
-        # OTP page) -- WinAppDriver returns a plain 500 Internal Error for this, not a
-        # distinguishable "stale element" error. Re-finding and retrying once covers it.
-        last_exc = None
-        for attempt in range(attempts):
-            try:
-                element = self._find()
-                return action(element)
-            except Exception as exc:
-                last_exc = exc
-                if attempt < attempts - 1:
-                    time.sleep(0.5)
-        raise last_exc
+    @retry(attempts=2, delay=0.5)
+    def _get_text_once(self) -> str:
+        return self._find().get_text()
 
     def get_text(self, timeout: Optional[float] = None) -> str:
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
         try:
-            element = self._find()
-            text = element.get_text()
+            text = self._get_text_once()
         except Exception as exc:
             logger.error(f"get_text failed on {self.name!r}: {exc}")
             raise

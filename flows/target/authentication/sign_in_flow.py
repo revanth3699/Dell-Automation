@@ -46,9 +46,19 @@ valid session even when the plain "Welcome to Dell" screen is showing (not just
 entirely. See _already_signed_in() and _click_sign_in_with_retry() below.
 
 This file is the orchestration layer only -- it holds no locators. All screen/dialog
-elements live in components/target/ (Page Object layer), and browser-window attach lives
-in factory/browser_driver_factory.py (Factory layer, also target-only in practice since
-nothing else opens an external sign-in browser).
+elements live in components/target/ (Page Object layer), and the app+browser+WinAppDriver
+lifecycle lives in factory/session.py's `Session` (Factory layer, also target-only in
+practice since nothing else opens an external sign-in browser).
+
+Takes a `Session` (factory/session.py), not a bare app WinAppDriverSession -- consolidated
+per explicit user direction (2026-10-06): "if any interaction is failed Desktop, default
+browser and driver must exit all together... if a single step fails then everything must
+be closed." `session.app` is passed to Page Object constructors exactly as the old bare
+app_session was; `session.attach_browser()`/`close_browser()` replace the removed
+factory/browser_driver_factory.py's `browser_driver()` context manager (same guarantee:
+closed on exit whether the body succeeds or raises); `session.close()` replaces the old
+`_cleanup_after_failure()`'s separate `DriverFactory.kill_app()` + `kill_winappdriver()`
+calls with one all-or-nothing teardown.
 
 Known flakiness, confirmed via live testing: the first click/type on a WebView2 or
 Chromium-hosted React element sometimes doesn't take effect even though the WinAppDriver
@@ -76,10 +86,9 @@ from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_discovery_screen import PairingDiscoveryScreen
-from factory.browser_driver_factory import browser_driver, list_browser_window_hwnds, find_new_browser_window_hwnd
-from factory.driver_factory import DriverFactory
+from factory.config import TARGET_PROCESS_NAME
 from factory.logger_factory import LoggerFactory
-from factory.prerequisites import kill_winappdriver
+from factory.session import _find_main_window_hwnd, find_new_browser_window_hwnd, is_uac_prompt_showing
 
 
 class SignInError(Exception):
@@ -94,8 +103,18 @@ class SignInFlow:
     # genuinely broken run gets before failing loudly instead of looping forever.
     MAX_AUTH_RETRIES = 3
 
-    def __init__(self, app_session, username: str, password: str, otp: str):
-        self.app_session = app_session
+    # Confirmed via a live run the user watched directly (2026-10-06): the transition
+    # screen can appear FIRST and the sign-in-failed dialog supersede it moments later --
+    # a real run cancelled OTP, approved the resulting UAC prompt, the transition phrase
+    # matched immediately, _wait_for_auth_outcome declared "success" and moved on -- but
+    # the screen the user actually saw next was "There was a problem signing in", whose
+    # Retry button never got clicked because the flow had already committed to success.
+    # See _wait_for_auth_outcome's own docstring for the fix.
+    AUTH_OUTCOME_CONFIRMATION_WINDOW = 5.0
+
+    def __init__(self, session, username: str, password: str, otp: str):
+        self.session = session
+        self.app_session = session.app  # Page Objects take the raw WinAppDriverSession
         self.username = username
         self.password = password
         self.otp = otp
@@ -106,12 +125,12 @@ class SignInFlow:
         # UAC approval afterward too. See run()'s use of this flag.
         self._just_clicked_get_started = False
 
-        self.welcome_screen = WelcomeScreen(app_session)
-        self.welcome_back_screen = WelcomeBackScreen(app_session)
-        self.trust_network_dialog = TrustNetworkDialog(app_session)
-        self.migration_preparation_transition = MigrationPreparationTransition(app_session)
-        self.sign_in_failed_dialog = SignInFailedDialog(app_session)
-        self.pairing_discovery_screen = PairingDiscoveryScreen(app_session)
+        self.welcome_screen = WelcomeScreen(self.app_session)
+        self.welcome_back_screen = WelcomeBackScreen(self.app_session)
+        self.trust_network_dialog = TrustNetworkDialog(self.app_session)
+        self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
+        self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
+        self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
 
     def run(self, step_timeout: float = 20.0, overall_timeout: float = 300.0) -> None:
         # overall_timeout defaults much higher than the actual automated work needs --
@@ -130,8 +149,8 @@ class SignInFlow:
                 # default browser is the user's everyday browser and is routinely already
                 # running with unrelated windows open. Attaching to "the first window
                 # found" (the original approach) silently grabbed the wrong window in
-                # exactly that situation, see factory/browser_driver_factory.py.
-                known_hwnds = list_browser_window_hwnds()
+                # exactly that situation, see factory/session.py.
+                known_hwnds = self.session.snapshot_browser_windows()
                 opened_browser = self._click_sign_in_with_retry(known_hwnds)
 
                 if opened_browser:
@@ -162,8 +181,7 @@ class SignInFlow:
                 if self._just_clicked_get_started:
                     self._wait_for_uac_approval(remaining=deadline - time.monotonic())
 
-            self._wait_for_trust_network_and_accept(remaining=deadline - time.monotonic())
-            self._confirm_reached_pairing_discovery(remaining=deadline - time.monotonic())
+            self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
         except BaseException as exc:
             # BaseException, not Exception -- confirmed via live debris (2026-10-05): a
             # run interrupted externally (Ctrl+C, a background task killed) raises
@@ -192,7 +210,19 @@ class SignInFlow:
             self.log.info("wait_for_source_pc: pairing-discovery screen isn't showing -- nothing to wait for")
             return True
         self.log.info(f"Waiting up to {timeout:.0f}s for Source PC to be found...")
-        found = self.pairing_discovery_screen.wait_until_source_found(timeout=timeout)
+        # Polls directly rather than delegating the whole wait to
+        # PairingDiscoveryScreen.wait_until_source_found() in one call -- this can be a
+        # long wait (up to 600s, genuinely spent waiting on real-world Source-PC
+        # discovery), and a crashed Target app looks identical to "still searching" to
+        # that method's own internal poll, so it would otherwise burn the full timeout
+        # silently. See _assert_app_alive()'s docstring.
+        deadline = time.monotonic() + timeout
+        found = False
+        while time.monotonic() < deadline:
+            self._assert_app_alive()
+            if not self.pairing_discovery_screen.is_showing(timeout=1.0):
+                found = True
+                break
         if found:
             self.log.success("Source PC found -- pairing-discovery screen cleared")
         else:
@@ -202,35 +232,29 @@ class SignInFlow:
     def _cleanup_after_failure(self) -> None:
         # Confirmed requirement: if a single interaction fails anywhere in the flow, the
         # whole setup must be torn down rather than left half-finished for the next run
-        # to trip over. The sign-in browser window (if one was attached) is already
-        # closed by this point -- browser_driver()'s context manager (see run() and
-        # factory/browser_driver_factory.py) closes + quits it on its way out via
-        # exception unwind, before this method ever runs. The Target app and
-        # WinAppDriver, by contrast, are safe to force-kill outright here: both are
-        # entirely our own test infrastructure (see DriverFactory.kill_app() and
-        # factory.prerequisites.kill_winappdriver()).
+        # to trip over -- app, browser (if attached), and WinAppDriver all together, per
+        # explicit user direction (2026-10-06). Session.close() is idempotent and safe to
+        # call even if the browser session was already closed by attach_browser()'s own
+        # finally block before this ever runs (see _run_fresh_auth_with_retry()).
         try:
-            DriverFactory.kill_app()
-            self.log.info("Cleanup: killed the Target PC app process")
+            self.session.close()
+            self.log.info("Cleanup: session closed (browser, app process, WinAppDriver)")
         except Exception as exc:
-            self.log.error(f"Cleanup: failed to kill the Target PC app process: {exc}")
+            self.log.error(f"Cleanup: session.close() failed: {exc}")
 
-        try:
-            if kill_winappdriver():
-                self.log.info("Cleanup: stopped WinAppDriver")
-            else:
-                # Confirmed limitation: WinAppDriver normally runs elevated, and this
-                # process isn't -- a non-elevated Stop-Process can't terminate a
-                # higher-integrity one (same UIPI restriction noted elsewhere in this
-                # codebase). Not silently claimed as success; logged honestly instead.
-                self.log.error(
-                    "Cleanup: WinAppDriver is still running -- likely still elevated "
-                    "and this process isn't, so it couldn't be stopped automatically. "
-                    "Stop it manually (or from an elevated prompt) if a clean restart "
-                    "is needed."
-                )
-        except Exception as exc:
-            self.log.error(f"Cleanup: failed to stop WinAppDriver: {exc}")
+    def _assert_app_alive(self) -> None:
+        """Confirmed live (2026-10-06, observed directly multiple times this session):
+        the Target app's WebView2 renderer can crash mid-wait (see PROJECT_PLAN.md Sec
+        5.3b). Without this check, a crashed window looks identical to "nothing's
+        happened yet" to every is_showing()/poll loop below, so a run silently burns
+        its entire timeout budget (up to 600s) polling a dead window instead of failing
+        fast with a clear reason. Call this every iteration of any polling loop here."""
+        if _find_main_window_hwnd(TARGET_PROCESS_NAME) is None:
+            raise SignInError(
+                f"The Target app window is gone (process {TARGET_PROCESS_NAME!r} not "
+                "found) -- it most likely crashed mid-run, not a normal screen "
+                "transition."
+            )
 
     def _already_signed_in(self) -> bool:
         # Confirmed via live log inspection (2026-10-05): the app can silently refresh a
@@ -301,6 +325,7 @@ class SignInFlow:
 
             deadline = time.monotonic() + wait_timeout
             while time.monotonic() < deadline:
+                self._assert_app_alive()
                 if find_new_browser_window_hwnd(known_hwnds) is not None:
                     return True
 
@@ -367,9 +392,19 @@ class SignInFlow:
         for attempt in range(self.MAX_AUTH_RETRIES):
             run_negative_check = attempt == 0
             self.log.info("Attaching WinAppDriver session to the new sign-in browser window")
-            # browser_driver() yields the session and guarantees it's closed + quit on
-            # exit (success or exception) -- see factory/browser_driver_factory.py.
-            with browser_driver(known_hwnds, timeout=step_timeout) as browser_session:
+            # session.attach_browser() sets self.session.browser; the finally block
+            # guarantees it's closed + quit whether the body succeeds or raises -- same
+            # guarantee the removed browser_driver() context manager gave, now owned by
+            # Session (see factory/session.py).
+            #
+            # Bug fixed here, confirmed directly by the user watching a live run
+            # (2026-10-06): this used to close the browser (in the finally) immediately
+            # after _handle_otp_step returned, BEFORE ever waiting for the UAC prompt or
+            # the auth-outcome race below -- closing it that early raced the real UAC
+            # prompt, which can take a moment to appear after OTP submission/cancel.
+            # Both waits now happen INSIDE this try block, before the browser closes.
+            browser_session = self.session.attach_browser(known_hwnds, timeout=step_timeout)
+            try:
                 self.log.success("Attached to the sign-in browser window")
                 restore_pages_dialog = RestorePagesDialog(browser_session)
                 restore_pages_dialog.dismiss_if_present()
@@ -377,15 +412,19 @@ class SignInFlow:
                 self._handle_email_step_if_present(browser_session, step_timeout)
                 self._handle_password_step_if_present(browser_session, restore_pages_dialog, step_timeout)
                 self._handle_otp_step(browser_session, restore_pages_dialog, step_timeout, run_negative_check)
-            self.log.success("Closed the sign-in browser window after OTP submission")
 
-            self.log.info(
-                "OTP submitted (or deliberately cancelled). A Windows User Access "
-                "Control (UAC) prompt may appear now -- automation cannot see or "
-                "interact with it (it runs on the secure desktop). Please approve it "
-                "manually if it appears; waiting..."
-            )
-            outcome = self._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+                self.log.info(
+                    "OTP submitted (or deliberately cancelled). Keeping the sign-in "
+                    "browser open until this resolves -- a Windows User Access Control "
+                    "(UAC) prompt may appear now; automation cannot see or interact "
+                    "with it (it runs on the secure desktop), only detect that it's "
+                    "showing. Please approve it manually if it appears; waiting..."
+                )
+                self._wait_for_uac_prompt_resolution(remaining=deadline - time.monotonic())
+                outcome = self._wait_for_auth_outcome(remaining=deadline - time.monotonic())
+            finally:
+                self.session.close_browser()
+            self.log.success("Closed the sign-in browser window")
 
             if outcome == "success":
                 return
@@ -408,7 +447,7 @@ class SignInFlow:
                     f"{self.MAX_AUTH_RETRIES}) -- clicking Retry and restarting the "
                     "browser-based sequence"
                 )
-            known_hwnds = list_browser_window_hwnds()  # re-snapshot before Retry opens a new window
+            known_hwnds = self.session.snapshot_browser_windows()  # re-snapshot before Retry opens a new window
             if not self.sign_in_failed_dialog.retry():
                 raise SignInError("Sign-in-failed dialog disappeared before Retry could be clicked")
             if not self._wait_for_new_browser(known_hwnds, timeout=30.0):
@@ -419,6 +458,7 @@ class SignInFlow:
     def _wait_for_new_browser(self, known_hwnds, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            self._assert_app_alive()
             if find_new_browser_window_hwnd(known_hwnds) is not None:
                 return True
             time.sleep(0.5)
@@ -430,14 +470,39 @@ class SignInFlow:
         actually distinguishes success from failure/cancellation. Returns "success" or
         "failed"; "timeout" if the time budget runs out with neither appearing, which the
         caller treats as a hard error rather than silently assuming either outcome.
+
+        Bug fixed here, confirmed via a live run the user watched directly (2026-10-06):
+        a transition-phrase match used to be trusted as IMMEDIATE, final "success" -- but
+        this method's own docstring (and SignInFailedDialog's) already said that screen
+        can appear on the way to a cancelled/failed outcome too, and in that live run it
+        did: the transition phrase matched right after UAC approval, this method returned
+        "success" and the caller moved on, but the real screen that appeared moments
+        later was "There was a problem signing in" -- whose Retry button never got
+        clicked because the flow had already committed. Once the transition phrase first
+        matches, this now keeps polling for AUTH_OUTCOME_CONFIRMATION_WINDOW seconds for
+        the failed dialog to supersede it (checked every iteration, same as before)
+        before actually committing to "success" -- a late-arriving failed dialog within
+        that window now correctly wins the race.
         """
         deadline = time.monotonic() + max(remaining, 5.0)
+        transition_matched_at = None
+        matched_phrase = None
         while time.monotonic() < deadline:
+            self._assert_app_alive()
             if self.sign_in_failed_dialog.is_showing(timeout=0.1):
                 return "failed"
-            matched = self.migration_preparation_transition.wait_until_any_showing(timeout=0.1)
-            if matched:
-                self.log.success(f"Sign-in succeeded -- transition screen detected: {matched!r}")
+            if transition_matched_at is None:
+                matched = self.migration_preparation_transition.wait_until_any_showing(timeout=0.1)
+                if matched:
+                    matched_phrase = matched
+                    transition_matched_at = time.monotonic()
+                    self.log.info(
+                        f"Transition screen detected ({matched_phrase!r}) -- not yet "
+                        f"final, watching {self.AUTH_OUTCOME_CONFIRMATION_WINDOW:.0f}s "
+                        "for the sign-in-failed dialog to supersede it"
+                    )
+            elif time.monotonic() - transition_matched_at >= self.AUTH_OUTCOME_CONFIRMATION_WINDOW:
+                self.log.success(f"Sign-in succeeded -- transition screen confirmed: {matched_phrase!r}")
                 return "success"
             time.sleep(0.5)
         return "timeout"
@@ -547,33 +612,96 @@ class SignInFlow:
         otp_step.submit(self.otp)
         self.log.success("OTP step: code submitted")
 
+    def _wait_for_uac_prompt_resolution(self, remaining: float) -> bool:
+        """Waits for the Windows UAC elevation prompt (consent.exe, the standard process
+        that hosts every UAC prompt) to appear, then waits for it to disappear again --
+        see factory.session.is_uac_prompt_showing()'s docstring for why observing this
+        process is a safe, direct signal rather than any interaction with the secure
+        desktop UAC itself runs on. Confirmed directly by the user (2026-10-06): the
+        previous design only ever inferred UAC activity indirectly (via the downstream
+        migration-prep transition screen), which made it hard to tell "a human needs to
+        act right now" apart from "something else is stuck."
+
+        Returns True if a prompt was actually detected and resolved; False if none
+        appeared within the detection window -- not necessarily an error, since UAC
+        doesn't always re-appear (e.g. if already granted earlier this run).
+        """
+        detect_timeout = min(max(remaining, 5.0), 20.0)
+        deadline = time.monotonic() + detect_timeout
+        appeared = False
+        while time.monotonic() < deadline:
+            self._assert_app_alive()
+            if is_uac_prompt_showing():
+                appeared = True
+                break
+            time.sleep(0.5)
+        if not appeared:
+            self.log.info("No UAC prompt detected within the detection window -- continuing")
+            return False
+
+        self.log.info("UAC prompt detected (consent.exe) -- waiting for manual approval...")
+        resolve_deadline = time.monotonic() + max(remaining, 5.0)
+        while time.monotonic() < resolve_deadline:
+            self._assert_app_alive()
+            if not is_uac_prompt_showing():
+                self.log.success("UAC prompt resolved (consent.exe exited)")
+                return True
+            time.sleep(0.5)
+        self.log.error("UAC prompt still showing after the time budget -- it may need manual attention")
+        return False
+
     def _wait_for_uac_approval(self, remaining: float) -> None:
-        # Not capped to a short timeout (same reasoning as _wait_for_trust_network_and_accept
-        # below) -- this wait spans the manual UAC approval, so it needs the real remaining
-        # budget. Polling for any of the known transition phrases gives a concrete signal
-        # that the human has actually clicked Yes and something moved forward, instead of
-        # silently waiting with no visibility -- if nothing ever appears, something is
-        # stuck (UAC dismissed/denied, or the app crashed) rather than just "still waiting
-        # on a human."
+        # Not capped to a short timeout (same reasoning as
+        # _wait_for_trust_network_then_pairing_discovery below) -- this wait spans the
+        # manual UAC approval, so it needs the real remaining
+        # budget. Checks for the UAC prompt directly first (see
+        # _wait_for_uac_prompt_resolution), then polls for any of the known transition
+        # phrases as the actual "did it succeed" confirmation -- if nothing ever appears,
+        # something is stuck (UAC dismissed/denied, or the app crashed) rather than just
+        # "still waiting on a human."
+        self._wait_for_uac_prompt_resolution(remaining=remaining)
         matched = self.migration_preparation_transition.wait_until_any_showing(timeout=max(remaining, 5.0))
         if matched:
             self.log.success(f"UAC approved -- transition screen detected: {matched!r}")
 
-    def _wait_for_trust_network_and_accept(self, remaining: float) -> None:
-        # Not capped to a short timeout here (unlike most other waits in this flow) --
-        # this wait spans the manual UAC approval window, so it needs to use the real
-        # remaining budget, not an arbitrarily short slice of it.
-        self.log.info("Waiting for the 'Connect to a trusted network' dialog")
-        if self.trust_network_dialog.accept(timeout=max(remaining, 5.0)):
-            self.log.success("Trust-network dialog accepted")
-        else:
-            self.log.info("Trust-network dialog never appeared -- continuing without it")
+    def _wait_for_trust_network_then_pairing_discovery(self, remaining: float) -> None:
+        """Races the "Connect to a trusted network" dialog against the pairing-discovery
+        screen ("We're looking for your other PC") directly.
 
-    def _confirm_reached_pairing_discovery(self, remaining: float) -> None:
-        self.log.info("Confirming the pairing-discovery screen ('We're looking for your other PC')")
-        if not self.pairing_discovery_screen.wait_until_showing(timeout=remaining):
-            raise SignInError(
-                "Did not reach the pairing-discovery screen ('We're looking for your other "
-                "PC') after sign-in -- check for an unexpected error dialog"
-            )
-        self.log.success("Pairing-discovery screen confirmed")
+        Bug fixed here, confirmed via a live run the user watched directly (2026-10-06):
+        this used to be two sequential waits -- wait out the FULL remaining budget on the
+        trust-network dialog alone, THEN separately check for pairing-discovery. But the
+        app doesn't always show the trust-network dialog before reaching
+        pairing-discovery; it can go straight there. The old sequential design would have
+        burned the entire remaining time budget waiting for a dialog that was never
+        coming, even though pairing-discovery was already showing moments after sign-in
+        completed. This now polls for EITHER signal every cycle: if the trust-network
+        button appears, click it and keep watching (with the same remaining budget) for
+        pairing-discovery to follow; if pairing-discovery appears directly first, that's
+        the confirmed end state immediately, no click needed either way.
+        """
+        self.log.info(
+            "Waiting for pairing-discovery ('We're looking for your other PC'), racing "
+            "the 'Connect to a trusted network' dialog in case it appears first"
+        )
+        deadline = time.monotonic() + max(remaining, 5.0)
+        trust_network_accepted = False
+        while time.monotonic() < deadline:
+            self._assert_app_alive()
+            if self.pairing_discovery_screen.is_showing(timeout=0.1):
+                if trust_network_accepted:
+                    self.log.success("Pairing-discovery screen confirmed (after accepting trust-network)")
+                else:
+                    self.log.success(
+                        "Pairing-discovery screen confirmed (reached directly -- "
+                        "trust-network dialog never appeared)"
+                    )
+                return
+            if not trust_network_accepted and self.trust_network_dialog.accept(timeout=0.1):
+                self.log.success("Trust-network dialog accepted -- continuing to watch for pairing-discovery")
+                trust_network_accepted = True
+            time.sleep(0.5)
+        raise SignInError(
+            "Did not reach the pairing-discovery screen ('We're looking for your other "
+            "PC') after sign-in -- check for an unexpected error dialog"
+        )

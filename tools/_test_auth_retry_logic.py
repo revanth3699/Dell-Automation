@@ -16,13 +16,33 @@ up after the cap.
 
 import sys
 import time
-from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flows.target.authentication.sign_in_flow import SignInFlow, SignInError
+
+
+class FakeSession:
+    """Stands in for factory.session.Session -- attach_browser()/close_browser() are
+    all _run_fresh_auth_with_retry() needs from it; snapshot_browser_windows() backs the
+    re-snapshot-before-Retry step. No real app/browser/WinAppDriver involved.
+    """
+
+    def __init__(self):
+        self.app = None
+        self.browser = None
+
+    def snapshot_browser_windows(self) -> set:
+        return set()
+
+    def attach_browser(self, known_hwnds, timeout: float = 20.0):
+        self.browser = FakeBrowserSession()
+        return self.browser
+
+    def close_browser(self) -> None:
+        self.browser = None
 
 
 class FakeBrowserSession:
@@ -79,22 +99,28 @@ class FakeMigrationTransition:
         return None
 
 
-@contextmanager
-def fake_browser_driver(known_hwnds, timeout=20.0):
-    yield FakeBrowserSession()
-
-
 def run_scenario(name: str, outcomes: list[str], expect_success: bool, expect_retry_calls: int) -> None:
     print(f"\n--- Scenario: {name} ---")
     controller = OutcomeController(outcomes)
-    flow = SignInFlow(app_session=None, username="u", password="p", otp="123456")
+    flow = SignInFlow(session=FakeSession(), username="u", password="p", otp="123456")
     flow.sign_in_failed_dialog = FakeSignInFailedDialog(controller)
     flow.migration_preparation_transition = FakeMigrationTransition(controller)
 
     deadline = time.monotonic() + 60.0
-    with patch("flows.target.authentication.sign_in_flow.browser_driver", fake_browser_driver), \
-         patch("flows.target.authentication.sign_in_flow.list_browser_window_hwnds", lambda: set()), \
-         patch("flows.target.authentication.sign_in_flow.find_new_browser_window_hwnd", lambda known: "FAKEHWND"):
+    # Patches _wait_for_uac_prompt_resolution itself, not just is_uac_prompt_showing --
+    # the real method's detection window is a genuine ~20s poll loop (by design, for a
+    # live run), which would make this "fast, deterministic, no real app involved" mock
+    # test take minutes across both scenarios' several retry iterations for no benefit
+    # here (the UAC-detection mechanism itself is exercised live, not by this test).
+    #
+    # Also patches _find_main_window_hwnd -- _assert_app_alive() (added 2026-10-06,
+    # confirmed live that the Target app can crash mid-wait) calls this for a REAL OS
+    # process check, bypassing FakeSession entirely; without this patch it correctly
+    # (from a real-world standpoint) reports "no such process" since no real app is
+    # running in this test, which would wrongly fail every scenario here.
+    with patch("flows.target.authentication.sign_in_flow.find_new_browser_window_hwnd", lambda known: "FAKEHWND"), \
+         patch("flows.target.authentication.sign_in_flow._find_main_window_hwnd", lambda process_name: "FAKEHWND"), \
+         patch.object(SignInFlow, "_wait_for_uac_prompt_resolution", lambda self, remaining: False):
         try:
             flow._run_fresh_auth_with_retry(known_hwnds=set(), step_timeout=5.0, deadline=deadline)
             succeeded = True
