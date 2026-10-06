@@ -659,7 +659,18 @@ class SignInFlow:
         # phrases as the actual "did it succeed" confirmation -- if nothing ever appears,
         # something is stuck (UAC dismissed/denied, or the app crashed) rather than just
         # "still waiting on a human."
-        self._wait_for_uac_prompt_resolution(remaining=remaining)
+        #
+        # Bug fixed here, confirmed live (2026-10-06) across two separate runs: when no
+        # UAC prompt ever appeared (_wait_for_uac_prompt_resolution returns False),
+        # there is nothing to wait for approval of -- but this unconditionally still
+        # waited here for the migration-prep transition screen anyway, which never shows
+        # up in that path, burning nearly the ENTIRE remaining overall_timeout budget
+        # (~5 minutes, confirmed as dead silence in both runs' logs) before proceeding.
+        # Skipping this wait when no prompt appeared loses no real verification --
+        # _wait_for_trust_network_then_pairing_discovery() (called right after this
+        # method returns) already confirms the actual end state with its own budget.
+        if not self._wait_for_uac_prompt_resolution(remaining=remaining):
+            return
         matched = self.migration_preparation_transition.wait_until_any_showing(timeout=max(remaining, 5.0))
         if matched:
             self.log.success(f"UAC approved -- transition screen detected: {matched!r}")
