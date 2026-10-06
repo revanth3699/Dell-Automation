@@ -93,6 +93,10 @@ class RoleRunner:
             if not sign_in_flow.wait_for_source_pc():
                 raise RoleRunnerError("Source PC was not found within the pairing timeout")
 
+            # Polling the Coordination Service only starts once the "Let's connect your
+            # two PCs" code-entry screen is actually showing -- see
+            # TargetPairingFlow.enter_pairing_code_from_coordination_service(), which
+            # waits for that screen first and only then calls CoordinationClient.wait_for().
             TargetPairingFlow(session.app).enter_pairing_code_from_coordination_service(run_id)
         except BaseException:
             session.close()
