@@ -19,5 +19,6 @@ reports/output/logs/
 # at runtime, never meant to be committed, same reasoning as reports/output/ above.
 coordination_service/state.json
 
-# Kept locally only, never pushed.
-README.md
+# Markdown docs are kept local only, except the root README.
+*.md
+!/README.md
