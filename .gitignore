@@ -30,3 +30,8 @@ coordination_service/state.json
 # Markdown docs are kept local only, except the root README.
 *.md
 !/README.md
+
+# Dev/debug scripts used only for building this framework locally (manual, piecemeal
+# testing of one flow/component at a time) -- never meant to be pushed. Kept on disk,
+# just untracked from git.
+tools/
