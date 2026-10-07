@@ -123,7 +123,15 @@ def ensure_winappdriver_running(startup_timeout: float = 90.0) -> None:
         )
     _ensure_webview2_accessibility_env_var()
     logger.info("WinAppDriver isn't running -- starting it elevated (this needs one admin approval)...")
-    _run_powershell(f'Start-Process -FilePath "{winappdriver_path}" -Verb RunAs')
+    # -WindowStyle Hidden (2026-10-08): WinAppDriver.exe is a console app -- its console
+    # window was visible on top of everything, including the Target app itself.
+    # Confirmed live via a screenshot: WinAppDriver's own window (showing its verbose
+    # request/response logging) sat directly over the Dell app, which matters because
+    # the /screenshot endpoint captures whatever is actually on top/foreground, not
+    # specifically our app's window (see factory/session.py's own comment on this same
+    # "foreground capture" behavior). Hiding it doesn't change what WinAppDriver does --
+    # it keeps logging to its own console buffer exactly as before, just not on screen.
+    _run_powershell(f'Start-Process -FilePath "{winappdriver_path}" -Verb RunAs -WindowStyle Hidden')
     deadline = time.monotonic() + startup_timeout
     while time.monotonic() < deadline:
         if is_winappdriver_running():
