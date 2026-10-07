@@ -67,7 +67,12 @@ class RoleRunner:
         """Runs this machine's own role through to a paired state. Credentials/build
         paths come from environment variables only, never passed through here as
         arguments (see module docstring for which ones each role needs)."""
-        ensure_target_prerequisites()  # same generic checks (dev mode, WinAppDriver) regardless of role
+        # Machine-level setup gate (dev mode, WinAppDriver installed, Python packages,
+        # browser cleanup) -- same checks regardless of role. Does NOT start WinAppDriver
+        # itself (see factory/prerequisites.py's module docstring, 2026-10-07): Session,
+        # created below, ensures WinAppDriver is actually running independently, the
+        # moment it's needed.
+        ensure_target_prerequisites()
         ActionReporter.start_run(run_id, role.value)
 
         try:

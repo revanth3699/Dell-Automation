@@ -3,11 +3,19 @@ Prerequisite checks + auto-install for running WinAppDriver-based automation aga
 Target PC app. Target-only (see PROJECT_PLAN.md Sec 10 open item: Source's launch flow is
 still undetermined, pending Source PC build access).
 
-Covers, in order: Windows Developer Mode, WinAppDriver installed, WinAppDriver running
-elevated (required -- the app itself needs admin elevation, confirmed via Phase 0 spike,
-see PROJECT_PLAN.md Sec 5.1), and the required Python packages. Node.js (for the
-GlassFloor mock server, Sec 5.3a) is checked separately via ensure_mock_server_prerequisites
-since it's only needed for that launch mode.
+Covers, in order: Windows Developer Mode, WinAppDriver installed, the required Python
+packages, and browser-profile cleanup. Node.js (for the GlassFloor mock server, Sec 5.3a)
+is checked separately via ensure_mock_server_prerequisites since it's only needed for that
+launch mode.
+
+This is a standalone, one-time pass/fail gate run once before automation starts -- checks
+and auto-fixes of machine-level setup only. Nothing in this module is imported by
+anything else (2026-10-07, per explicit user direction): actually launching/attaching/
+killing WinAppDriver for a real automation run is factory/session.py's job entirely,
+self-contained, independent of this module -- it does not import from here, and this
+module does not assume anything it starts stays running for session.py's benefit.
+check_winappdriver_running() below is read-only and only used for this gate's own
+informational printout.
 """
 
 import importlib.util
@@ -99,72 +107,11 @@ def ensure_winappdriver_installed() -> str:
 
 
 def check_winappdriver_running() -> bool:
+    """Read-only: is something currently listening on WinAppDriver's port. Does not
+    start or stop anything -- actually launching WinAppDriver for a real automation run
+    is factory/session.py's job (see this module's own docstring), independent of this
+    function. Used here only for this gate's own informational printout."""
     return _port_is_open(WINAPPDRIVER_HOST, WINAPPDRIVER_PORT)
-
-
-def ensure_webview2_accessibility_env_var() -> None:
-    """Persists WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--force-renderer-accessibility as a
-    User-scope environment variable (not just this process's). Confirmed via testing that
-    this is read correctly by a WinAppDriver instance launched via plain elevated
-    Start-Process -Verb RunAs -- persisted env vars are read fresh from the registry at
-    process creation regardless of elevation, so this works even though an elevated
-    ("runas") process does not inherit the launching process's in-memory environment.
-    Idempotent -- a no-op if already set correctly.
-    """
-    try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ)
-        value, _ = winreg.QueryValueEx(key, "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
-        if value == "--force-renderer-accessibility":
-            return
-    except (FileNotFoundError, OSError):
-        pass
-    _run_powershell(
-        '[System.Environment]::SetEnvironmentVariable('
-        '"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--force-renderer-accessibility", "User")'
-    )
-
-
-def ensure_winappdriver_running(winappdriver_path: str, startup_timeout: float = 90.0) -> None:
-    """Starts WinAppDriver elevated. Idempotent: no-ops if something is already listening
-    on the port.
-
-    Confirmed via testing: a plain elevated `Start-Process -Verb RunAs` is sufficient to
-    keep WinAppDriver alive (no stdin-redirection tricks needed, despite an earlier,
-    apparently environment-dependent finding to the contrary -- see
-    tools/phase0_inspection_notes.md for the full history). The WebView2 accessibility
-    flag is supplied via a persisted User env var (ensure_webview2_accessibility_env_var)
-    rather than this process's own environment, since an elevated process does not
-    inherit the launching process's in-memory environment.
-
-    Caveat: if a WinAppDriver instance is already running (started by someone/something
-    else), this cannot cheaply verify it is elevated -- only that the port is open. A
-    non-elevated pre-existing instance will still fail to expose the WebView2 tree per
-    Sec 5.1; if that happens, stop it and let this function start one properly.
-
-    Bug fixed here, confirmed live (2026-10-07): Start-Process -Verb RunAs (without
-    -Wait) returns almost immediately -- it requests the elevation and the UAC consent
-    dialog appears asynchronously, it does not block until approved. The countdown
-    below used to start right then, at 20s, meaning a human taking more than ~20s to
-    notice and click the prompt (easy in practice) caused this to raise before
-    WinAppDriver was even granted elevation yet -- then re-running triggered a second,
-    genuinely new elevation request, confusingly looking like "it's asking for UAC
-    again" right after approving the first one. Raised to 90s, matching how every other
-    UAC-dependent wait in this codebase is already deliberately generous about human
-    reaction time (e.g. _wait_for_uac_approval()'s own docstring).
-    """
-    if check_winappdriver_running():
-        return
-    ensure_webview2_accessibility_env_var()
-    print("WinAppDriver isn't running -- starting it elevated (this needs one admin approval)...")
-    _run_powershell(f'Start-Process -FilePath "{winappdriver_path}" -Verb RunAs')
-    deadline = time.monotonic() + startup_timeout
-    while time.monotonic() < deadline:
-        if check_winappdriver_running():
-            return
-        time.sleep(0.5)
-    raise RuntimeError(
-        "WinAppDriver did not start within the timeout -- was the admin prompt approved?"
-    )
 
 
 def find_node() -> str | None:
@@ -305,13 +252,22 @@ def ensure_browsers_exit_cleanly() -> None:
 
 def ensure_target_prerequisites() -> str:
     """Runs all Target-PC prerequisite checks, auto-installing/fixing what it can.
-    Returns the resolved WinAppDriver executable path. Raises RuntimeError if a step
+    Returns the resolved WinAppDriver executable path (informational -- Session resolves
+    its own path independently; see factory/session.py). Raises RuntimeError if a step
     needed an admin approval that wasn't given.
+
+    Deliberately does NOT start WinAppDriver itself (moved to factory/session.py,
+    2026-10-07) -- this is a one-time, standalone pass/fail gate over machine-level setup
+    only (dev mode, WinAppDriver installed, Python packages, browser profile cleanup).
+    check_winappdriver_running() below is just a read-only status printout, not an action.
     """
     ensure_developer_mode()
     winappdriver_path = ensure_winappdriver_installed()
-    ensure_winappdriver_running(winappdriver_path)
     ensure_python_packages()
     ensure_browsers_exit_cleanly()
+    if check_winappdriver_running():
+        print("WinAppDriver: already running.")
+    else:
+        print("WinAppDriver: not running yet -- Session starts it elevated on first use.")
     print("PC checks OK.")
     return winappdriver_path
