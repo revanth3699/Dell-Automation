@@ -44,8 +44,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.mock_server import start_mock_server
-from prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
+from utils.mock_server import start_mock_server
+from utils.prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow

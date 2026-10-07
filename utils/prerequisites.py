@@ -8,10 +8,13 @@ actually launch on this machine, the required Python packages, and browser-profi
 cleanup. Node.js (for the GlassFloor mock server, Sec 5.3a) is checked separately via
 ensure_mock_server_prerequisites since it's only needed for that launch mode.
 
-Lives at the repo root, not inside factory/ (moved here 2026-10-07, per explicit user
-direction): this is a standalone, one-time pass/fail gate run once before automation
-starts, not a Factory-layer component -- if all checks pass, automation may proceed; if
-not, it must not. factory/driver_factory.py is the sole owner of actually finding,
+Lives in utils/, not inside factory/ (moved to repo root 2026-10-07, then here, per
+explicit user direction: utility modules that help drive the framework -- this,
+coordination_client.py, mock_server.py, ocr.py, retry.py, wait_utils.py -- belong
+together in utils/, separate from factory/'s drivers/sessions/config). This is a
+standalone, one-time pass/fail gate run once before automation starts, not a
+Factory-layer component -- if all checks pass, automation may proceed; if not, it must
+not. factory/driver_factory.py is the sole owner of actually finding,
 launching, and killing the real WinAppDriver process ("the actual driver must be yielded
 by driver_factory") -- this module calls into those same two functions
 (ensure_winappdriver_running()/kill_winappdriver()) for its own one-time launch-then-close

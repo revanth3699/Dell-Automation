@@ -16,10 +16,10 @@ This module is also the sole owner of the actual WinAppDriver PROCESS's lifecycl
 finding it, checking if it's running, launching it elevated, killing it (ensure_
 winappdriver_running()/kill_winappdriver() below) -- per explicit user direction
 (2026-10-07): "the actual driver must be yielded by driver_factory." factory/session.py
-calls into these rather than owning this logic itself. The standalone prerequisites.py
-gate (moved out of factory/ entirely, repo root) also calls these same two functions for
-its own one-time launch-then-close self-test -- one source of truth either way, not
-duplicated per caller.
+calls into these rather than owning this logic itself. The standalone utils/
+prerequisites.py gate (not part of this factory/ package) also calls these same two
+functions for its own one-time launch-then-close self-test -- one source of truth either
+way, not duplicated per caller.
 """
 
 import socket
@@ -86,8 +86,8 @@ def ensure_winappdriver_running(startup_timeout: float = 90.0) -> None:
     """Starts WinAppDriver elevated. Idempotent: no-ops if something is already listening
     on the port. The one place that actually launches WinAppDriver for any caller --
     factory/session.py's Session (for a real automation run) and the standalone
-    prerequisites.py gate (for its own launch-then-close self-test) both call this same
-    function rather than each owning their own copy.
+    utils/prerequisites.py gate (for its own launch-then-close self-test) both call this
+    same function rather than each owning their own copy.
 
     Confirmed via testing: a plain elevated `Start-Process -Verb RunAs` is sufficient to
     keep WinAppDriver alive (no stdin-redirection tricks needed, despite an earlier,

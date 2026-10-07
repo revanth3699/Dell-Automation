@@ -1,4 +1,4 @@
-"""
+﻿"""
 BaseComponent: wraps a WinAppDriverSession + locator with explicit-wait find, click,
 type, and a screenshot taken after every action. See PROJECT_PLAN.md Sec 4.4.
 
@@ -15,8 +15,8 @@ from typing import Optional
 from loguru import logger
 
 from factory.logger_factory import LoggerFactory
-from factory.retry import retry
-from factory.wait_utils import poll_until
+from utils.retry import retry
+from utils.wait_utils import poll_until
 from reports.action_reporter import ActionReporter
 
 LoggerFactory.ensure_console()  # colored console logging works even before any flow
@@ -59,7 +59,7 @@ class BaseComponent:
     # we act on it if the page transitions in between (e.g. password page -> OTP page) --
     # WinAppDriver returns a plain 500 Internal Error for this, not a distinguishable
     # "stale element" error. @retry re-finds the element each attempt (the whole method
-    # body re-runs), which covers it -- see factory/retry.py.
+    # body re-runs), which covers it -- see utils/retry.py.
     @retry(attempts=2, delay=0.5)
     def _click_once(self) -> None:
         self._find().click()

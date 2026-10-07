@@ -1,4 +1,4 @@
-"""
+﻿"""
 Session: owns the full lifecycle of one automation run against the Target PC app -- the
 app process itself, its WinAppDriver attach, and (when opened) the external sign-in
 browser's WinAppDriver attach. All three live and die together.
@@ -28,7 +28,7 @@ direction: "the actual driver must be yielded by driver_factory"). factory/
 driver_factory.py is the sole owner of finding/launching/killing WinAppDriver itself
 (ensure_winappdriver_running()/kill_winappdriver(), imported below); this module just
 calls into it at the right points (before launching/attaching the app, and during
-close()). The standalone prerequisites.py gate (repo root, not part of this factory/
+close()). The standalone utils/prerequisites.py gate (not part of this factory/
 package) calls the same two driver_factory functions for its own one-time
 launch-then-close self-test -- one source of truth either way, not duplicated per caller.
 """
@@ -56,7 +56,7 @@ from factory.config import (
     WINAPPDRIVER_URL,
 )
 from factory.driver_factory import WinAppDriverSession, ensure_winappdriver_running, kill_winappdriver
-from factory.wait_utils import poll_until
+from utils.wait_utils import poll_until
 
 LAUNCH_ATTEMPT_TIMEOUT = 35.0  # Confirmed necessary via testing: a short client timeout
                                # (previously tried: 5s) caused launches to silently fail

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Target-side pairing-code screens, shown once Source PC is found (i.e. once
 PairingDiscoveryScreen's "We're looking for your other PC" heading clears -- see
 components/target/pairing_discovery_screen.py). Confirmed from a user-supplied flow
@@ -20,7 +20,7 @@ out to be required once this runs live, add an explicit click to enter_code().
 """
 
 from components.base_component import BaseComponent, ComponentActionError
-from factory.wait_utils import poll_until
+from utils.wait_utils import poll_until
 from locators.target.confirm_accounts_dialog import (
     CONFIRM_ACCOUNTS_CONTINUE_BUTTON_LOCATOR,
     CONFIRM_ACCOUNTS_HEADING_LOCATOR,

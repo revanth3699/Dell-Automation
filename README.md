@@ -29,7 +29,7 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    ```
 
 **WinAppDriver, Windows Developer Mode, and required Python packages are all
-auto-detected and auto-installed/enabled on first run** -- `prerequisites.py`'s
+auto-detected and auto-installed/enabled on first run** -- `utils/prerequisites.py`'s
 `ensure_target_prerequisites()` runs at the start of every `role_runner` invocation and
 installs WinAppDriver via `winget` if it's missing (one admin approval prompt), enables
 Developer Mode if it's off (another admin prompt), and confirms WinAppDriver can launch

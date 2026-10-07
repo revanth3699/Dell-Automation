@@ -1,4 +1,4 @@
-"""
+﻿"""
 RoleRunner: the real entry point for one independent automation process -- chains this
 machine's own role (Target or Source) through its full flow sequence (sign-in/discovery
 -> pairing), given just a role and a run_id shared between the two independent
@@ -18,7 +18,7 @@ Usage:
     python -m orchestration.role_runner --role source --run-id my-migration
 
 Both machines must be given the SAME run_id -- a plain correlation label (not a secret),
-agreed on by whoever starts the two independent runs (see factory/coordination_client.py).
+agreed on by whoever starts the two independent runs (see utils/coordination_client.py).
 
 Env vars (role-specific, see each branch below):
     Target: DDA_TARGET_BUILD_PATH, DDA_TARGET_SIGNIN_USERNAME,
@@ -36,8 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.coordination_client import CoordinationClient
-from prerequisites import ensure_target_prerequisites
+from utils.coordination_client import CoordinationClient
+from utils.prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.source.pairing_flow import SourcePairingFlow
 from flows.source.transfer_flow import SourceTransferFlow
@@ -69,7 +69,7 @@ class RoleRunner:
         arguments (see module docstring for which ones each role needs)."""
         # Standalone machine-level setup gate (dev mode, WinAppDriver installed +
         # launchable, Python packages, browser cleanup) -- same checks regardless of
-        # role. Lives at the repo root, not in factory/ (see its own module docstring,
+        # role. Lives in utils/, not in factory/ (see its own module docstring,
         # 2026-10-07). Does not leave WinAppDriver running: Session, created below,
         # launches its own independently via factory.driver_factory, the moment it's
         # actually needed.

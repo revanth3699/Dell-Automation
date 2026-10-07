@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from prerequisites import ensure_target_prerequisites
+from utils.prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep

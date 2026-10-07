@@ -25,7 +25,7 @@ from components.target.common_dialogs import TrustNetworkDialog
 from components.target.pairing_discovery_screen import PairingDiscoveryScreen
 from components.target.sign_in_screen import WelcomeBackScreen, WelcomeScreen
 from factory.config import TARGET_PROCESS_NAME
-from prerequisites import ensure_target_prerequisites
+from utils.prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session, _find_main_window_hwnd
 from flows.target.pairing_flow import TargetPairingFlow
 

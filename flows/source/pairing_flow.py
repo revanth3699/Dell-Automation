@@ -1,4 +1,4 @@
-"""
+﻿"""
 SourcePairingFlow: drives the Source PC from the Welcome screen through to a paired
 state, continuously publishing the current pairing code to the Coordination Service so
 the independent Target-side process can read and enter it.
@@ -33,7 +33,7 @@ from components.source.searching_screen import SearchingScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
 from factory.config import SOURCE_PROCESS_NAME
-from factory.coordination_client import PAIRING_CODE_KEY, CoordinationClient
+from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
 from factory.session import _find_main_window_hwnd
 

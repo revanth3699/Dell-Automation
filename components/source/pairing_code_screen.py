@@ -1,4 +1,4 @@
-"""Source PC's pairing-code display screen ("Let's finish linking your PCs.") -- shows a
+﻿"""Source PC's pairing-code display screen ("Let's finish linking your PCs.") -- shows a
 rotating 6-digit verification code that the Target PC must enter. Confirmed live
 (2026-10-06) via Phase 0 spike against the real Source build.
 
@@ -10,7 +10,7 @@ not a fixed index. The app's own logs redact the code value
 
 read_code() works around this with two layers of fallback, both cross-checked against
 the UIA-confirmed digits before being trusted:
-1. Whole-screenshot OCR (Windows' built-in engine, factory/ocr.py) -- cheap, worked
+1. Whole-screenshot OCR (Windows' built-in engine, utils/ocr.py) -- cheap, worked
    reliably in initial testing.
 2. Confirmed live (2026-10-06) on a SECOND machine: whole-screenshot OCR can fail to
    recognize the code's digits at all (the boxed digits are simply absent from the
@@ -46,7 +46,7 @@ from PIL import Image
 
 from components.base_component import BaseComponent
 from factory.config import SOURCE_PROCESS_NAME
-from factory.ocr import recognize_text
+from utils.ocr import recognize_text
 from factory.session import _find_main_window_hwnd, bring_window_to_foreground
 from locators.source.pairing_code_screen import (
     CANCEL_BUTTON_LOCATOR,

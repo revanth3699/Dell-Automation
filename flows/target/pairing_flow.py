@@ -1,4 +1,4 @@
-"""
+﻿"""
 TargetPairingFlow: orchestrates the pairing-code exchange once SignInFlow.run() has
 reached the pairing-discovery screen and SignInFlow.wait_for_source_pc() has confirmed
 Source PC was found. Confirmed sequence from a user-supplied flow diagram (dell screens
@@ -10,14 +10,14 @@ here, a later phase of the migration, not part of pairing).
 
 Target-PC-only, same as SignInFlow -- Source PC's side of this exchange (showing its own
 code) lives under flows/source/pairing_flow.py (SourcePairingFlow), which publishes the
-current code to the Coordination Service (see factory/coordination_client.py) for this
+current code to the Coordination Service (see utils/coordination_client.py) for this
 flow to fetch -- see enter_pairing_code_from_coordination_service() below.
 """
 
 from typing import Optional
 
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
-from factory.coordination_client import PAIRING_CODE_KEY, CoordinationClient
+from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
 
 

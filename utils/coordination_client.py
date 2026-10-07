@@ -14,7 +14,7 @@ import requests
 from loguru import logger
 
 from factory.config import COORDINATION_SERVICE_URL
-from factory.wait_utils import poll_until
+from utils.wait_utils import poll_until
 
 # Shared key name for the pairing-code hand-off -- defined once here so
 # flows/source/pairing_flow.py (publisher) and flows/target/pairing_flow.py (fetcher)
