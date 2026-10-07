@@ -1,6 +1,4 @@
-"""Source PC's "Do you trust the <network> network?" dialog. Confirmed from a
-user-supplied screenshot (2026-10-06) -- NOT yet confirmed live (didn't appear in the one
-live run done so far, likely conditional on whether this network was already trusted).
+"""Source PC's "Do you trust the <network> network?" dialog. Confirmed live (2026-10-07).
 Mirrors components/target/common_dialogs.py's TrustNetworkDialog shape.
 """
 

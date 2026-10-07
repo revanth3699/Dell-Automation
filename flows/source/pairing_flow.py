@@ -4,12 +4,18 @@ state, continuously publishing the current pairing code to the Coordination Serv
 the independent Target-side process can read and enter it.
 
 Confirmed live (2026-10-06) via Phase 0 spike against the real Source build. Sequence:
-Welcome screen -> click "Let's get started" -> trust-network dialog (accepted if shown;
-confirmed from a user-supplied screenshot, not yet seen live -- likely conditional on
-whether this network was already trusted) -> "We're searching for your new PC."
-(discovery screen -- confirmed it does NOT advance on its own; it waits for a real
-Target PC to become network-discoverable, confirmed by waiting 15s+ with no change) ->
-pairing-code screen ("Let's finish linking your PCs.").
+Welcome screen -> click "Let's get started" -> trust-network dialog (accepted if shown)
+-> "We're searching for your new PC." (discovery screen -- confirmed it does NOT advance
+on its own; it waits for a real Target PC to become network-discoverable, confirmed by
+waiting 15s+ with no change) -> pairing-code screen ("Let's finish linking your PCs.").
+
+Confirmed live (2026-10-07): the trust-network dialog ("Do you trust the <network>
+network?") is NOT reliably confined to the point right after "Let's get started" --
+a user-supplied screenshot caught it layered over the pairing-code screen itself, well
+into the publish loop. Same "can appear unpredictably, race it continuously" lesson
+already learned for Target's ConfirmAccountsDialog/CloseAppsDialog. Both the
+discovery-wait loop and _publish_loop() now check/accept it on every iteration, not just
+once up front -- a one-shot check right after "Let's get started" is not enough.
 
 The pairing code rotates every ~59s (confirmed directly by the user, 2026-10-06).
 run() keeps re-reading and re-publishing the CURRENT code on a shorter
@@ -94,6 +100,8 @@ class SourcePairingFlow:
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
+                if self.trust_network_dialog.accept(timeout=0.1):
+                    self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
                 if self.pairing_code_screen.is_showing(timeout=2.0):
                     break
                 if not self.searching_screen.is_showing(timeout=1.0) and not self.pairing_code_screen.is_showing(timeout=1.0):
@@ -125,6 +133,9 @@ class SourcePairingFlow:
 
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self.trust_network_dialog.accept(timeout=0.1):
+                self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
+                continue
             if not self.pairing_code_screen.is_showing(timeout=1.0):
                 self.log.success("Pairing-code screen no longer showing -- Target has paired")
                 return

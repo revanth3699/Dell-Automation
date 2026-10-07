@@ -1,8 +1,7 @@
 """Locators for components.source.trust_network_dialog.TrustNetworkDialog ("Do you trust
-the <network> network?"). Confirmed from a user-supplied screenshot (2026-10-06) -- NOT
-yet confirmed live against the real Source build (it didn't appear in the one live run
-done so far, likely because it's conditional on network-trust state). Treat as
-best-effort until seen live.
+the <network> network?"). Confirmed live (2026-10-07): heading text and the "Yes,
+continue" button both match a real run's screenshot exactly, including appearing layered
+over the pairing-code screen itself (see flows/source/pairing_flow.py's docstring).
 """
 
 HEADING_LOCATOR = ("xpath", '//*[contains(@Name, "Do you trust the")]')
