@@ -220,7 +220,7 @@ def _launch_then_attach(
 ) -> WinAppDriverSession:
     # Session ensures WinAppDriver is actually running before it ever tries to
     # launch/attach the app, via factory.driver_factory (see module docstring) -- not
-    # dependent on the standalone prerequisites.ensure_target_prerequisites() gate
+    # dependent on the standalone prerequisites.ensure_prerequisites() gate
     # having been called first, even though role_runner.py happens to call that too for
     # the separate machine-level setup checks it covers.
     ensure_winappdriver_running()

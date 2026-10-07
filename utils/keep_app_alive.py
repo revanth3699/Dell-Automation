@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from factory import capabilities as caps
 from factory.config import TARGET_PROCESS_NAME, WINAPPDRIVER_URL
-from utils.prerequisites import ensure_target_prerequisites
+from utils.prerequisites import ensure_prerequisites
 from factory.session import _find_main_window_hwnd
 import requests
 
@@ -47,7 +47,7 @@ def is_winappdriver_alive() -> bool:
 
 def relaunch(build_path: str, app_arguments: list[str]) -> str:
     P("relaunching: ensuring prerequisites (restarts WinAppDriver if needed)")
-    ensure_target_prerequisites()
+    ensure_prerequisites()
 
     P(f"relaunching: starting app with args {app_arguments}")
     subprocess.Popen(

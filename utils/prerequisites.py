@@ -1,7 +1,10 @@
-"""
-Prerequisite checks + auto-install for running WinAppDriver-based automation against the
-Target PC app. Target-only (see PROJECT_PLAN.md Sec 10 open item: Source's launch flow is
-still undetermined, pending Source PC build access).
+﻿"""
+Prerequisite checks + auto-install for running WinAppDriver-based automation. Despite the
+function's older name (ensure_target_prerequisites, renamed to ensure_prerequisites
+2026-10-07), these checks are machine-level, not role-specific, and this gate is called
+for BOTH roles from orchestration/role_runner.py -- the "Target-only" framing from when
+Source's launch flow was still unconfirmed no longer applies; Source has run this same
+gate live since Source pairing/transfer landed.
 
 Covers, in order: Windows Developer Mode, WinAppDriver installed, that WinAppDriver can
 actually launch on this machine, the required Python packages, and browser-profile
@@ -146,7 +149,7 @@ def ensure_node_installed() -> str:
 
 
 def ensure_mock_server_prerequisites() -> str:
-    """Node.js check, separate from ensure_target_prerequisites() since it's only needed
+    """Node.js check, separate from ensure_prerequisites() since it's only needed
     for the GlassFloor mock-server launch mode, not plain app launches. Returns the
     resolved node.exe path.
     """
@@ -248,11 +251,11 @@ def ensure_browsers_exit_cleanly() -> None:
         _disable_autofill_suggestions(preferences_path)
 
 
-def ensure_target_prerequisites() -> str:
-    """Runs all Target-PC prerequisite checks, auto-installing/fixing what it can.
-    Returns the resolved WinAppDriver executable path (informational -- Session resolves
-    its own path independently via factory.driver_factory). Raises RuntimeError if a step
-    needed an admin approval that wasn't given.
+def ensure_prerequisites() -> str:
+    """Runs all machine-level prerequisite checks (either role), auto-installing/fixing
+    what it can. Returns the resolved WinAppDriver executable path (informational --
+    Session resolves its own path independently via factory.driver_factory). Raises
+    RuntimeError if a step needed an admin approval that wasn't given.
 
     This is the one standalone pass/fail gate: if every step here passes, automation may
     proceed; if any step fails, it must not. It launches WinAppDriver exactly once, as a

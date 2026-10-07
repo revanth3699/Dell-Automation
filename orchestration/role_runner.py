@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.coordination_client import CoordinationClient
-from utils.prerequisites import ensure_target_prerequisites
+from utils.prerequisites import ensure_prerequisites
 from factory.session import MachineRole, Session
 from flows.source.pairing_flow import SourcePairingFlow
 from flows.source.transfer_flow import SourceTransferFlow
@@ -73,7 +73,7 @@ class RoleRunner:
         # 2026-10-07). Does not leave WinAppDriver running: Session, created below,
         # launches its own independently via factory.driver_factory, the moment it's
         # actually needed.
-        ensure_target_prerequisites()
+        ensure_prerequisites()
         ActionReporter.start_run(run_id, role.value)
 
         try:

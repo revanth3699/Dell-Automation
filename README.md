@@ -34,7 +34,7 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
 
 **WinAppDriver, Windows Developer Mode, and required Python packages are all
 auto-detected and auto-installed/enabled on first run** -- `utils/prerequisites.py`'s
-`ensure_target_prerequisites()` runs at the start of every `role_runner` invocation and
+`ensure_prerequisites()` runs at the start of every `role_runner` invocation and
 installs WinAppDriver via `winget` if it's missing (one admin approval prompt), enables
 Developer Mode if it's off (another admin prompt), and confirms WinAppDriver can launch
 elevated as a one-time self-test (then closes it again) -- `factory/session.py` starts
@@ -182,7 +182,7 @@ Both machines run `python -m orchestration.role_runner --role {target|source} --
 as fully independent processes -- there is no single process holding both machines'
 sessions. `RoleRunner.run()` does the same four things for either role:
 
-1. **`ensure_target_prerequisites()`** (`utils/prerequisites.py`) -- enables Developer
+1. **`ensure_prerequisites()`** (`utils/prerequisites.py`) -- enables Developer
    Mode and installs WinAppDriver if needed (each a one-time admin-approval prompt),
    confirms WinAppDriver can actually launch on this machine via a launch-then-close
    self-test (`factory.driver_factory.ensure_winappdriver_running()` +
