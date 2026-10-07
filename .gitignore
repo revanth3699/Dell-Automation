@@ -10,10 +10,18 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Generated test artifacts (screenshots, logs) -- see reports/output/.gitkeep, which
-# this leaves tracked since only the two subdirs below are ignored.
-reports/output/screenshots/
+# Generated test artifacts (logs, per-run reports) -- see reports/output/.gitkeep, which
+# this leaves tracked since only the paths below are ignored. Each run is a single flat
+# file "<run_id>_<role>_<datetime>.html" directly under reports/output/ (no screenshots/
+# or other sidecar folders -- the report is the only file a run produces), plus the
+# generated index.html -- reports/output/*.html covers all of them.
+reports/output/*.html
 reports/output/logs/
+
+# Legacy flat screenshot dump from before the reporting pipeline embedded screenshots
+# directly in each report -- nothing writes here anymore, but ~560 old PNGs are still on
+# disk from earlier manual runs; keep them out of `git status` noise.
+reports/output/screenshots/
 
 # Coordination Service's own runtime state (published pairing codes etc.) -- generated
 # at runtime, never meant to be committed, same reasoning as reports/output/ above.

@@ -39,6 +39,7 @@ fix.
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -48,6 +49,8 @@ from factory.prerequisites import ensure_mock_server_prerequisites, ensure_targe
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow
+from reports.action_reporter import ActionReporter
+from reports.html_report_builder import build_report
 
 
 def _prompt_for_path(label: str) -> str:
@@ -81,6 +84,9 @@ parser.add_argument("--pairing-code", help="If given, enters this literal pairin
 parser.add_argument("--run-id", help="If given (and --pairing-code isn't), fetches the current "
                      "pairing code from the Coordination Service for this run_id instead")
 args = parser.parse_args()
+
+_run_id = args.run_id or f"signin-{int(time.time())}"
+ActionReporter.start_run(_run_id, "target")
 
 username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
 password = _require_env("DDA_TARGET_SIGNIN_PASSWORD")
@@ -123,3 +129,6 @@ else:
     print("No --pairing-code/--run-id given -- waiting for Source PC to be found (up to 10 min)...")
     if sign_in_flow.wait_for_source_pc():
         print("Source PC found. Re-run with --pairing-code <code> or --run-id <id> to enter it automatically.")
+
+report_path = build_report()
+print(f"Report written to: {report_path}")

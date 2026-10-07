@@ -22,6 +22,7 @@ args (see PROJECT_PLAN.md Sec 4.7/7):
 
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -29,6 +30,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pytest
 
 from factory.session import MachineRole, Session
+from reports.action_reporter import ActionReporter
+from reports.html_report_builder import build_report
+
+# One run_id per pytest process invocation (not per-test) -- an entire pytest run is "one
+# run" for reporting purposes, matching the orchestration/role_runner.py side's semantics.
+# Tests are Target-only today (see tracking/IMPLEMENTATION_STATUS.md), hence role="target".
+_RUN_ID = f"pytest-{datetime.now():%Y%m%d-%H%M%S}"
+_ROLE = "target"
 
 
 def _require_env(name: str) -> str:
@@ -36,6 +45,14 @@ def _require_env(name: str) -> str:
     if not value:
         pytest.skip(f"{name} not set -- see tests/conftest.py's module docstring")
     return value
+
+
+def pytest_configure(config):
+    ActionReporter.start_run(_RUN_ID, _ROLE)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    build_report()
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -47,6 +64,18 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    # Attributes every action recorded during this test (by BaseComponent, via
+    # ActionReporter.current()) to this test's nodeid, so the report can group by test
+    # instead of just by component -- see reports/html_report_builder.py's _group_records.
+    ActionReporter.current().set_test_name(item.nodeid)
+    try:
+        yield
+    finally:
+        ActionReporter.current().clear_test_name()
 
 
 @pytest.fixture

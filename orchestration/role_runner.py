@@ -44,6 +44,8 @@ from flows.source.transfer_flow import SourceTransferFlow
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow
 from flows.target.transfer_flow import TargetTransferFlow
+from reports.action_reporter import ActionReporter
+from reports.html_report_builder import build_report
 
 
 class RoleRunnerError(Exception):
@@ -66,13 +68,19 @@ class RoleRunner:
         paths come from environment variables only, never passed through here as
         arguments (see module docstring for which ones each role needs)."""
         ensure_target_prerequisites()  # same generic checks (dev mode, WinAppDriver) regardless of role
+        ActionReporter.start_run(run_id, role.value)
 
-        if role is MachineRole.TARGET:
-            RoleRunner._run_target(run_id)
-        elif role is MachineRole.SOURCE:
-            RoleRunner._run_source(run_id)
-        else:
-            raise RoleRunnerError(f"Unknown role: {role!r}")
+        try:
+            if role is MachineRole.TARGET:
+                RoleRunner._run_target(run_id)
+            elif role is MachineRole.SOURCE:
+                RoleRunner._run_source(run_id)
+            else:
+                raise RoleRunnerError(f"Unknown role: {role!r}")
+        finally:
+            # A report must exist for this run whether it succeeded or failed -- see
+            # PROJECT_PLAN.md Sec 4.8.
+            build_report()
 
     @staticmethod
     def _run_target(run_id: str) -> None:

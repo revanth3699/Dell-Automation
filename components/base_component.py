@@ -2,13 +2,14 @@
 BaseComponent: wraps a WinAppDriverSession + locator with explicit-wait find, click,
 type, and a screenshot taken after every action. See PROJECT_PLAN.md Sec 4.4.
 
-Minimal version -- full ActionReporter/report.html wiring (Sec 4.8) not built yet;
-screenshots are saved to reports/output/ with a timestamped filename in the meantime so
-nothing is lost once that layer exists.
+Full ActionReporter/report.html wiring (Sec 4.8): every click()/click_at_center()/
+type_text()/get_text() times itself and calls reports.action_reporter.ActionReporter
+.current().record(...) right alongside the existing loguru logging, and screenshots are
+captured via that same reporter (reports/output/<run_id>_<role>/screenshots/) instead of
+the old flat reports/output/screenshots/ directory.
 """
 
 import time
-from pathlib import Path
 from typing import Optional
 
 from loguru import logger
@@ -16,11 +17,10 @@ from loguru import logger
 from factory.logger_factory import LoggerFactory
 from factory.retry import retry
 from factory.wait_utils import poll_until
+from reports.action_reporter import ActionReporter
 
 LoggerFactory.ensure_console()  # colored console logging works even before any flow
                                  # calls LoggerFactory.get_logger(role)
-
-SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "reports" / "output" / "screenshots"
 
 
 class ComponentActionError(Exception):
@@ -45,15 +45,15 @@ class BaseComponent:
         element = poll_until(_try, timeout=self.timeout, interval=0.5)
         return element
 
-    def _screenshot(self, action: str) -> str:
-        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        filename = f"{int(time.time() * 1000)}_{self.name.replace(' ', '_')}_{action}.png"
-        path = SCREENSHOT_DIR / filename
-        try:
-            path.write_bytes(self.session.get_screenshot_as_png())
-        except Exception:
-            pass  # evidence capture must never mask the real failure
-        return str(path)
+    def _screenshot(self, action: str) -> Optional[str]:
+        return ActionReporter.current().capture_screenshot(self.session, self.name, action)
+
+    def _record(self, action: str, status: str, duration_ms: float, error: Optional[str] = None,
+                screenshot: Optional[str] = None) -> None:
+        ActionReporter.current().record(
+            component=self.name, action=action, status=status,
+            duration_ms=duration_ms, error=error, screenshot=screenshot,
+        )
 
     # Confirmed via testing: an element found via _find() can become invalid by the time
     # we act on it if the page transitions in between (e.g. password page -> OTP page) --
@@ -76,16 +76,21 @@ class BaseComponent:
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
+        start = time.monotonic()
         try:
             self._click_once()
         except Exception as exc:
-            self._screenshot("click_FAILED")
+            duration_ms = (time.monotonic() - start) * 1000
+            screenshot = self._screenshot("click_FAILED")
             logger.error(f"click failed on {self.name!r}: {exc}")
+            self._record("click", "fail", duration_ms, error=str(exc), screenshot=screenshot)
             raise ComponentActionError(f"click failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
+        duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click succeeded on {self.name!r}")
-        self._screenshot("click")
+        screenshot = self._screenshot("click")
+        self._record("click", "pass", duration_ms, screenshot=screenshot)
 
     @retry(attempts=2, delay=0.5)
     def _click_at_center_once(self) -> None:
@@ -100,30 +105,40 @@ class BaseComponent:
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
+        start = time.monotonic()
         try:
             self._click_at_center_once()
         except Exception as exc:
-            self._screenshot("click_at_center_FAILED")
+            duration_ms = (time.monotonic() - start) * 1000
+            screenshot = self._screenshot("click_at_center_FAILED")
             logger.error(f"click_at_center failed on {self.name!r}: {exc}")
+            self._record("click_at_center", "fail", duration_ms, error=str(exc), screenshot=screenshot)
             raise ComponentActionError(f"click_at_center failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
+        duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click_at_center succeeded on {self.name!r}")
-        self._screenshot("click_at_center")
+        screenshot = self._screenshot("click_at_center")
+        self._record("click_at_center", "pass", duration_ms, screenshot=screenshot)
 
     @retry(attempts=2, delay=0.5)
     def _type_once(self, text: str) -> None:
         self._find().send_keys(text)
 
     def type_text(self, text: str) -> None:
+        start = time.monotonic()
         try:
             self._type_once(text)
         except Exception as exc:
-            self._screenshot("type_FAILED")
+            duration_ms = (time.monotonic() - start) * 1000
+            screenshot = self._screenshot("type_FAILED")
             logger.error(f"type failed on {self.name!r}: {exc}")
+            self._record("type", "fail", duration_ms, error=str(exc), screenshot=screenshot)
             raise ComponentActionError(f"type failed on {self.name!r}: {exc}") from exc
+        duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"type succeeded on {self.name!r}")
-        self._screenshot("type")
+        screenshot = self._screenshot("type")
+        self._record("type", "pass", duration_ms, screenshot=screenshot)
 
     @retry(attempts=2, delay=0.5)
     def _get_text_once(self) -> str:
@@ -133,14 +148,21 @@ class BaseComponent:
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
+        start = time.monotonic()
         try:
             text = self._get_text_once()
         except Exception as exc:
+            duration_ms = (time.monotonic() - start) * 1000
+            screenshot = self._screenshot("get_text_FAILED")
             logger.error(f"get_text failed on {self.name!r}: {exc}")
+            self._record("get_text", "fail", duration_ms, error=str(exc), screenshot=screenshot)
             raise
         finally:
             self.timeout = original_timeout
+        duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"get_text succeeded on {self.name!r}: {text!r}")
+        screenshot = self._screenshot("get_text")
+        self._record("get_text", "pass", duration_ms, screenshot=screenshot)
         return text
 
     def exists(self, timeout: float = 2.0) -> bool:
