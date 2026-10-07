@@ -129,6 +129,22 @@ class TargetTransferFlow:
                         # Confirmed live (2026-10-07): the first click can report
                         # success without the button actually activating -- still on
                         # "ready to move" with nothing else blocking, so re-click it.
+                        #
+                        # Reported (2026-10-07): a live run went stale on this screen at
+                        # 0%/0%. One re-click away from this exact check having missed
+                        # the progress screen on a transient false-negative is enough to
+                        # fire Migrate now again right as the real transfer is starting
+                        # -- same "re-check right before acting" rule already used for
+                        # the close-apps/confirm-accounts dialogs elsewhere in this file.
+                        # Stop (don't click) the moment this text is confirmed, even if
+                        # the check at the top of this loop iteration missed it.
+                        if self.transfer_progress_screen.is_showing(timeout=0.3):
+                            self.log.success(
+                                "Transfer in progress -- \"We're moving your files and "
+                                "settings\" confirmed right before a re-click -- not "
+                                "clicking again"
+                            )
+                            return
                         self.log.warning(
                             "Still on \"Your files are ready to move\" -- Migrate now "
                             "may not have registered, clicking it again"
