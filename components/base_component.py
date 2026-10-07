@@ -10,7 +10,7 @@ the old flat reports/output/screenshots/ directory.
 """
 
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from loguru import logger
 
@@ -45,14 +45,19 @@ class BaseComponent:
         element = poll_until(_try, timeout=self.timeout, interval=0.5)
         return element
 
-    def _screenshot(self, action: str) -> Optional[str]:
+    def _screenshot(self, action: str) -> Tuple[Optional[str], Optional[str]]:
+        """Returns (screenshot_b64, screenshot_error) -- see ActionReporter.capture_screenshot()
+        for why the error is surfaced rather than silently swallowed (confirmed live
+        2026-10-07: a window-closing action's own screenshot can race the window actually
+        closing and fail, even though the action itself reported PASS)."""
         return ActionReporter.current().capture_screenshot(self.session, self.name, action)
 
     def _record(self, action: str, status: str, duration_ms: float, error: Optional[str] = None,
-                screenshot: Optional[str] = None) -> None:
+                screenshot: Optional[str] = None, screenshot_error: Optional[str] = None) -> None:
         ActionReporter.current().record(
             component=self.name, action=action, status=status,
             duration_ms=duration_ms, error=error, screenshot=screenshot,
+            screenshot_error=screenshot_error,
         )
 
     # Confirmed via testing: an element found via _find() can become invalid by the time
@@ -81,16 +86,17 @@ class BaseComponent:
             self._click_once()
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
-            screenshot = self._screenshot("click_FAILED")
+            screenshot, screenshot_error = self._screenshot("click_FAILED")
             logger.error(f"click failed on {self.name!r}: {exc}")
-            self._record("click", "fail", duration_ms, error=str(exc), screenshot=screenshot)
+            self._record("click", "fail", duration_ms, error=str(exc), screenshot=screenshot,
+                         screenshot_error=screenshot_error)
             raise ComponentActionError(f"click failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click succeeded on {self.name!r}")
-        screenshot = self._screenshot("click")
-        self._record("click", "pass", duration_ms, screenshot=screenshot)
+        screenshot, screenshot_error = self._screenshot("click")
+        self._record("click", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
 
     @retry(attempts=2, delay=0.5)
     def _click_at_center_once(self) -> None:
@@ -110,16 +116,17 @@ class BaseComponent:
             self._click_at_center_once()
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
-            screenshot = self._screenshot("click_at_center_FAILED")
+            screenshot, screenshot_error = self._screenshot("click_at_center_FAILED")
             logger.error(f"click_at_center failed on {self.name!r}: {exc}")
-            self._record("click_at_center", "fail", duration_ms, error=str(exc), screenshot=screenshot)
+            self._record("click_at_center", "fail", duration_ms, error=str(exc), screenshot=screenshot,
+                         screenshot_error=screenshot_error)
             raise ComponentActionError(f"click_at_center failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click_at_center succeeded on {self.name!r}")
-        screenshot = self._screenshot("click_at_center")
-        self._record("click_at_center", "pass", duration_ms, screenshot=screenshot)
+        screenshot, screenshot_error = self._screenshot("click_at_center")
+        self._record("click_at_center", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
 
     @retry(attempts=2, delay=0.5)
     def _type_once(self, text: str) -> None:
@@ -131,14 +138,15 @@ class BaseComponent:
             self._type_once(text)
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
-            screenshot = self._screenshot("type_FAILED")
+            screenshot, screenshot_error = self._screenshot("type_FAILED")
             logger.error(f"type failed on {self.name!r}: {exc}")
-            self._record("type", "fail", duration_ms, error=str(exc), screenshot=screenshot)
+            self._record("type", "fail", duration_ms, error=str(exc), screenshot=screenshot,
+                         screenshot_error=screenshot_error)
             raise ComponentActionError(f"type failed on {self.name!r}: {exc}") from exc
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"type succeeded on {self.name!r}")
-        screenshot = self._screenshot("type")
-        self._record("type", "pass", duration_ms, screenshot=screenshot)
+        screenshot, screenshot_error = self._screenshot("type")
+        self._record("type", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
 
     @retry(attempts=2, delay=0.5)
     def _get_text_once(self) -> str:
@@ -153,16 +161,17 @@ class BaseComponent:
             text = self._get_text_once()
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
-            screenshot = self._screenshot("get_text_FAILED")
+            screenshot, screenshot_error = self._screenshot("get_text_FAILED")
             logger.error(f"get_text failed on {self.name!r}: {exc}")
-            self._record("get_text", "fail", duration_ms, error=str(exc), screenshot=screenshot)
+            self._record("get_text", "fail", duration_ms, error=str(exc), screenshot=screenshot,
+                         screenshot_error=screenshot_error)
             raise
         finally:
             self.timeout = original_timeout
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"get_text succeeded on {self.name!r}: {text!r}")
-        screenshot = self._screenshot("get_text")
-        self._record("get_text", "pass", duration_ms, screenshot=screenshot)
+        screenshot, screenshot_error = self._screenshot("get_text")
+        self._record("get_text", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
         return text
 
     def exists(self, timeout: float = 2.0) -> bool:

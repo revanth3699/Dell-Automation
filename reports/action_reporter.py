@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from reports.report_models import ActionRecord
 
@@ -76,6 +76,7 @@ class ActionReporter:
         duration_ms: float,
         error: Optional[str] = None,
         screenshot: Optional[str] = None,
+        screenshot_error: Optional[str] = None,
     ) -> None:
         record = ActionRecord(
             run_id=self.run_id,
@@ -87,17 +88,27 @@ class ActionReporter:
             duration_ms=duration_ms,
             error=error,
             screenshot=screenshot,
+            screenshot_error=screenshot_error,
             test_name=self._current_test_name,
         )
         with self._records_lock:
             self.records.append(record)
 
-    def capture_screenshot(self, session, component: str, action: str) -> Optional[str]:
-        """Returns the screenshot as a plain base64 string (no data: prefix -- the
-        report builder adds that), never touching disk. Never raises -- evidence
-        capture must never mask the real failure (same rule the old disk-writing
-        version followed)."""
+    def capture_screenshot(self, session, component: str, action: str) -> Tuple[Optional[str], Optional[str]]:
+        """Returns (screenshot_b64, error) -- screenshot_b64 is a plain base64 string (no
+        data: prefix -- the report builder adds that), never touching disk; error is the
+        reason capture failed, if it did. Never raises -- evidence capture must never mask
+        the real failure (same rule the old disk-writing version followed).
+
+        Confirmed live (2026-10-07): a window-closing action (e.g. BrowserWindowCloseButton)
+        can report PASS while its own screenshot capture fails right after -- the window
+        can already be mid-teardown (navigating to a sign-out page, or its WinAppDriver
+        session already gone) by the moment the screenshot call fires. That's an expected
+        race for this kind of action, not a bug -- but it used to render as a bare,
+        unexplained "no screenshot" with the real reason silently swallowed. Returning the
+        error lets the report say why instead of just "no screenshot".
+        """
         try:
-            return base64.b64encode(session.get_screenshot_as_png()).decode("ascii")
-        except Exception:
-            return None
+            return base64.b64encode(session.get_screenshot_as_png()).decode("ascii"), None
+        except Exception as exc:
+            return None, str(exc)

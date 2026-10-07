@@ -22,6 +22,11 @@ class ActionRecord:
     error: Optional[str] = None
     screenshot: Optional[str] = None  # plain base64 PNG string (no data: prefix, no file
                                        # on disk) -- the report is the only source of truth
+    screenshot_error: Optional[str] = None  # why capture failed, if screenshot is None --
+                                             # e.g. a window-closing action's own capture
+                                             # racing the window actually closing. Confirmed
+                                             # 2026-10-07: this used to be silently swallowed,
+                                             # rendering as a bare, unexplained "no screenshot".
     test_name: Optional[str] = None  # populated only under pytest (see tests/conftest.py)
 
 

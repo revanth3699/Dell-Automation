@@ -74,10 +74,18 @@ def _status_badge(status: str) -> str:
     return f'<span class="badge {cls}">{label}</span>'
 
 
-def _screenshot_html(screenshot_b64: Optional[str]) -> str:
+def _screenshot_html(screenshot_b64: Optional[str], screenshot_error: Optional[str] = None) -> str:
     """Embeds the screenshot inline as a base64 data URI -- never a reference to a
-    screenshots/ folder, since the report is the only file a run produces."""
+    screenshots/ folder, since the report is the only file a run produces.
+
+    Shows WHY capture failed when known (confirmed live 2026-10-07: a window-closing
+    action's own screenshot can race the window actually closing -- the action itself
+    still reports PASS, but there's genuinely nothing left to capture by that point).
+    Previously this was a bare, unexplained "no screenshot" even when the reason was
+    known and non-alarming."""
     if not screenshot_b64:
+        if screenshot_error:
+            return f'<div class="no-shot">no screenshot ({html.escape(screenshot_error)})</div>'
         return '<div class="no-shot">no screenshot</div>'
     return f'<img class="shot" src="data:image/png;base64,{screenshot_b64}" alt="screenshot">'
 
@@ -100,7 +108,7 @@ def _action_row_html(r: ActionRecord, index: int) -> str:
       </div>
       <div id="{body_id}" class="action-body collapsible-body{'' if expanded else ' collapsed'}">
         {error_html}
-        {_screenshot_html(r.screenshot)}
+        {_screenshot_html(r.screenshot, r.screenshot_error)}
       </div>
     </div>"""
 
