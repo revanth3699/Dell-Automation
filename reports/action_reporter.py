@@ -77,6 +77,8 @@ class ActionReporter:
         error: Optional[str] = None,
         screenshot: Optional[str] = None,
         screenshot_error: Optional[str] = None,
+        screenshot_before: Optional[str] = None,
+        screenshot_before_error: Optional[str] = None,
     ) -> None:
         record = ActionRecord(
             run_id=self.run_id,
@@ -89,6 +91,8 @@ class ActionReporter:
             error=error,
             screenshot=screenshot,
             screenshot_error=screenshot_error,
+            screenshot_before=screenshot_before,
+            screenshot_before_error=screenshot_before_error,
             test_name=self._current_test_name,
         )
         with self._records_lock:

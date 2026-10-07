@@ -59,13 +59,25 @@ def _build_run_report(reporter: ActionReporter) -> RunReport:
 
 
 def _group_records(records: List[ActionRecord]) -> Dict[str, List[ActionRecord]]:
-    """Groups by test_name when present (pytest runs), otherwise by component
-    (live orchestration runs) -- preserves first-seen order, not alphabetical."""
-    key_fn = (lambda r: r.test_name) if any(r.test_name for r in records) else (lambda r: r.component)
-    groups: Dict[str, List[ActionRecord]] = {}
-    for r in records:
-        groups.setdefault(key_fn(r) or "(ungrouped)", []).append(r)
-    return groups
+    """Groups by test_name when present (pytest runs) -- distinguishing which test
+    produced which actions is genuinely useful there, and pytest tests run to completion
+    one at a time, so they don't interleave the same component across widely-separated
+    points in time the way a live orchestration run can.
+
+    For a live run (no test_name), returns ONE flat group in true chronological order
+    instead of grouping by component. Confirmed live (2026-10-07/08): grouping by
+    component pulled two BrowserWindowCloseButton clicks 87 seconds apart (with several
+    other actions genuinely happening in between -- OtpCancelButton, SignInFailedRetryButton,
+    a full second sign-in pass) next to each other, while the actions that chronologically
+    separated them ended up rendered further down the page -- actively misleading about
+    execution order, which is the one thing a live run's report needs to get right.
+    """
+    if any(r.test_name for r in records):
+        groups: Dict[str, List[ActionRecord]] = {}
+        for r in records:
+            groups.setdefault(r.test_name or "(ungrouped)", []).append(r)
+        return groups
+    return {"All actions (chronological)": records}
 
 
 def _status_badge(status: str) -> str:
@@ -92,12 +104,26 @@ def _screenshot_html(screenshot_b64: Optional[str], screenshot_error: Optional[s
 
 def _action_row_html(r: ActionRecord, index: int) -> str:
     """Each action is its own dropdown: a clickable header (badge/name/duration) and a
-    collapsible body (error text, if any, plus the embedded screenshot). Failed actions
-    start expanded (the thing you need to see first); passed actions start collapsed
-    (keeps a long run scannable) -- one click away either way, never omitted."""
+    collapsible body (error text, if any, plus the embedded screenshot(s)). Failed
+    actions start expanded (the thing you need to see first); passed actions start
+    collapsed (keeps a long run scannable) -- one click away either way, never omitted.
+
+    click()/click_at_center() carry a before-shot too (2026-10-08) -- rendered side by
+    side with the existing after-shot so a genuine before/after comparison is visible at
+    a glance. Every other action type has screenshot_before=None, so this collapses back
+    to the single after-shot, unchanged.
+    """
     expanded = r.status == "fail"
     error_html = f'<div class="error">{html.escape(r.error)}</div>' if r.error else ""
     body_id = f"action-body-{index}"
+    if r.screenshot_before is not None or r.screenshot_before_error is not None:
+        shots_html = f"""
+        <div class="shots-row">
+          <div class="shot-col"><div class="shot-label">Before</div>{_screenshot_html(r.screenshot_before, r.screenshot_before_error)}</div>
+          <div class="shot-col"><div class="shot-label">After</div>{_screenshot_html(r.screenshot, r.screenshot_error)}</div>
+        </div>"""
+    else:
+        shots_html = _screenshot_html(r.screenshot, r.screenshot_error)
     return f"""
     <div class="action-row {r.status}">
       <div class="action-header toggle-header" data-target="{body_id}">
@@ -108,7 +134,7 @@ def _action_row_html(r: ActionRecord, index: int) -> str:
       </div>
       <div id="{body_id}" class="action-body collapsible-body{'' if expanded else ' collapsed'}">
         {error_html}
-        {_screenshot_html(r.screenshot, r.screenshot_error)}
+        {shots_html}
       </div>
     </div>"""
 
@@ -192,6 +218,9 @@ h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
 .shot { max-width: 480px; max-height: 360px; border-radius: 6px; display: block;
         border: 1px solid rgba(127,127,127,0.3); }
 .no-shot { color: #999; font-size: 0.8rem; font-style: italic; }
+.shots-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+.shot-label { font-size: 0.7rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em;
+              margin-bottom: 0.25rem; }
 .collapsible-body.collapsed { display: none; }
 """
 

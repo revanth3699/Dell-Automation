@@ -53,11 +53,13 @@ class BaseComponent:
         return ActionReporter.current().capture_screenshot(self.session, self.name, action)
 
     def _record(self, action: str, status: str, duration_ms: float, error: Optional[str] = None,
-                screenshot: Optional[str] = None, screenshot_error: Optional[str] = None) -> None:
+                screenshot: Optional[str] = None, screenshot_error: Optional[str] = None,
+                screenshot_before: Optional[str] = None, screenshot_before_error: Optional[str] = None) -> None:
         ActionReporter.current().record(
             component=self.name, action=action, status=status,
             duration_ms=duration_ms, error=error, screenshot=screenshot,
-            screenshot_error=screenshot_error,
+            screenshot_error=screenshot_error, screenshot_before=screenshot_before,
+            screenshot_before_error=screenshot_before_error,
         )
 
     # Confirmed via testing: an element found via _find() can become invalid by the time
@@ -77,7 +79,15 @@ class BaseComponent:
         many seconds even though the element was just there. timeout, same optional-
         override pattern as get_text(), lets a caller that just confirmed presence use
         a short one here instead of silently eating the default.
+
+        Captures a BEFORE screenshot too (2026-10-08), taken right before the click
+        fires, in addition to the existing after-the-fact one -- a genuine before/after
+        comparison is exactly the evidence that would have helped diagnose this
+        project's repeated "click reports success but the button never actually
+        activates" WebView2 bug. Taken before the timer starts, so it doesn't inflate
+        duration_ms.
         """
+        screenshot_before, screenshot_before_error = self._screenshot("click_BEFORE")
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
@@ -89,14 +99,16 @@ class BaseComponent:
             screenshot, screenshot_error = self._screenshot("click_FAILED")
             logger.error(f"click failed on {self.name!r}: {exc}")
             self._record("click", "fail", duration_ms, error=str(exc), screenshot=screenshot,
-                         screenshot_error=screenshot_error)
+                         screenshot_error=screenshot_error, screenshot_before=screenshot_before,
+                         screenshot_before_error=screenshot_before_error)
             raise ComponentActionError(f"click failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click succeeded on {self.name!r}")
         screenshot, screenshot_error = self._screenshot("click")
-        self._record("click", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
+        self._record("click", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error,
+                     screenshot_before=screenshot_before, screenshot_before_error=screenshot_before_error)
 
     @retry(attempts=2, delay=0.5)
     def _click_at_center_once(self) -> None:
@@ -107,7 +119,9 @@ class BaseComponent:
         center (WinAppDriverElement.click_at_center()) instead of the UIA Invoke
         pattern -- see that method's docstring for why. Use this when click() reports
         success but the on-screen control doesn't actually respond. Same timeout
-        override as click() (see its docstring)."""
+        override as click() (see its docstring). Also captures a BEFORE screenshot,
+        same reasoning and timing as click()'s own."""
+        screenshot_before, screenshot_before_error = self._screenshot("click_at_center_BEFORE")
         original_timeout = self.timeout
         if timeout is not None:
             self.timeout = timeout
@@ -119,14 +133,16 @@ class BaseComponent:
             screenshot, screenshot_error = self._screenshot("click_at_center_FAILED")
             logger.error(f"click_at_center failed on {self.name!r}: {exc}")
             self._record("click_at_center", "fail", duration_ms, error=str(exc), screenshot=screenshot,
-                         screenshot_error=screenshot_error)
+                         screenshot_error=screenshot_error, screenshot_before=screenshot_before,
+                         screenshot_before_error=screenshot_before_error)
             raise ComponentActionError(f"click_at_center failed on {self.name!r}: {exc}") from exc
         finally:
             self.timeout = original_timeout
         duration_ms = (time.monotonic() - start) * 1000
         logger.success(f"click_at_center succeeded on {self.name!r}")
         screenshot, screenshot_error = self._screenshot("click_at_center")
-        self._record("click_at_center", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error)
+        self._record("click_at_center", "pass", duration_ms, screenshot=screenshot, screenshot_error=screenshot_error,
+                     screenshot_before=screenshot_before, screenshot_before_error=screenshot_before_error)
 
     @retry(attempts=2, delay=0.5)
     def _type_once(self, text: str) -> None:

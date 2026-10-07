@@ -27,6 +27,15 @@ class ActionRecord:
                                              # racing the window actually closing. Confirmed
                                              # 2026-10-07: this used to be silently swallowed,
                                              # rendering as a bare, unexplained "no screenshot".
+    screenshot_before: Optional[str] = None  # click()/click_at_center() only (2026-10-08):
+                                              # a second screenshot taken right before the
+                                              # click fires, so a report can show a genuine
+                                              # before/after comparison -- the kind of
+                                              # evidence that would have helped diagnose this
+                                              # project's repeated "click reports success but
+                                              # the button never actually activates" WebView2
+                                              # bug. None for every other action type.
+    screenshot_before_error: Optional[str] = None  # same as screenshot_error, for the before shot
     test_name: Optional[str] = None  # populated only under pytest (see tests/conftest.py)
 
 
