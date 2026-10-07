@@ -10,18 +10,13 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Generated test artifacts (logs, per-run reports) -- see reports/output/.gitkeep, which
-# this leaves tracked since only the paths below are ignored. Each run is a single flat
-# file "<run_id>_<role>_<datetime>.html" directly under reports/output/ (no screenshots/
-# or other sidecar folders -- the report is the only file a run produces), plus the
-# generated index.html -- reports/output/*.html covers all of them.
-reports/output/*.html
-reports/output/logs/
-
-# Legacy flat screenshot dump from before the reporting pipeline embedded screenshots
-# directly in each report -- nothing writes here anymore, but ~560 old PNGs are still on
-# disk from earlier manual runs; keep them out of `git status` noise.
-reports/output/screenshots/
+# Everything generated under reports/output/ -- never pushed, whatever form a report or
+# its artifacts take (per explicit user direction: the folder where reports get
+# generated must never be pushed). Blanket rule rather than enumerated file types/
+# subfolders, so a future report format can't accidentally slip through. .gitkeep stays
+# tracked so the empty folder structure still exists in a fresh clone.
+reports/output/*
+!reports/output/.gitkeep
 
 # Coordination Service's own runtime state (published pairing codes etc.) -- generated
 # at runtime, never meant to be committed, same reasoning as reports/output/ above.
@@ -35,3 +30,8 @@ coordination_service/state.json
 # testing of one flow/component at a time) -- never meant to be pushed. Kept on disk,
 # just untracked from git.
 tools/
+
+# Status-tracking doc -- local-only (per explicit user direction, same as tools/ above).
+# Already caught by the blanket *.md rule above since it's IMPLEMENTATION_STATUS.md, but
+# named explicitly too so this stays true even if a non-.md file is ever added here.
+tracking/
