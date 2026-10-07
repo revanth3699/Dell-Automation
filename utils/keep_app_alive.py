@@ -1,4 +1,4 @@
-"""
+﻿"""
 Watches for the Target PC app + WinAppDriver dying (confirmed recurring in this
 environment -- see PROJECT_PLAN.md Sec 4.2/5.3b/10: the WebView2 renderer reliably
 crashes ~47s after becoming visible and appears to take WinAppDriver down with it, no
@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from factory import capabilities as caps
 from factory.config import TARGET_PROCESS_NAME, WINAPPDRIVER_URL
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import _find_main_window_hwnd
 import requests
 

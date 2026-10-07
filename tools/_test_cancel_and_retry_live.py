@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live test of the cancel-and-retry path. Sequence confirmed directly by the user
 (2026-10-06): wrong OTP -> deliberately click the OTP page's OWN Cancel button (below
 Verify, in the browser) -> this STILL triggers a Windows UAC prompt (a human must
@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep

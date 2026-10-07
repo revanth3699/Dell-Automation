@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from factory.coordination_client import CoordinationClient
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.source.pairing_flow import SourcePairingFlow
 from flows.source.transfer_flow import SourceTransferFlow
@@ -67,11 +67,12 @@ class RoleRunner:
         """Runs this machine's own role through to a paired state. Credentials/build
         paths come from environment variables only, never passed through here as
         arguments (see module docstring for which ones each role needs)."""
-        # Machine-level setup gate (dev mode, WinAppDriver installed, Python packages,
-        # browser cleanup) -- same checks regardless of role. Does NOT start WinAppDriver
-        # itself (see factory/prerequisites.py's module docstring, 2026-10-07): Session,
-        # created below, ensures WinAppDriver is actually running independently, the
-        # moment it's needed.
+        # Standalone machine-level setup gate (dev mode, WinAppDriver installed +
+        # launchable, Python packages, browser cleanup) -- same checks regardless of
+        # role. Lives at the repo root, not in factory/ (see its own module docstring,
+        # 2026-10-07). Does not leave WinAppDriver running: Session, created below,
+        # launches its own independently via factory.driver_factory, the moment it's
+        # actually needed.
         ensure_target_prerequisites()
         ActionReporter.start_run(run_id, role.value)
 

@@ -3,33 +3,35 @@ Prerequisite checks + auto-install for running WinAppDriver-based automation aga
 Target PC app. Target-only (see PROJECT_PLAN.md Sec 10 open item: Source's launch flow is
 still undetermined, pending Source PC build access).
 
-Covers, in order: Windows Developer Mode, WinAppDriver installed, the required Python
-packages, and browser-profile cleanup. Node.js (for the GlassFloor mock server, Sec 5.3a)
-is checked separately via ensure_mock_server_prerequisites since it's only needed for that
-launch mode.
+Covers, in order: Windows Developer Mode, WinAppDriver installed, that WinAppDriver can
+actually launch on this machine, the required Python packages, and browser-profile
+cleanup. Node.js (for the GlassFloor mock server, Sec 5.3a) is checked separately via
+ensure_mock_server_prerequisites since it's only needed for that launch mode.
 
-This is a standalone, one-time pass/fail gate run once before automation starts -- checks
-and auto-fixes of machine-level setup only. Nothing in this module is imported by
-anything else (2026-10-07, per explicit user direction): actually launching/attaching/
-killing WinAppDriver for a real automation run is factory/session.py's job entirely,
-self-contained, independent of this module -- it does not import from here, and this
-module does not assume anything it starts stays running for session.py's benefit.
-check_winappdriver_running() below is read-only and only used for this gate's own
-informational printout.
+Lives at the repo root, not inside factory/ (moved here 2026-10-07, per explicit user
+direction): this is a standalone, one-time pass/fail gate run once before automation
+starts, not a Factory-layer component -- if all checks pass, automation may proceed; if
+not, it must not. factory/driver_factory.py is the sole owner of actually finding,
+launching, and killing the real WinAppDriver process ("the actual driver must be yielded
+by driver_factory") -- this module calls into those same two functions
+(ensure_winappdriver_running()/kill_winappdriver()) for its own one-time launch-then-close
+self-test (confirming WinAppDriver CAN run here), then leaves it closed. The real,
+long-lived instance actually used for automation is launched independently and later, by
+factory.session.Session, via the same driver_factory functions -- this gate never leaves
+WinAppDriver running for anything else's benefit.
 """
 
 import importlib.util
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
-import time
 import winreg
 from pathlib import Path
 
-from factory.config import NODE_INSTALL_PATHS, WINAPPDRIVER_HOST, WINAPPDRIVER_INSTALL_PATHS, WINAPPDRIVER_PORT
+from factory.config import NODE_INSTALL_PATHS
+from factory.driver_factory import ensure_winappdriver_running, find_winappdriver_path, kill_winappdriver
 
 REQUIRED_PACKAGES = {
     "selenium": "selenium",
@@ -41,14 +43,6 @@ def _run_powershell(command: str, timeout: int = 60) -> subprocess.CompletedProc
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
         capture_output=True, text=True, timeout=timeout,
     )
-
-
-def _port_is_open(host: str, port: int, timeout: float = 1.0) -> bool:
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
 
 
 def check_developer_mode() -> bool:
@@ -83,15 +77,11 @@ def ensure_developer_mode() -> None:
         raise RuntimeError("Failed to enable Developer Mode -- was the admin prompt approved?")
 
 
-def find_winappdriver() -> str | None:
-    for path in WINAPPDRIVER_INSTALL_PATHS:
-        if Path(path).exists():
-            return path
-    return None
-
-
 def ensure_winappdriver_installed() -> str:
-    path = find_winappdriver()
+    """Installed-path check only -- uses factory.driver_factory.find_winappdriver_path()
+    as the one source of truth for where WinAppDriver lives, rather than re-searching
+    independently."""
+    path = find_winappdriver_path()
     if path:
         return path
     print("WinAppDriver not found -- installing via winget (this needs one admin approval)...")
@@ -100,18 +90,23 @@ def ensure_winappdriver_installed() -> str:
          "--source", "winget", "--accept-source-agreements", "--accept-package-agreements", "--silent"],
         timeout=300,
     )
-    path = find_winappdriver()
+    path = find_winappdriver_path()
     if not path:
         raise RuntimeError("WinAppDriver install did not complete -- was the admin prompt approved?")
     return path
 
 
-def check_winappdriver_running() -> bool:
-    """Read-only: is something currently listening on WinAppDriver's port. Does not
-    start or stop anything -- actually launching WinAppDriver for a real automation run
-    is factory/session.py's job (see this module's own docstring), independent of this
-    function. Used here only for this gate's own informational printout."""
-    return _port_is_open(WINAPPDRIVER_HOST, WINAPPDRIVER_PORT)
+def ensure_winappdriver_can_launch() -> None:
+    """One-time self-test: launch WinAppDriver (elevated, via factory.driver_factory),
+    confirm it actually came up, then close it right back down. Proves this machine CAN
+    run it; does not leave anything running for a later Session to reuse -- Session
+    launches its own, independently, via the exact same driver_factory functions, the
+    moment it's actually needed.
+    """
+    print("Verifying WinAppDriver can actually start on this machine (this needs one admin approval)...")
+    ensure_winappdriver_running()
+    kill_winappdriver()
+    print("WinAppDriver: confirmed launchable.")
 
 
 def find_node() -> str | None:
@@ -253,21 +248,19 @@ def ensure_browsers_exit_cleanly() -> None:
 def ensure_target_prerequisites() -> str:
     """Runs all Target-PC prerequisite checks, auto-installing/fixing what it can.
     Returns the resolved WinAppDriver executable path (informational -- Session resolves
-    its own path independently; see factory/session.py). Raises RuntimeError if a step
+    its own path independently via factory.driver_factory). Raises RuntimeError if a step
     needed an admin approval that wasn't given.
 
-    Deliberately does NOT start WinAppDriver itself (moved to factory/session.py,
-    2026-10-07) -- this is a one-time, standalone pass/fail gate over machine-level setup
-    only (dev mode, WinAppDriver installed, Python packages, browser profile cleanup).
-    check_winappdriver_running() below is just a read-only status printout, not an action.
+    This is the one standalone pass/fail gate: if every step here passes, automation may
+    proceed; if any step fails, it must not. It launches WinAppDriver exactly once, as a
+    self-test (ensure_winappdriver_can_launch()), and closes it right back down -- it does
+    not leave anything running for Session to reuse; Session launches its own, later and
+    independently, via the same factory.driver_factory functions.
     """
     ensure_developer_mode()
     winappdriver_path = ensure_winappdriver_installed()
+    ensure_winappdriver_can_launch()
     ensure_python_packages()
     ensure_browsers_exit_cleanly()
-    if check_winappdriver_running():
-        print("WinAppDriver: already running.")
-    else:
-        print("WinAppDriver: not running yet -- Session starts it elevated on first use.")
     print("PC checks OK.")
     return winappdriver_path

@@ -11,14 +11,156 @@ Session lifecycle (launch-then-attach, idempotent registry, process/window inspe
 PowerShell) moved to factory/session.py's `Session` class -- this file is now just the
 low-level REST client the Session (and everything built on it) uses underneath. See
 factory/session.py's own docstring for why that consolidation happened (2026-10-06).
+
+This module is also the sole owner of the actual WinAppDriver PROCESS's lifecycle --
+finding it, checking if it's running, launching it elevated, killing it (ensure_
+winappdriver_running()/kill_winappdriver() below) -- per explicit user direction
+(2026-10-07): "the actual driver must be yielded by driver_factory." factory/session.py
+calls into these rather than owning this logic itself. The standalone prerequisites.py
+gate (moved out of factory/ entirely, repo root) also calls these same two functions for
+its own one-time launch-then-close self-test -- one source of truth either way, not
+duplicated per caller.
 """
 
+import socket
+import subprocess
 import time
+import winreg
+from pathlib import Path
 from typing import Optional
 
 import requests
+from loguru import logger
+
+from factory.config import WINAPPDRIVER_HOST, WINAPPDRIVER_INSTALL_PATHS, WINAPPDRIVER_PORT
 
 _MASK_CHARS = set("•*●○")
+
+
+def _run_powershell(command: str, timeout: int = 20) -> str:
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", command],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    return result.stdout.strip()
+
+
+def find_winappdriver_path() -> Optional[str]:
+    for path in WINAPPDRIVER_INSTALL_PATHS:
+        if Path(path).exists():
+            return path
+    return None
+
+
+def is_winappdriver_running() -> bool:
+    try:
+        with socket.create_connection((WINAPPDRIVER_HOST, WINAPPDRIVER_PORT), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
+def _ensure_webview2_accessibility_env_var() -> None:
+    """Persists WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--force-renderer-accessibility as a
+    User-scope environment variable (not just this process's). Confirmed via testing that
+    this is read correctly by a WinAppDriver instance launched via plain elevated
+    Start-Process -Verb RunAs -- persisted env vars are read fresh from the registry at
+    process creation regardless of elevation, so this works even though an elevated
+    ("runas") process does not inherit the launching process's in-memory environment.
+    Idempotent -- a no-op if already set correctly.
+    """
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ)
+        value, _ = winreg.QueryValueEx(key, "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        if value == "--force-renderer-accessibility":
+            return
+    except (FileNotFoundError, OSError):
+        pass
+    _run_powershell(
+        '[System.Environment]::SetEnvironmentVariable('
+        '"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--force-renderer-accessibility", "User")'
+    )
+
+
+def ensure_winappdriver_running(startup_timeout: float = 90.0) -> None:
+    """Starts WinAppDriver elevated. Idempotent: no-ops if something is already listening
+    on the port. The one place that actually launches WinAppDriver for any caller --
+    factory/session.py's Session (for a real automation run) and the standalone
+    prerequisites.py gate (for its own launch-then-close self-test) both call this same
+    function rather than each owning their own copy.
+
+    Confirmed via testing: a plain elevated `Start-Process -Verb RunAs` is sufficient to
+    keep WinAppDriver alive (no stdin-redirection tricks needed, despite an earlier,
+    apparently environment-dependent finding to the contrary -- see
+    tools/phase0_inspection_notes.md for the full history). The WebView2 accessibility
+    flag is supplied via a persisted User env var (_ensure_webview2_accessibility_env_var)
+    rather than this process's own environment, since an elevated process does not
+    inherit the launching process's in-memory environment.
+
+    Caveat: if a WinAppDriver instance is already running (started by someone/something
+    else), this cannot cheaply verify it is elevated -- only that the port is open. A
+    non-elevated pre-existing instance will still fail to expose the WebView2 tree per
+    PROJECT_PLAN.md Sec 5.1; if that happens, stop it and let this function start one
+    properly.
+
+    Bug fixed here, confirmed live (2026-10-07): Start-Process -Verb RunAs (without
+    -Wait) returns almost immediately -- it requests the elevation and the UAC consent
+    dialog appears asynchronously, it does not block until approved. A countdown that
+    used to start right then, at 20s, meant a human taking more than ~20s to notice and
+    click the prompt (easy in practice) caused this to raise before WinAppDriver was even
+    granted elevation yet -- then re-running triggered a second, genuinely new elevation
+    request, confusingly looking like "it's asking for UAC again" right after approving
+    the first one. 90s matches how every other UAC-dependent wait in this codebase is
+    already deliberately generous about human reaction time.
+    """
+    if is_winappdriver_running():
+        return
+    winappdriver_path = find_winappdriver_path()
+    if not winappdriver_path:
+        raise RuntimeError(
+            "WinAppDriver is not installed at any known path -- run the prerequisites "
+            "gate first to install it."
+        )
+    _ensure_webview2_accessibility_env_var()
+    logger.info("WinAppDriver isn't running -- starting it elevated (this needs one admin approval)...")
+    _run_powershell(f'Start-Process -FilePath "{winappdriver_path}" -Verb RunAs')
+    deadline = time.monotonic() + startup_timeout
+    while time.monotonic() < deadline:
+        if is_winappdriver_running():
+            return
+        time.sleep(0.5)
+    raise RuntimeError(
+        "WinAppDriver did not start within the timeout -- was the admin prompt approved?"
+    )
+
+
+def kill_winappdriver() -> bool:
+    """Stops any running WinAppDriver instance. Returns whether it is confirmed stopped
+    afterward (port no longer open) -- checked rather than assumed.
+
+    Bug fixed here, confirmed live (2026-10-07): WinAppDriver normally runs elevated
+    (started via Start-Process -Verb RunAs), and a non-elevated process cannot
+    terminate a higher-integrity one (the same UIPI mechanism noted in
+    ensure_winappdriver_running() and PROJECT_PLAN.md Sec 5.1) -- confirmed directly:
+    a plain non-elevated kill attempt during this same project silently did nothing,
+    every time, for exactly this reason. This used to just re-test the port and report
+    failure; now it retries via an elevated Stop-Process (one more admin prompt, same
+    mechanism already used to start WinAppDriver elevated in the first place) when the
+    plain attempt didn't actually work, so cleanup on error/interrupt is guaranteed
+    rather than silently incomplete.
+    """
+    _run_powershell("Stop-Process -Name WinAppDriver -Force -ErrorAction SilentlyContinue")
+    time.sleep(1.0)
+    if not is_winappdriver_running():
+        return True
+    _run_powershell(
+        "Start-Process powershell -Verb RunAs -ArgumentList "
+        "'-NoProfile','-Command','Stop-Process -Name WinAppDriver -Force "
+        "-ErrorAction SilentlyContinue' -Wait",
+        timeout=60,
+    )
+    time.sleep(1.0)
+    return not is_winappdriver_running()
 
 
 def _text_matches(actual: Optional[str], expected: str) -> bool:

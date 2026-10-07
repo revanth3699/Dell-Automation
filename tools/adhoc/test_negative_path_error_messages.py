@@ -1,4 +1,4 @@
-"""
+﻿"""
 Adhoc, deliberately-invoked negative-path validation for the Target PC sign-in flow --
 confirms the app's error banner appears correctly for a wrong email, wrong password, and
 wrong OTP, each followed by the correct value, then completes the sign-in normally.
@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep

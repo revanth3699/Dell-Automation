@@ -1,4 +1,4 @@
-"""
+﻿"""
 Interactive Target PC launcher: checks + auto-installs prerequisites, prompts for the
 build path, launches the app, and attaches a WinAppDriver session.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from factory.mock_server import start_mock_server
-from factory.prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
+from prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
 from factory.session import MachineRole, Session
 
 

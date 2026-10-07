@@ -1,4 +1,4 @@
-"""
+﻿"""
 Quick non-interactive smoke test of the full sign-in flow. For anything beyond a quick
 local check, prefer tools/run_sign_in_flow.py (the portable, CLI-driven entry point with
 prompted/argument build path and optional pairing-code support).
@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 

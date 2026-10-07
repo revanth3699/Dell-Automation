@@ -1,4 +1,4 @@
-"""
+﻿"""
 Interactive Target PC sign-in (+ optional pairing) test runner: ensures prerequisites,
 launches + attaches the app (same recipe as tools/launch_target_app.py), then drives the
 full SignInFlow end to end -- including the negative-path wrong-credential checks on the
@@ -45,7 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from factory.mock_server import start_mock_server
-from factory.prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
+from prerequisites import ensure_mock_server_prerequisites, ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow

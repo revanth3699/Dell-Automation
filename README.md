@@ -29,11 +29,13 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    ```
 
 **WinAppDriver, Windows Developer Mode, and required Python packages are all
-auto-detected and auto-installed/enabled on first run** -- `factory/prerequisites.py`'s
+auto-detected and auto-installed/enabled on first run** -- `prerequisites.py`'s
 `ensure_target_prerequisites()` runs at the start of every `role_runner` invocation and
 installs WinAppDriver via `winget` if it's missing (one admin approval prompt), enables
-Developer Mode if it's off (another admin prompt), and starts WinAppDriver itself,
-elevated. Nothing needs to be installed by hand beyond uv and this repo's own
+Developer Mode if it's off (another admin prompt), and confirms WinAppDriver can launch
+elevated as a one-time self-test (then closes it again) -- `factory/session.py` starts
+the real instance independently, elevated, the moment automation actually needs it.
+Nothing needs to be installed by hand beyond uv and this repo's own
 dependencies.
 
 ## Environment variables

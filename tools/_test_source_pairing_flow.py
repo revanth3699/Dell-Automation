@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live test of SourcePairingFlow: launches the Source app, drives it to the pairing-code
 screen, and continuously publishes the current code to the Coordination Service.
 
@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from factory.coordination_client import CoordinationClient
 from flows.source.pairing_flow import SourcePairingFlow

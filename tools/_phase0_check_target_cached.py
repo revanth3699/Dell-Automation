@@ -1,4 +1,4 @@
-"""
+﻿"""
 Checks whether the Target app can reach an already-signed-in shortcut WITHOUT touching
 credentials at all -- zero risk to the (currently locked) test account. Launches the app,
 checks only the pure passthrough/already-signed-in conditions, and stops immediately
@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import TrustNetworkDialog

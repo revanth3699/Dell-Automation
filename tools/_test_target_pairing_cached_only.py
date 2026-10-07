@@ -1,4 +1,4 @@
-"""
+﻿"""
 Live test: drives Target to the pairing-discovery screen using ONLY the cached/
 already-signed-in shortcuts -- zero credential risk. Aborts loudly rather than typing
 username/password/otp if a fresh sign-in would be required (the test account has a real
@@ -25,7 +25,7 @@ from components.target.common_dialogs import TrustNetworkDialog
 from components.target.pairing_discovery_screen import PairingDiscoveryScreen
 from components.target.sign_in_screen import WelcomeBackScreen, WelcomeScreen
 from factory.config import TARGET_PROCESS_NAME
-from factory.prerequisites import ensure_target_prerequisites
+from prerequisites import ensure_target_prerequisites
 from factory.session import MachineRole, Session, _find_main_window_hwnd
 from flows.target.pairing_flow import TargetPairingFlow
 
