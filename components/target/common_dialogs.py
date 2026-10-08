@@ -11,6 +11,7 @@ from typing import Optional
 from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, CLOSE_APPS_HEADING_LOCATOR
 from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
+from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR, MIGRATION_ERROR_HEADING_LOCATOR
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR, TRUST_NETWORK_HEADING_LOCATOR
@@ -140,6 +141,40 @@ class CloseAppsDialog:
             return False
         self._close_application_button.click()
         return True
+
+
+class MigrationErrorDialog:
+    """"Something went wrong" -- a fatal engine-side error during migration prep/transfer
+    (e.g. "error 2969": confirmed via a live log, "Engine reported error 2969 on
+    MigrationStatus (Status=false) after pairing -> FailurePage"). Confirmed from a
+    user-supplied screenshot (2026-10-08) appearing layered over the transfer-progress
+    screen, with that screen's own content ("0 B/s", "...minutes left") still visible,
+    greyed out, behind it.
+
+    Treated as an immediate, unrecoverable migration failure -- no accept()/close()
+    method here, unlike every other dialog in this module. Those are all meant to be
+    clicked through so the flow can continue; this one means the whole run should stop
+    and raise, so callers check is_showing() and raise their own error immediately
+    (see flows/target/transfer_flow.py), using read_error_text() to surface the real
+    error code instead of a generic timeout message.
+    """
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(app_session, *MIGRATION_ERROR_HEADING_LOCATOR, "MigrationErrorHeading")
+        self._body = BaseComponent(app_session, *MIGRATION_ERROR_BODY_LOCATOR, "MigrationErrorBody")
+
+    def is_showing(self, timeout: float = 0.1) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def read_error_text(self, timeout: float = 2.0) -> str:
+        """Best-effort: returns the body text (e.g. "Something went wrong while getting
+        your PCs ready (error 2969). Please close and try again.") for a clearer
+        failure message. Never raises -- evidence-gathering must never mask the real
+        failure that's about to be raised by the caller."""
+        try:
+            return self._body.get_text(timeout=timeout)
+        except Exception:
+            return "(error text unavailable)"
 
 
 class MigrationPreparationTransition:

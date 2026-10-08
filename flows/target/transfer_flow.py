@@ -54,11 +54,24 @@ single click, the wait for "We're moving your files and settings" now periodical
 re-clicks "Migrate now" (every RECLICK_INTERVAL_SECONDS) for as long as neither it nor
 the close-apps dialog has appeared -- since the button is presumably still right there
 on the unchanged "ready to move" screen if the first click didn't take.
+
+Bug fixed here, confirmed live (2026-10-08): a fatal engine-side error ("Something went
+wrong ... (error 2969). Please close and try again.") can appear layered over the
+transfer-progress screen mid-transfer -- confirmed both from a raw TargetPc log excerpt
+("Engine reported error 2969 on MigrationStatus (Status=false) after pairing ->
+FailurePage") and a live screenshot showing the dialog over the still-visible "0 B/s"/
+"...minutes left" progress screen. Nothing previously detected this: wait_for_completion()'s
+wait for the progress screen to clear was a single un-raced wait_until_gone() call, so
+it would have silently burned up to the full transfer_timeout (30 minutes default)
+before raising a generic "did not finish" error with the wrong cause attached. All
+three wait loops in this file (start_transfer()'s two, wait_for_completion()'s one) now
+race MigrationErrorDialog every cycle and raise immediately with the real error text if
+it appears, same pattern as every other dialog race here.
 """
 
 import time
 
-from components.target.common_dialogs import CloseAppsDialog
+from components.target.common_dialogs import CloseAppsDialog, MigrationErrorDialog
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
@@ -81,6 +94,7 @@ class TargetTransferFlow:
         self.migration_complete_screen = MigrationCompleteScreen(app_session)
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.close_apps_dialog = CloseAppsDialog(app_session)
+        self.migration_error_dialog = MigrationErrorDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def start_transfer(self, screen_timeout: float = 300.0, progress_screen_timeout: float = 30.0) -> None:
@@ -97,6 +111,9 @@ class TargetTransferFlow:
         deadline = time.monotonic() + screen_timeout
         confirmed_accounts = False
         while time.monotonic() < deadline:
+            if self.migration_error_dialog.is_showing(timeout=0.1):
+                error_text = self.migration_error_dialog.read_error_text()
+                raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
             if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
                 # Confirmed necessary, same reasoning as the confirm-accounts dialog:
                 # check for the close-apps dialog one more time, right here, before
@@ -114,6 +131,9 @@ class TargetTransferFlow:
                 progress_deadline = time.monotonic() + progress_screen_timeout
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
+                    if self.migration_error_dialog.is_showing(timeout=0.1):
+                        error_text = self.migration_error_dialog.read_error_text()
+                        raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
                     if self.transfer_progress_screen.is_showing(timeout=0.5):
                         self.log.success(
                             "Transfer in progress -- \"We're moving your files and "
@@ -185,7 +205,23 @@ class TargetTransferFlow:
           MigrationCompleteScreen).
         """
         self.log.info('Waiting for the transfer to finish ("We\'re moving your files and settings" to clear)...')
-        if not self.transfer_progress_screen.wait_until_gone(timeout=transfer_timeout):
+        # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
+        # e.g. "error 2969") can appear layered over this exact screen while it's still
+        # showing "0 B/s"/"...minutes left" behind it. A plain wait_until_gone() call
+        # has no way to notice this -- it would just keep polling until the full
+        # transfer_timeout (up to 30 minutes) and then raise a generic "did not finish"
+        # error, hiding the real cause. Races the error dialog every cycle instead, same
+        # pattern as every other dialog race in this file.
+        deadline = time.monotonic() + transfer_timeout
+        finished = False
+        while time.monotonic() < deadline:
+            if self.migration_error_dialog.is_showing(timeout=0.1):
+                error_text = self.migration_error_dialog.read_error_text()
+                raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+            if not self.transfer_progress_screen.is_showing(timeout=0.5):
+                finished = True
+                break
+        if not finished:
             raise TransferFlowError(f"Transfer did not finish within {transfer_timeout:.0f}s")
         self.log.success("Transfer finished")
 
