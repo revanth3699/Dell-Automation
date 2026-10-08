@@ -1,26 +1,42 @@
-﻿"""
+"""
 RoleRunner: the real entry point for one independent automation process -- chains this
-machine's own role (Target or Source) through its full flow sequence (sign-in/discovery
--> pairing), given just a role and a run_id shared between the two independent
-processes/machines. See PROJECT_PLAN.md Sec 4.6.
+machine's own role (Target or Source) through a scenario's flow sequence, given a role,
+a run_id shared between the two independent processes/machines, and a scenario name.
+See PROJECT_PLAN.md Sec 4.6.
 
 `tools/*.py` scripts are dev/debug helpers only (manual, piecemeal testing of one flow
 or component at a time, used throughout Phase 0-3 development) -- this is the one
 command meant for actually running a role end to end in production, chaining its real
 flows together rather than poking at internals.
 
-Data-selection/transfer phases (Phase 4) are not implemented yet -- run() currently ends
-once pairing is confirmed (Target) or Target has paired (Source). Extending to later
-phases means adding more flow calls in each role's branch below, not a redesign.
+Scenario dispatch (2026-10-08, per explicit user direction): TargetRunner/SourceRunner
+each own only their own role's FIXED prefix -- sign-in + pairing for Target, pairing
+for Source -- the part every scenario shares identically, with no exceptions. What
+happens after pairing succeeds is a list of plain `(session) -> None` step functions,
+supplied by a scenario function (e.g. full_transfer() below) that decides, per role,
+which steps apply. Adding a new scenario means: write its step function(s), write one
+small scenario function that picks steps per role and calls RoleRunner.run(), add one
+entry to SCENARIOS -- no change to TargetRunner, SourceRunner, or RoleRunner itself.
+This assumes every scenario shares the exact same prefix; a scenario that needs to
+diverge BEFORE pairing finishes (e.g. sign-in only, no pairing attempt) doesn't fit
+this shape and would need its own prefix too, not just a new step list.
 
 Usage:
     python -m orchestration.role_runner --role target --run-id my-migration
     python -m orchestration.role_runner --role source --run-id my-migration
+    python -m orchestration.role_runner --role target --run-id my-migration --scenario full_transfer
 
 Both machines must be given the SAME run_id -- a plain correlation label (not a secret),
 agreed on by whoever starts the two independent runs (see utils/coordination_client.py).
+Both machines should also be given the SAME --scenario name, by the same convention --
+nothing in code enforces this (the two processes never see each other's arguments),
+but a scenario's Target-side and Source-side step functions are written as
+complementary halves of one story, so a mismatch (e.g. Target running full_transfer
+while Source runs a different scenario) won't error at pairing time -- it'll surface
+later as one side timing out waiting for a screen the other side's scenario never
+produces.
 
-Env vars (role-specific, see each branch below):
+Env vars (role-specific, see each Runner class below):
     Target: DDA_TARGET_BUILD_PATH, DDA_TARGET_SIGNIN_USERNAME,
             DDA_TARGET_SIGNIN_PASSWORD, DDA_TARGET_OTP_STATIC_VALUE
     Source: DDA_SOURCE_BUILD_PATH
@@ -33,6 +49,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Callable, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -61,35 +78,14 @@ def _require_env(name: str) -> str:
     return value
 
 
-class RoleRunner:
-    @staticmethod
-    def run(role: MachineRole, run_id: str) -> None:
-        """Runs this machine's own role through to a paired state. Credentials/build
-        paths come from environment variables only, never passed through here as
-        arguments (see module docstring for which ones each role needs)."""
-        # Standalone machine-level setup gate (dev mode, WinAppDriver installed +
-        # launchable, Python packages, browser cleanup) -- same checks regardless of
-        # role. Lives in utils/, not in factory/ (see its own module docstring,
-        # 2026-10-07). Does not leave WinAppDriver running: Session, created below,
-        # launches its own independently via factory.driver_factory, the moment it's
-        # actually needed.
-        ensure_prerequisites()
-        ActionReporter.start_run(run_id, role.value)
-
-        try:
-            if role is MachineRole.TARGET:
-                RoleRunner._run_target(run_id)
-            elif role is MachineRole.SOURCE:
-                RoleRunner._run_source(run_id)
-            else:
-                raise RoleRunnerError(f"Unknown role: {role!r}")
-        finally:
-            # A report must exist for this run whether it succeeded or failed -- see
-            # PROJECT_PLAN.md Sec 4.8.
-            build_report()
+class TargetRunner:
+    """Owns only the Target role's fixed prefix (sign-in + pairing) -- the part every
+    Target scenario shares identically. Whatever happens after pairing succeeds is
+    entirely up to post_pairing_steps, supplied by whichever scenario function called
+    this."""
 
     @staticmethod
-    def _run_target(run_id: str) -> None:
+    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]]) -> None:
         build_path = _require_env("DDA_TARGET_BUILD_PATH")
         username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
         password = _require_env("DDA_TARGET_SIGNIN_PASSWORD")
@@ -114,9 +110,9 @@ class RoleRunner:
             # TargetPairingFlow.enter_pairing_code_from_coordination_service(), which
             # waits for that screen first and only then calls CoordinationClient.wait_for().
             TargetPairingFlow(session.app).enter_pairing_code_from_coordination_service(run_id)
-            transfer_flow = TargetTransferFlow(session.app)
-            transfer_flow.start_transfer()
-            transfer_flow.wait_for_completion()
+
+            for step in post_pairing_steps:
+                step(session)
         finally:
             # Bug fixed here, confirmed live (2026-10-07): this used to be
             # except BaseException: session.close(); raise, which only ever closed
@@ -128,8 +124,14 @@ class RoleRunner:
             # up" gracefully), so this needs no other change.
             session.close()
 
+
+class SourceRunner:
+    """Owns only the Source role's fixed prefix (pairing) -- the part every Source
+    scenario shares identically. Whatever happens after pairing succeeds is entirely up
+    to post_pairing_steps, supplied by whichever scenario function called this."""
+
     @staticmethod
-    def _run_source(run_id: str) -> None:
+    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]]) -> None:
         build_path = _require_env("DDA_SOURCE_BUILD_PATH")
 
         session = Session.get(MachineRole.SOURCE, build_path=build_path)
@@ -137,21 +139,83 @@ class RoleRunner:
             coordination_client = CoordinationClient()
             flow = SourcePairingFlow(session.app, run_id=run_id, coordination_client=coordination_client)
             flow.run()
-            transfer_flow = SourceTransferFlow(session.app)
-            transfer_flow.wait_for_transfer_to_start()
-            transfer_flow.wait_for_migration_to_complete()
+
+            for step in post_pairing_steps:
+                step(session)
         finally:
-            # See _run_target()'s matching comment -- finally guarantees cleanup on
+            # See TargetRunner.run()'s matching comment -- finally guarantees cleanup on
             # both success and failure, not just failure.
             session.close()
+
+
+class RoleRunner:
+    @staticmethod
+    def run(role: MachineRole, run_id: str, runner_class, post_pairing_steps: List[Callable[[Session], None]]) -> None:
+        """The thin, universal wrapper -- the one place prerequisites/reporting happen,
+        exactly once, regardless of role or scenario. Does not branch on role itself:
+        by the time a scenario function calls this, it has already resolved role into a
+        concrete runner_class (TargetRunner or SourceRunner) and the step list that
+        applies to it."""
+        # Standalone machine-level setup gate (dev mode, WinAppDriver installed +
+        # launchable, Python packages, browser cleanup) -- same checks regardless of
+        # role. Lives in utils/, not in factory/ (see its own module docstring,
+        # 2026-10-07). Does not leave WinAppDriver running: Session, created below,
+        # launches its own independently via factory.driver_factory, the moment it's
+        # actually needed.
+        ensure_prerequisites()
+        ActionReporter.start_run(run_id, role.value)
+
+        try:
+            runner_class.run(run_id, post_pairing_steps)
+        finally:
+            # A report must exist for this run whether it succeeded or failed -- see
+            # PROJECT_PLAN.md Sec 4.8.
+            build_report()
+
+
+# ---------------------------------------------------------------------------------
+# Scenarios. Each post-pairing step function is a plain (session) -> None callable;
+# each scenario function decides, per role, which runner class and step list apply.
+# ---------------------------------------------------------------------------------
+
+def full_transfer_target(session: Session) -> None:
+    transfer_flow = TargetTransferFlow(session.app)
+    transfer_flow.start_transfer()
+    transfer_flow.wait_for_completion()
+
+
+def full_transfer_source(session: Session) -> None:
+    transfer_flow = SourceTransferFlow(session.app)
+    transfer_flow.wait_for_transfer_to_start()
+    transfer_flow.wait_for_migration_to_complete()
+
+
+def full_transfer(role: MachineRole, run_id: str) -> None:
+    """The one scenario that exists today: the shared prefix (sign-in + pairing for
+    Target, pairing for Source), then a complete file transfer, for whichever role this
+    process is."""
+    if role is MachineRole.TARGET:
+        RoleRunner.run(role, run_id, TargetRunner, [full_transfer_target])
+    else:
+        RoleRunner.run(role, run_id, SourceRunner, [full_transfer_source])
+
+
+SCENARIOS = {
+    "full_transfer": full_transfer,
+}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--role", required=True, choices=["target", "source"])
     parser.add_argument("--run-id", required=True, help="Correlation label shared with the other machine's run")
+    parser.add_argument(
+        "--scenario", default="full_transfer", choices=list(SCENARIOS),
+        help="Which post-pairing flow sequence to run (default: full_transfer). "
+             "Both machines should be given the same scenario name.",
+    )
     args = parser.parse_args()
 
     role = MachineRole.TARGET if args.role == "target" else MachineRole.SOURCE
-    RoleRunner.run(role, args.run_id)
-    print(f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}.")
+    SCENARIOS[args.scenario](role, args.run_id)
+    print(f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}, scenario={args.scenario!r}.")
