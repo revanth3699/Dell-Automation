@@ -64,14 +64,22 @@ class SourceTransferFlow:
         self.log.success("Ready-to-migrate screen confirmed")
 
     def wait_for_migration_to_complete(
-        self, migrating_timeout: float = 60.0, summary_timeout: float = 1800.0
+        self, migrating_timeout: float = 60.0, summary_timeout: float = 1800.0, complete_timeout: float = 1800.0
     ) -> None:
         """Call after wait_for_transfer_to_start() returns. Confirmed from user-supplied
-        screenshots (2026-10-07): "We're migrating your data now." (confirms migration
-        actually started) -> "Your migration summary is ready." (confirms it finished --
-        defaults to 30 minutes since this is genuinely data-size-dependent, same
-        reasoning as the Target-side timeout). The first needs no click; the second has
-        a "Close" button, clicked per explicit user direction, 2026-10-07.
+        screenshots: "We're migrating your data now." (confirms migration actually
+        started, 2026-10-07) -> "Your migration summary is ready." (confirms it
+        finished, 2026-10-07) -> "We've completed your migration." (the real final
+        screen, confirmed 2026-10-09). The first two need no click, just confirmation
+        the sequence is progressing; the third has the "Close" button that's actually
+        clicked.
+
+        Bug fixed here, confirmed directly by the user (2026-10-09): Close used to be
+        clicked on "Your migration summary is ready." -- that was premature, not the
+        app's own intended final action. "We've completed your migration." only appears
+        once Target PC's own user clicks Finish and Target is redirected back to its
+        home screen, so complete_timeout is a genuinely cross-machine, human-paced wait
+        with no fixed bound -- defaults to 30 minutes, same reasoning as summary_timeout.
         """
         self.log.info('Waiting for "We\'re migrating your data now."...')
         if not self._poll_until_showing(self.transfer_progress_screen.is_migrating, migrating_timeout):
@@ -83,5 +91,15 @@ class SourceTransferFlow:
             raise RuntimeError(
                 f'"Your migration summary is ready." never appeared within {summary_timeout:.0f}s'
             )
-        self.log.success("Migration summary ready -- migration complete -- clicking Close")
-        self.transfer_progress_screen.close_summary()
+        self.log.success("Migration summary ready")
+
+        self.log.info(
+            'Waiting for "We\'ve completed your migration." (appears only after Target '
+            "PC's own user clicks Finish and returns to its home screen)..."
+        )
+        if not self._poll_until_showing(self.transfer_progress_screen.is_migration_complete, complete_timeout):
+            raise RuntimeError(
+                f'"We\'ve completed your migration." never appeared within {complete_timeout:.0f}s'
+            )
+        self.log.success("Migration complete confirmed -- clicking Close")
+        self.transfer_progress_screen.close_migration_complete()
