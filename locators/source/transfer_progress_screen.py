@@ -20,4 +20,15 @@ READY_TO_MIGRATE_HEADING_LOCATOR = ("xpath", '//*[@Name="Are you ready to start 
 MIGRATING_DATA_HEADING_LOCATOR = ("xpath", '//*[@Name="We\'re migrating your data now."]')
 MIGRATION_SUMMARY_READY_HEADING_LOCATOR = ("xpath", '//*[@Name="Your migration summary is ready."]')
 MIGRATION_COMPLETE_HEADING_LOCATOR = ("xpath", '//*[@Name="We\'ve completed your migration."]')
+# Confirmed directly by the user via a live screenshot (2026-10-09): the body text
+# shown under the heading, used alongside it as the real "migration succeeded"
+# confirmation (same two-texts-stronger-than-one pattern as
+# WelcomeBackScreen.is_home_confirmed()). Matched via contains() on a stable substring
+# rather than the full paragraph, since the trailing "Erase this PC." is rendered bold
+# (a separate run in the accessibility tree) and may not share one Name with the rest
+# of the sentence.
+MIGRATION_COMPLETE_BODY_LOCATOR = (
+    "xpath",
+    '//*[contains(@Name, "You\'ve successfully migrated your data to your new PC")]',
+)
 MIGRATION_COMPLETE_CLOSE_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Close"]')

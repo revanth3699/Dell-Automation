@@ -21,6 +21,7 @@ from components.base_component import BaseComponent
 from locators.source.transfer_progress_screen import (
     LINKED_SUCCESS_HEADING_LOCATOR,
     MIGRATING_DATA_HEADING_LOCATOR,
+    MIGRATION_COMPLETE_BODY_LOCATOR,
     MIGRATION_COMPLETE_CLOSE_BUTTON_LOCATOR,
     MIGRATION_COMPLETE_HEADING_LOCATOR,
     MIGRATION_SUMMARY_READY_HEADING_LOCATOR,
@@ -43,6 +44,9 @@ class TransferProgressScreen:
         self._migration_complete_heading = BaseComponent(
             app_session, *MIGRATION_COMPLETE_HEADING_LOCATOR, "MigrationCompleteHeading"
         )
+        self._migration_complete_body = BaseComponent(
+            app_session, *MIGRATION_COMPLETE_BODY_LOCATOR, "MigrationCompleteBody"
+        )
         self._migration_complete_close_button = BaseComponent(
             app_session, *MIGRATION_COMPLETE_CLOSE_BUTTON_LOCATOR, "MigrationCompleteCloseButton"
         )
@@ -60,7 +64,14 @@ class TransferProgressScreen:
         return self._summary_ready_heading.exists(timeout=timeout)
 
     def is_migration_complete(self, timeout: float = 2.0) -> bool:
-        return self._migration_complete_heading.exists(timeout=timeout)
+        """Confirmed directly by the user via a live screenshot (2026-10-09): both the
+        heading ("We've completed your migration.") AND the body text underneath it
+        ("...You've successfully migrated your data to your new PC...") together are
+        what confirm the migration genuinely succeeded -- require both, not just the
+        heading, before this is trusted as the real final screen."""
+        return self._migration_complete_heading.exists(timeout=timeout) and self._migration_complete_body.exists(
+            timeout=timeout
+        )
 
     def close_migration_complete(self) -> None:
         self._migration_complete_close_button.click()
