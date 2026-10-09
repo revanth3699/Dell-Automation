@@ -178,9 +178,13 @@ Concrete import examples, so this isn't just a diagram:
 
 ## Code flow: one `role_runner` run, end to end
 
-Both machines run `python -m orchestration.role_runner --role {target|source} --run-id <id>`
-as fully independent processes -- there is no single process holding both machines'
-sessions. `RoleRunner.run()` does the same four things for either role:
+Both machines run `python -m orchestration.role_runner --role {target|source} --run-id <id>
+--scenario full_transfer` as fully independent processes -- there is no single process
+holding both machines' sessions. A scenario function (`full_transfer` is the only one
+today) resolves `role` into a concrete runner class (`TargetRunner`/`SourceRunner`, see
+`orchestration/role_runner.py`) and a per-role post-pairing step list, then calls
+`RoleRunner.run()`, the thin wrapper that does the same three things regardless of role
+or scenario:
 
 1. **`ensure_prerequisites()`** (`utils/prerequisites.py`) -- enables Developer
    Mode and installs WinAppDriver if needed (each a one-time admin-approval prompt),
@@ -190,15 +194,17 @@ sessions. `RoleRunner.run()` does the same four things for either role:
    browser profile state. Raises if a step needed an approval that wasn't given.
 2. **`ActionReporter.start_run(run_id, role)`** -- every action recorded from here on
    belongs to this run.
-3. **`Session.get(role, build_path)`** (`factory/session.py`) -- idempotently
+3. Calls into `TargetRunner.run()`/`SourceRunner.run()`, each of which opens its own
+   **`Session.get(role, build_path)`** (`factory/session.py`) -- idempotently
    launches/reuses WinAppDriver (elevated, via `factory.driver_factory`) and
    launch-then-attaches the app process, exposing `session.app` (a `WinAppDriverSession`)
-   to every flow below.
-4. Role-specific flow sequence, then **`session.close()`** unconditionally in a
-   `finally` (tears down browser + app + WinAppDriver together, even on success), then
-   **`build_report()`** in `RoleRunner.run()`'s own outer `finally`.
+   to every flow below -- runs that role's fixed prefix (sign-in+pairing, or pairing),
+   then its scenario-supplied post-pairing steps, then **`session.close()`**
+   unconditionally in a `finally` (tears down browser + app + WinAppDriver together,
+   even on success). `RoleRunner.run()`'s own outer `finally` then calls
+   **`build_report()`**.
 
-**Target role** (`RoleRunner._run_target`):
+**Target role** (`TargetRunner.run()`, via the `full_transfer` scenario):
 `SignInFlow(session, username, password, otp).run()` (browser-based OIDC sign-in +
 OTP, with retry/cancel handling) -> `wait_for_source_pc()` (pairing-discovery finds a
 Source PC on the network) -> `TargetPairingFlow.enter_pairing_code_from_coordination_service(run_id)`
@@ -209,7 +215,7 @@ whole time, clicks "Migrate now" with a periodic re-click + a final re-check rig
 before each click) -> `wait_for_completion()` (waits out the transfer, then checks the
 migration-summary/migration-complete screens, each independently).
 
-**Source role** (`RoleRunner._run_source`):
+**Source role** (`SourceRunner.run()`, via the `full_transfer` scenario):
 `SourcePairingFlow(session.app, run_id, coordination_client).run()` (clicks through
 Welcome, races the trust-network dialog continuously, waits for Target to become
 discoverable, then loops: reads the on-screen pairing code -- which rotates every

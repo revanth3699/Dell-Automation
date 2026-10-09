@@ -193,11 +193,22 @@ def full_transfer_source(session: Session) -> None:
 def full_transfer(role: MachineRole, run_id: str) -> None:
     """The one scenario that exists today: the shared prefix (sign-in + pairing for
     Target, pairing for Source), then a complete file transfer, for whichever role this
-    process is."""
+    process is.
+
+    Bug fixed here, confirmed via code review (2026-10-09): the pre-refactor
+    RoleRunner.run() used to raise RoleRunnerError for any role that wasn't explicitly
+    Target or Source; that guard was dropped when role-dispatch moved into each
+    scenario function. Restored here explicitly -- currently unreachable via the CLI
+    (argparse restricts --role to {target,source}), but a future scenario or a
+    programmatic caller bypassing the CLI should still get a clear error instead of
+    silently running as Source.
+    """
     if role is MachineRole.TARGET:
         RoleRunner.run(role, run_id, TargetRunner, [full_transfer_target])
-    else:
+    elif role is MachineRole.SOURCE:
         RoleRunner.run(role, run_id, SourceRunner, [full_transfer_source])
+    else:
+        raise RoleRunnerError(f"Unknown role: {role!r}")
 
 
 SCENARIOS = {

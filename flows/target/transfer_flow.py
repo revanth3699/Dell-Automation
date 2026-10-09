@@ -97,6 +97,15 @@ class TargetTransferFlow:
         self.migration_error_dialog = MigrationErrorDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
+    def _raise_if_migration_error(self) -> None:
+        """Shared by every wait loop in this class (confirmed via code review,
+        2026-10-09: this exact 3-line check used to be copy-pasted at three separate
+        call sites). Raises TransferFlowError immediately if "Something went wrong"
+        is showing; a no-op otherwise."""
+        if self.migration_error_dialog.is_showing(timeout=0.1):
+            error_text = self.migration_error_dialog.read_error_text()
+            raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+
     def start_transfer(self, screen_timeout: float = 300.0, progress_screen_timeout: float = 30.0) -> None:
         """Waits up to screen_timeout for "Your files are ready to move" -- the
         preceding "preparing your files" step can genuinely take a few minutes per its
@@ -111,9 +120,7 @@ class TargetTransferFlow:
         deadline = time.monotonic() + screen_timeout
         confirmed_accounts = False
         while time.monotonic() < deadline:
-            if self.migration_error_dialog.is_showing(timeout=0.1):
-                error_text = self.migration_error_dialog.read_error_text()
-                raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+            self._raise_if_migration_error()
             if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
                 # Confirmed necessary, same reasoning as the confirm-accounts dialog:
                 # check for the close-apps dialog one more time, right here, before
@@ -131,9 +138,7 @@ class TargetTransferFlow:
                 progress_deadline = time.monotonic() + progress_screen_timeout
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
-                    if self.migration_error_dialog.is_showing(timeout=0.1):
-                        error_text = self.migration_error_dialog.read_error_text()
-                        raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+                    self._raise_if_migration_error()
                     if self.transfer_progress_screen.is_showing(timeout=0.5):
                         self.log.success(
                             "Transfer in progress -- \"We're moving your files and "
@@ -212,14 +217,23 @@ class TargetTransferFlow:
         # transfer_timeout (up to 30 minutes) and then raise a generic "did not finish"
         # error, hiding the real cause. Races the error dialog every cycle instead, same
         # pattern as every other dialog race in this file.
+        #
+        # Bug fixed here, confirmed via code review (2026-10-09): this loop used to
+        # check `time.monotonic() < deadline` BEFORE each attempt, so it could exit
+        # having made zero checks if the deadline had already passed the instant this
+        # method was entered (e.g. transfer_timeout=0, or enough delay accumulated
+        # earlier in the run). Restructured as a do-while so at least one full check
+        # (error dialog + progress screen) always happens first, matching the
+        # guarantee BaseComponent.wait_until_gone() (what this loop replaced) already
+        # made.
         deadline = time.monotonic() + transfer_timeout
         finished = False
-        while time.monotonic() < deadline:
-            if self.migration_error_dialog.is_showing(timeout=0.1):
-                error_text = self.migration_error_dialog.read_error_text()
-                raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+        while True:
+            self._raise_if_migration_error()
             if not self.transfer_progress_screen.is_showing(timeout=0.5):
                 finished = True
+                break
+            if time.monotonic() >= deadline:
                 break
         if not finished:
             raise TransferFlowError(f"Transfer did not finish within {transfer_timeout:.0f}s")
