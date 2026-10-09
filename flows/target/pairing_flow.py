@@ -14,8 +14,10 @@ current code to the Coordination Service (see utils/coordination_client.py) for 
 flow to fetch -- see enter_pairing_code_from_coordination_service() below.
 """
 
+import time
 from typing import Optional
 
+from components.target.common_dialogs import NetworkDisconnectedDialog
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
@@ -31,10 +33,41 @@ class TargetPairingFlow:
         self.log = LoggerFactory.get_logger("target")
         self.pairing_code_entry_screen = PairingCodeEntryScreen(app_session)
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
+        self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
+
+    def _poll_with_network_recovery(self, condition_fn, timeout: float, poll_interval: float = 1.0) -> bool:
+        """Polls condition_fn() every poll_interval seconds up to timeout, transparently
+        recovering from the "This PC isn't connected to a network." dialog if it appears
+        in the meantime. Confirmed directly by the user via a live screenshot
+        (2026-10-09): this dialog can appear at ANY point during pairing (not tied to one
+        specific step) and is not a terminal error -- NetworkDisconnectedDialog.accept()
+        (components/target/common_dialogs.py) already waits 30s before clicking its own
+        "Check again" button, so this just calls that and keeps waiting on the original
+        condition. Both `_wait_for_screen()` and `_submit_code_and_confirm()` below go
+        through this, since the dialog isn't specific to either one.
+
+        Uses the same NetworkDisconnectedDialog as flows/target/authentication/
+        sign_in_flow.py and flows/source/pairing_flow.py (not a separate copy) -- see
+        that class's own docstring.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if condition_fn():
+                return True
+            if self.network_disconnected_dialog.accept(timeout=0.1):
+                self.log.info(
+                    "\"This PC isn't connected to a network\" appeared -- waited and "
+                    "clicked Check again"
+                )
+                continue
+            time.sleep(poll_interval)
+        return False
 
     def _wait_for_screen(self, screen_timeout: float) -> None:
         self.log.info("Waiting for the pairing-code entry screen (\"Let's connect your two PCs\")")
-        if not self.pairing_code_entry_screen.wait_until_showing(timeout=screen_timeout):
+        if not self._poll_with_network_recovery(
+            lambda: self.pairing_code_entry_screen.is_showing(timeout=0.1), max(screen_timeout, 5.0)
+        ):
             raise PairingError(
                 "Pairing-code entry screen (\"Let's connect your two PCs\") never appeared "
                 "after Source PC was found"
@@ -45,7 +78,9 @@ class TargetPairingFlow:
         self.pairing_code_entry_screen.enter_code(code)
 
         self.log.info("Waiting for the pairing-code entry screen to clear (code accepted)")
-        if not self.pairing_code_entry_screen.wait_until_gone(timeout=advance_timeout):
+        if not self._poll_with_network_recovery(
+            lambda: not self.pairing_code_entry_screen.is_showing(timeout=0.1), advance_timeout
+        ):
             raise PairingError(
                 f"Pairing-code entry screen still showing after {advance_timeout:.0f}s -- "
                 "the code may have been rejected (no confirmed error-message text for "

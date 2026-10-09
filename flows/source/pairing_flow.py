@@ -28,6 +28,7 @@ advanced) or the overall timeout elapses.
 import time
 from typing import Optional
 
+from components.source.network_disconnected_dialog import NetworkDisconnectedDialog
 from components.source.pairing_code_screen import PairingCodeScreen
 from components.source.searching_screen import SearchingScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
@@ -56,6 +57,7 @@ class SourcePairingFlow:
 
         self.welcome_screen = WelcomeScreen(app_session)
         self.trust_network_dialog = TrustNetworkDialog(app_session)
+        self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
         self.searching_screen = SearchingScreen(app_session)
         self.pairing_code_screen = PairingCodeScreen(app_session)
 
@@ -100,6 +102,12 @@ class SourcePairingFlow:
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
+                if self.network_disconnected_dialog.accept(timeout=0.1):
+                    self.log.warning(
+                        "\"This PC isn't connected to a network\" appeared mid-discovery-wait "
+                        "-- waited and clicked Check again"
+                    )
+                    continue
                 if self.trust_network_dialog.accept(timeout=0.1):
                     self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
                 if self.pairing_code_screen.is_showing(timeout=2.0):
@@ -133,6 +141,12 @@ class SourcePairingFlow:
 
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self.network_disconnected_dialog.accept(timeout=0.1):
+                self.log.warning(
+                    "\"This PC isn't connected to a network\" appeared mid-publish-loop "
+                    "-- waited and clicked Check again"
+                )
+                continue
             if self.trust_network_dialog.accept(timeout=0.1):
                 self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
                 continue

@@ -83,7 +83,9 @@ part of this default path.
 import time
 
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
-from components.target.common_dialogs import TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog
+from components.target.common_dialogs import (
+    TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog, NetworkDisconnectedDialog,
+)
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
 from components.target.pairing_discovery_screen import PairingDiscoveryScreen
@@ -129,6 +131,7 @@ class SignInFlow:
         self.welcome_screen = WelcomeScreen(self.app_session)
         self.welcome_back_screen = WelcomeBackScreen(self.app_session)
         self.trust_network_dialog = TrustNetworkDialog(self.app_session)
+        self.network_disconnected_dialog = NetworkDisconnectedDialog(self.app_session)
         self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
         self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
@@ -222,6 +225,12 @@ class SignInFlow:
         found = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self.network_disconnected_dialog.accept(timeout=0.1):
+                self.log.warning(
+                    "\"This PC isn't connected to a network\" appeared while waiting for "
+                    "Source PC -- waited and clicked Check again"
+                )
+                continue
             if not self.pairing_discovery_screen.is_showing(timeout=1.0):
                 found = True
                 break
@@ -712,6 +721,12 @@ class SignInFlow:
         trust_network_accepted = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self.network_disconnected_dialog.accept(timeout=0.1):
+                self.log.warning(
+                    "\"This PC isn't connected to a network\" appeared while waiting for "
+                    "pairing-discovery -- waited and clicked Check again"
+                )
+                continue
             if self.pairing_discovery_screen.is_showing(timeout=0.1):
                 if trust_network_accepted:
                     self.log.success("Pairing-discovery screen confirmed (after accepting trust-network)")

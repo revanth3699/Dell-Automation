@@ -12,6 +12,7 @@ from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, CLOSE_APPS_HEADING_LOCATOR
 from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR, MIGRATION_ERROR_HEADING_LOCATOR
+from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR, NETWORK_DISCONNECTED_HEADING_LOCATOR
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR, TRUST_NETWORK_HEADING_LOCATOR
@@ -140,6 +141,41 @@ class CloseAppsDialog:
         if not self._heading.exists(timeout=timeout):
             return False
         self._close_application_button.click()
+        return True
+
+
+class NetworkDisconnectedDialog:
+    """"This PC isn't connected to a network." -- a generic connectivity-check dialog
+    confirmed from two user-supplied screenshots (2026-10-09), each showing it layered
+    over a different underlying screen -- can appear at any point during a
+    pairing-dependent wait (the body text, "Connect both of your PCs to the same
+    network to continue", ties it to the cross-machine discovery/pairing step
+    specifically), not tied to one specific screen. Has a "Check again" button.
+
+    Per explicit user direction: waits CHECK_AGAIN_DELAY_SECONDS before clicking Check
+    again (rather than immediately), since the underlying network condition is likely
+    transient -- an instant re-check would probably just hit the same failure again.
+    """
+
+    CHECK_AGAIN_DELAY_SECONDS = 30.0
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(
+            app_session, *NETWORK_DISCONNECTED_HEADING_LOCATOR, "NetworkDisconnectedHeading"
+        )
+        self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
+
+    def is_showing(self, timeout: float = 0.1) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def accept(self, timeout: float = 2.0) -> bool:
+        """Clicks "Check again" if the dialog is showing, after waiting
+        CHECK_AGAIN_DELAY_SECONDS first. Returns whether it was present at all (same
+        pattern as every other dialog in this module)."""
+        if not self._heading.exists(timeout=timeout):
+            return False
+        time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
+        self._check_again_button.click(timeout=2.0)
         return True
 
 
