@@ -75,6 +75,7 @@ from components.target.common_dialogs import CloseAppsDialog, MigrationErrorDial
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
+from components.target.sign_in_screen import WelcomeBackScreen
 from components.target.transfer_progress_screen import TransferProgressScreen
 from components.target.transfer_receive_screen import TransferReceiveScreen
 from factory.logger_factory import LoggerFactory
@@ -92,6 +93,7 @@ class TargetTransferFlow:
         self.transfer_progress_screen = TransferProgressScreen(app_session)
         self.migration_summary_screen = MigrationSummaryScreen(app_session)
         self.migration_complete_screen = MigrationCompleteScreen(app_session)
+        self.welcome_back_screen = WelcomeBackScreen(app_session)
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
@@ -195,19 +197,33 @@ class TargetTransferFlow:
             f'"Your files are ready to move" screen never appeared within {screen_timeout:.0f}s'
         )
 
-    def wait_for_completion(self, transfer_timeout: float = 1800.0, summary_timeout: float = 30.0) -> None:
+    def wait_for_completion(
+        self,
+        transfer_timeout: float = 1800.0,
+        summary_timeout: float = 30.0,
+        complete_timeout: float = 30.0,
+        home_timeout: float = 30.0,
+    ) -> None:
         """Call after start_transfer() returns. Waits for "We're moving your files and
         settings" to clear (transfer finished -- defaults to 30 minutes since this is
-        genuinely data-size-dependent), then checks for two confirmed-from-screenshots
-        follow-on screens, each independently and optionally (neither is a required
-        gate -- exact ordering between them isn't confirmed, so each is checked on its
-        own rather than assuming one implies the other already appeared):
+        genuinely data-size-dependent), then drives the real, confirmed completion
+        sequence (2026-10-09, via live screenshots -- this REPLACES an earlier,
+        incorrect guess that treated the two follow-on screens as independent/optional):
 
-        - "Here's a summary of your migration results" -> clicks the "here" link in
-          "Click here to view the details." (see MigrationSummaryScreen).
-        - "We've successfully migrated your files" -> clicks "download the PDF report"
-          in "You can also download the PDF report with more details." (see
-          MigrationCompleteScreen).
+        "Here's a summary of your migration results" -> click "Finish" (top right, NOT
+        the "here" link -- clicking "here" was the previous wrong action) ->
+        "Your migration is now complete" -> click "download a PDF", then click
+        "Back to Home" -> back on the Welcome-back home screen, confirmed via its
+        "Nothing's lost from your old PC" text (not just the heading, which this
+        screen also shows during the unrelated already-signed-in sign-in shortcut).
+
+        Every step here is now a required gate (raises TransferFlowError if a screen
+        doesn't appear in time), not optional -- this is the one real, confirmed path,
+        not a best-effort check. Once is_home_confirmed() returns True, this method
+        returns normally; the caller's own Session.close() (already wired in
+        orchestration/role_runner.py's TargetRunner.run(), via its finally block) is
+        what actually closes the app -- no separate in-app "close" action exists or is
+        needed here.
         """
         self.log.info('Waiting for the transfer to finish ("We\'re moving your files and settings" to clear)...')
         # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
@@ -239,24 +255,33 @@ class TargetTransferFlow:
             raise TransferFlowError(f"Transfer did not finish within {transfer_timeout:.0f}s")
         self.log.success("Transfer finished")
 
-        self.log.info('Checking for "Here\'s a summary of your migration results"...')
-        if self.migration_summary_screen.is_showing(timeout=summary_timeout):
-            self.log.success('Migration-summary screen confirmed -- clicking "here" to view details')
-            self.migration_summary_screen.click_view_details_link()
-        else:
-            self.log.info(
-                '"Here\'s a summary of your migration results" not seen within '
-                f"{summary_timeout:.0f}s -- skipping the view-details link"
+        self.log.info('Waiting for "Here\'s a summary of your migration results"...')
+        if not self.migration_summary_screen.is_showing(timeout=summary_timeout):
+            raise TransferFlowError(
+                f'"Here\'s a summary of your migration results" never appeared within '
+                f"{summary_timeout:.0f}s after the transfer finished"
             )
+        self.log.success('Migration-summary screen confirmed -- clicking "Finish"')
+        self.migration_summary_screen.click_finish()
 
-        self.log.info('Checking for "We\'ve successfully migrated your files"...')
-        if self.migration_complete_screen.is_showing(timeout=summary_timeout):
-            self.log.success(
-                'Migration-complete screen confirmed -- clicking "download the PDF report"'
+        self.log.info('Waiting for "Your migration is now complete"...')
+        if not self.migration_complete_screen.is_showing(timeout=complete_timeout):
+            raise TransferFlowError(
+                f'"Your migration is now complete" never appeared within {complete_timeout:.0f}s '
+                "after clicking Finish"
             )
-            self.migration_complete_screen.click_download_pdf_report_link()
-        else:
-            self.log.info(
-                '"We\'ve successfully migrated your files" not seen within '
-                f"{summary_timeout:.0f}s -- skipping the PDF-report link"
+        self.log.success(
+            'Migration-complete screen confirmed -- clicking "download a PDF", then "Back to Home"'
+        )
+        self.migration_complete_screen.click_download_pdf_link()
+        self.migration_complete_screen.click_back_to_home()
+
+        self.log.info(
+            'Confirming return to the home screen ("Nothing\'s lost from your old PC")...'
+        )
+        if not self.welcome_back_screen.is_home_confirmed(timeout=home_timeout):
+            raise TransferFlowError(
+                f"Did not confirm return to the home screen within {home_timeout:.0f}s "
+                "after clicking Back to Home"
             )
+        self.log.success("Confirmed back on the home screen -- migration flow complete")

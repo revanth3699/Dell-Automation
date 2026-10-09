@@ -1,13 +1,15 @@
-"""Target-role migration-complete screen -- shown after clicking "here" on
-MigrationSummaryScreen. Confirmed from a user-supplied screenshot (2026-10-06):
-"We've successfully migrated your files", with a "You can also download the PDF
-report with more details." sentence where only "download the PDF report" is a real
-clickable link.
+"""Target-role migration-complete screen -- shown after clicking "Finish" on
+MigrationSummaryScreen. Confirmed directly by the user (2026-10-09) via a live
+screenshot: "Your migration is now complete", with "download a PDF" as the real
+clickable link, and a separate "Back to Home" link (top right) that's the actual way
+off this screen, back to the Welcome-back home screen
+(components/target/sign_in_screen.py's WelcomeBackScreen).
 """
 
 from components.base_component import BaseComponent
 from locators.target.migration_complete_screen import (
-    DOWNLOAD_PDF_REPORT_LINK_LOCATOR,
+    BACK_TO_HOME_LINK_LOCATOR,
+    DOWNLOAD_PDF_LINK_LOCATOR,
     MIGRATION_COMPLETE_HEADING_LOCATOR,
 )
 
@@ -15,12 +17,14 @@ from locators.target.migration_complete_screen import (
 class MigrationCompleteScreen:
     def __init__(self, app_session):
         self._heading = BaseComponent(app_session, *MIGRATION_COMPLETE_HEADING_LOCATOR, "MigrationCompleteHeading")
-        self._download_pdf_report_link = BaseComponent(
-            app_session, *DOWNLOAD_PDF_REPORT_LINK_LOCATOR, "DownloadPdfReportLink"
-        )
+        self._download_pdf_link = BaseComponent(app_session, *DOWNLOAD_PDF_LINK_LOCATOR, "DownloadPdfLink")
+        self._back_to_home_link = BaseComponent(app_session, *BACK_TO_HOME_LINK_LOCATOR, "BackToHomeLink")
 
     def is_showing(self, timeout: float = 2.0) -> bool:
         return self._heading.exists(timeout=timeout)
 
-    def click_download_pdf_report_link(self) -> None:
-        self._download_pdf_report_link.click()
+    def click_download_pdf_link(self) -> None:
+        self._download_pdf_link.click()
+
+    def click_back_to_home(self) -> None:
+        self._back_to_home_link.click()

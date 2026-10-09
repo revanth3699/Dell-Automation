@@ -12,4 +12,10 @@ screenshot and has been replaced.
 """
 
 MIGRATION_SUCCESS_HEADING_LOCATOR = ("xpath", '//*[@Name="Here\'s a summary of your migration results"]')
-VIEW_DETAILS_LINK_LOCATOR = ("xpath", '//*[@Name="here"]')
+
+# Bug fixed here, confirmed directly by the user (2026-10-09) via live screenshots:
+# this screen also has a "Finish" link (top right) -- the actual next step in the real
+# flow. The "here" link (VIEW_DETAILS_LINK_LOCATOR) used to be clicked instead; that was
+# wrong -- clicking "here" doesn't advance to the real completion screen
+# ("Your migration is now complete"), "Finish" does.
+FINISH_LINK_LOCATOR = ("xpath", '//*[@Name="Finish"]')
