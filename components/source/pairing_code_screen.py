@@ -149,9 +149,17 @@ class PairingCodeScreen:
 
     def _read_via_ocr(self) -> Optional[str]:
         self._bring_app_to_foreground()
-        png_bytes = self._session.get_screenshot_as_png()
-        tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_ocr.png"
-        tmp_path.write_bytes(png_bytes)
+        try:
+            png_bytes = self._session.get_screenshot_as_png()
+            tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_ocr.png"
+            tmp_path.write_bytes(png_bytes)
+        except Exception as exc:
+            # A WinAppDriver screenshot call (network/HTTP underneath) or the temp-file
+            # write can both fail transiently -- treat exactly like a failed OCR read
+            # (return None, let the caller retry) rather than letting it escape
+            # uncaught, same as the crop/save failure below.
+            logger.debug(f"OCR fallback: screenshot capture failed: {exc}")
+            return None
         try:
             text = recognize_text(str(tmp_path))
         except Exception as exc:
@@ -215,8 +223,16 @@ class PairingCodeScreen:
         hi_rect = rects.get(hi) or interpolated.get(hi) or pos_rect
 
         self._bring_app_to_foreground()
-        png_bytes = self._session.get_screenshot_as_png()
-        image = Image.open(io.BytesIO(png_bytes))
+        try:
+            png_bytes = self._session.get_screenshot_as_png()
+            image = Image.open(io.BytesIO(png_bytes))
+        except Exception as exc:
+            # Same reasoning as _read_via_ocr's screenshot guard: a flaky WinAppDriver
+            # screenshot call or a truncated/corrupt PNG (PIL.UnidentifiedImageError,
+            # an OSError subclass) is a transient read failure, not a reason to crash
+            # the whole flow.
+            logger.debug(f"Neighbor-crop OCR: screenshot capture failed: {exc}")
+            return None
         pad = 10
         left = max(0, int(lo_rect["x"]) - pad)
         top = max(0, int(pos_rect["y"]) - pad)
@@ -234,10 +250,14 @@ class PairingCodeScreen:
                 f"{bottom}) for position {pos} -- discarding"
             )
             return None
-        crop = image.crop((left, top, right, bottom))
-        crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
-        tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_neighbor_crop.png"
-        crop.save(tmp_path)
+        try:
+            crop = image.crop((left, top, right, bottom))
+            crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
+            tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_neighbor_crop.png"
+            crop.save(tmp_path)
+        except Exception as exc:
+            logger.debug(f"Neighbor-crop OCR: crop/resize/save failed: {exc}")
+            return None
         try:
             text = recognize_text(str(tmp_path))
         except Exception as exc:

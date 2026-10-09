@@ -38,10 +38,17 @@ _MASK_CHARS = set("•*●○")
 
 
 def _run_powershell(command: str, timeout: int = 20) -> str:
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
-        capture_output=True, text=True, timeout=timeout,
-    )
+    """Returns "" (instead of raising) on a subprocess-level failure -- see
+    factory/session.py's copy of this same function for the full reasoning; kept
+    consistent across both so neither one is a weaker link than the other."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug(f"_run_powershell: subprocess failed ({exc}) -- treating as no output")
+        return ""
     return result.stdout.strip()
 
 

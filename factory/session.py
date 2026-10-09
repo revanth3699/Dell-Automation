@@ -76,10 +76,24 @@ class MachineRole(str, Enum):
 
 
 def _run_powershell(command: str, timeout: int = 20) -> str:
-    result = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", command],
-        capture_output=True, text=True, timeout=timeout,
-    )
+    """Returns "" (instead of raising) on a subprocess-level failure -- a slow/hung
+    PowerShell invocation (subprocess.TimeoutExpired) or powershell.exe itself not being
+    resolvable (FileNotFoundError/OSError) -- so callers like _find_main_window_hwnd(),
+    which this underlies, see "nothing found" (the same shape as a normal negative
+    result) and let their own polling loop retry, rather than crashing the whole flow.
+    Confirmed real risk: this function is called every iteration of several polling
+    loops (_assert_app_alive() and friends) during a live migration, under the I/O load
+    this project's own docs already document as capable of making process/window
+    inspection flaky.
+    """
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug(f"_run_powershell: subprocess failed ({exc}) -- treating as no output")
+        return ""
     return result.stdout.strip()
 
 

@@ -28,6 +28,8 @@ advanced) or the overall timeout elapses.
 import time
 from typing import Optional
 
+import requests
+
 from components.source.network_disconnected_dialog import NetworkDisconnectedDialog
 from components.source.pairing_code_screen import PairingCodeScreen
 from components.source.searching_screen import SearchingScreen
@@ -156,7 +158,7 @@ class SourcePairingFlow:
 
             try:
                 code = self.pairing_code_screen.read_code()
-            except RuntimeError as exc:
+            except (RuntimeError, OSError, requests.exceptions.RequestException) as exc:
                 # Confirmed live (2026-10-06): read_code() can genuinely fail on one
                 # particular rotation (e.g. a harder-than-usual OCR misread, or more
                 # boxes than usual missing from the UIA tree at once) while the very
@@ -164,15 +166,27 @@ class SourcePairingFlow:
                 # re-publishes every CODE_REPUBLISH_INTERVAL_SECONDS regardless of
                 # whether the code changed, specifically so a single bad read doesn't
                 # need to be fatal. Log it and try again next cycle instead of ending
-                # the whole flow over one unlucky rotation.
+                # the whole flow over one unlucky rotation. Broadened beyond RuntimeError
+                # to also cover a flaky WinAppDriver screenshot call or corrupt-PNG read
+                # (OSError/PIL.UnidentifiedImageError) one layer down in read_code()'s
+                # own OCR fallbacks -- same "retry next cycle" treatment, not fatal.
                 self.log.warning(f"read_code() failed this cycle, will retry next cycle: {exc}")
                 time.sleep(CODE_REPUBLISH_INTERVAL_SECONDS)
                 continue
 
             if code != last_published:
-                self.coordination_client.publish(self.run_id, PAIRING_CODE_KEY, code)
-                self.log.success(f"Published pairing code to run_id={self.run_id!r}: {code}")
-                last_published = code
+                try:
+                    self.coordination_client.publish(self.run_id, PAIRING_CODE_KEY, code)
+                except requests.exceptions.RequestException as exc:
+                    # A transient blip talking to the Coordination Service (connection
+                    # reset, 5xx, service mid-restart) shouldn't be fatal either -- this
+                    # loop already re-reads and re-publishes every
+                    # CODE_REPUBLISH_INTERVAL_SECONDS, so the next cycle's publish just
+                    # retries with whatever code is current then.
+                    self.log.warning(f"Publishing pairing code failed this cycle, will retry next cycle: {exc}")
+                else:
+                    self.log.success(f"Published pairing code to run_id={self.run_id!r}: {code}")
+                    last_published = code
             else:
                 self.log.debug(f"Code unchanged ({code}) -- not re-publishing")
 

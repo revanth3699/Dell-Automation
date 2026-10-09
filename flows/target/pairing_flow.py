@@ -17,6 +17,9 @@ flow to fetch -- see enter_pairing_code_from_coordination_service() below.
 import time
 from typing import Optional
 
+import requests
+
+from components.base_component import ComponentActionError
 from components.target.common_dialogs import NetworkDisconnectedDialog
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
@@ -25,6 +28,24 @@ from factory.logger_factory import LoggerFactory
 
 class PairingError(Exception):
     pass
+
+
+# Exception types a single fetch+enter attempt can actually raise underneath
+# _submit_code_and_confirm(), beyond this module's own PairingError: enter_code() can
+# raise ComponentActionError directly, or TimeoutError via poll_until() when the
+# code-entry boxes never appear; the raw box.send_keys() call (bypassing
+# BaseComponent's own exception-wrapping) can raise RuntimeError after exhausting its
+# own retries, or a requests exception straight from WinAppDriverElement._post(). All
+# of these are exactly the kind of single-rotation, transient failure
+# enter_pairing_code_from_coordination_service()'s retry loop exists to survive -- not
+# just PairingError.
+_RETRYABLE_PAIRING_ENTRY_EXCEPTIONS = (
+    PairingError,
+    ComponentActionError,
+    TimeoutError,
+    RuntimeError,
+    requests.exceptions.RequestException,
+)
 
 
 class TargetPairingFlow:
@@ -145,7 +166,7 @@ class TargetPairingFlow:
         coordination_client = coordination_client or CoordinationClient()
         self._wait_for_screen(screen_timeout)
 
-        last_error: Optional[PairingError] = None
+        last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             self.log.info(
                 f"Fetching current pairing code from Coordination Service "
@@ -157,11 +178,12 @@ class TargetPairingFlow:
             try:
                 self._submit_code_and_confirm(code, advance_timeout)
                 return
-            except PairingError as exc:
+            except _RETRYABLE_PAIRING_ENTRY_EXCEPTIONS as exc:
                 last_error = exc
                 self.log.warning(
-                    f"Attempt {attempt}/{max_attempts} failed ({exc}) -- re-fetching "
-                    "the current code and retrying, in case it rotated on the Source "
-                    "side during entry"
+                    f"Attempt {attempt}/{max_attempts} failed ({type(exc).__name__}: {exc}) "
+                    "-- re-fetching the current code and retrying, in case it rotated on "
+                    "the Source side during entry, or a WinAppDriver/network hiccup during "
+                    "digit entry"
                 )
         raise last_error

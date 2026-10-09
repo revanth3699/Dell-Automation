@@ -80,8 +80,19 @@ class TransferReceiveScreen:
 
         if len(candidates) == 1:
             logger.info("Exactly one non-chrome button found -- clicking it")
-            candidates[0].click_at_center()
-            return
+            try:
+                candidates[0].click_at_center()
+                return
+            except Exception as exc:
+                # Consistent with the primary click_at_center() attempt above: a click
+                # failure here is still just "couldn't start the transfer", the same
+                # family of error the RuntimeError below already describes -- fall
+                # through to it instead of letting a raw exception escape uncaught
+                # (this method's only caller, TargetTransferFlow.start_transfer(),
+                # doesn't wrap this call either, so an uncaught exception here would
+                # otherwise propagate all the way to RoleRunner.run() as a raw
+                # traceback instead of a clean, diagnosable error).
+                logger.warning(f"Fallback candidate click_at_center also failed ({exc})")
 
         raise RuntimeError(
             "Could not find the 'Bring everything over for me' / 'Migrate now' "
