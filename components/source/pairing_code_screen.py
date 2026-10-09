@@ -222,6 +222,18 @@ class PairingCodeScreen:
         top = max(0, int(pos_rect["y"]) - pad)
         right = int(hi_rect["x"] + hi_rect["width"]) + pad
         bottom = int(pos_rect["y"] + pos_rect["height"]) + pad
+        if right <= left or bottom <= top:
+            # Confirmed live (2026-10-09): can happen when the pairing-code screen
+            # advances (Target already entered the code) mid-read -- the rects this
+            # attempt collected describe boxes that are already gone/stale by the time
+            # this screenshot is taken, producing a degenerate crop rect. Treat it the
+            # same as any other untrustworthy OCR read rather than letting PIL's
+            # crop() raise and kill the whole flow.
+            logger.debug(
+                f"Neighbor-crop OCR: degenerate crop rect ({left}, {top}, {right}, "
+                f"{bottom}) for position {pos} -- discarding"
+            )
+            return None
         crop = image.crop((left, top, right, bottom))
         crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
         tmp_path = Path(tempfile.gettempdir()) / "dda_pairing_code_neighbor_crop.png"
@@ -274,6 +286,16 @@ class PairingCodeScreen:
         last_digits: dict = {}
         last_element_ids: dict = {}
         for attempt in range(attempts):
+            if not self.is_showing(timeout=0.1):
+                # Confirmed live (2026-10-09): the screen can advance (pairing already
+                # succeeded) in the middle of this method's own retry loop -- bail
+                # immediately instead of burning the rest of `attempts` on OCR reads of
+                # a screen that's no longer there. _publish_loop's next-iteration
+                # is_showing() check is what actually recognizes "Target has paired".
+                raise RuntimeError(
+                    "Pairing-code screen stopped showing mid-read -- pairing most "
+                    "likely already advanced"
+                )
             digits, rects, element_ids = self._read_via_uia()
 
             rotated_mid_read = any(
