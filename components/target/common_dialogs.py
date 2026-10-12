@@ -13,6 +13,10 @@ from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, 
 from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR, MIGRATION_ERROR_HEADING_LOCATOR
 from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR, NETWORK_DISCONNECTED_HEADING_LOCATOR
+from locators.target.other_pc_network_disconnected_dialog import (
+    CANCEL_TRANSFER_BUTTON_LOCATOR,
+    OTHER_PC_NETWORK_DISCONNECTED_HEADING_LOCATOR,
+)
 from locators.target.plug_into_ac_power_dialog import (
     PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR,
     PLUG_INTO_AC_POWER_HEADING_LOCATOR,
@@ -217,6 +221,38 @@ class PlugIntoAcPowerDialog:
         time.sleep(self.PLUG_IN_DELAY_SECONDS)
         self._cancel_button.click(timeout=2.0)
         return True
+
+
+class OtherPcNetworkDisconnectedDialog:
+    """"The other PC isn't connected to a network." -- confirmed from a user-supplied
+    screenshot (2026-10-12), shown layered over the transfer-progress screen. Distinct
+    from NetworkDisconnectedDialog ("This PC isn't connected to a network."), which is
+    about THIS machine's own connectivity and is recoverable by waiting and clicking
+    "Check again". This one reports the REMOTE (Source) PC losing its network
+    connection -- nothing local to retry, the problem is on the other machine -- so per
+    explicit user direction this is treated as a terminal failure, not something to
+    race and recover from: click "Cancel transfer" and let the caller abort the whole
+    run (same "immediate, unrecoverable" treatment as MigrationErrorDialog, just with
+    its own explicit button to click first instead of nothing to click at all).
+    """
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(
+            app_session, *OTHER_PC_NETWORK_DISCONNECTED_HEADING_LOCATOR, "OtherPcNetworkDisconnectedHeading"
+        )
+        self._cancel_transfer_button = BaseComponent(
+            app_session, *CANCEL_TRANSFER_BUTTON_LOCATOR, "CancelTransferButton"
+        )
+
+    def is_showing(self, timeout: float = 0.1) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def cancel_transfer(self, timeout: float = 2.0) -> None:
+        """Clicks "Cancel transfer". Callers check is_showing() first and only call
+        this once they already know the dialog is present (same convention as
+        MigrationErrorDialog.read_error_text()) -- unlike every other dialog's
+        accept()/retry(), this doesn't re-check presence itself."""
+        self._cancel_transfer_button.click(timeout=timeout)
 
 
 class MigrationErrorDialog:

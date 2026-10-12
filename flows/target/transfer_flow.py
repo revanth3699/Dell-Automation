@@ -71,7 +71,12 @@ it appears, same pattern as every other dialog race here.
 
 import time
 
-from components.target.common_dialogs import CloseAppsDialog, MigrationErrorDialog, PlugIntoAcPowerDialog
+from components.target.common_dialogs import (
+    CloseAppsDialog,
+    MigrationErrorDialog,
+    OtherPcNetworkDisconnectedDialog,
+    PlugIntoAcPowerDialog,
+)
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
@@ -97,6 +102,7 @@ class TargetTransferFlow:
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
+        self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
@@ -108,6 +114,28 @@ class TargetTransferFlow:
         if self.migration_error_dialog.is_showing(timeout=0.1):
             error_text = self.migration_error_dialog.read_error_text()
             raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+
+    def _raise_if_other_pc_disconnected(self) -> None:
+        """Shared by every wait loop in this class, same reasoning as
+        _raise_if_migration_error(). Confirmed directly by the user via a live
+        screenshot (2026-10-12): "The other PC isn't connected to a network." means the
+        Source PC lost its network connection -- nothing Target can retry locally, so
+        per explicit user direction this clicks "Cancel transfer" and raises
+        immediately, aborting the run. The caller's own Session.close() (already wired
+        in orchestration/role_runner.py's TargetRunner.run(), via its finally block)
+        is what then actually closes the app and WinAppDriver -- same cleanup path
+        every other failure in this flow already goes through, nothing extra needed
+        here."""
+        if self.other_pc_network_disconnected_dialog.is_showing(timeout=0.1):
+            self.log.error(
+                '"The other PC isn\'t connected to a network." appeared -- clicking '
+                '"Cancel transfer" and aborting'
+            )
+            self.other_pc_network_disconnected_dialog.cancel_transfer()
+            raise TransferFlowError(
+                'Migration failed: "The other PC isn\'t connected to a network." appeared -- '
+                "the Source PC lost network connectivity mid-transfer; clicked Cancel transfer"
+            )
 
     def _accept_plug_into_ac_power_if_showing(self) -> bool:
         """Shared by every wait loop in this class, same reasoning as
@@ -138,6 +166,7 @@ class TargetTransferFlow:
         confirmed_accounts = False
         while time.monotonic() < deadline:
             self._raise_if_migration_error()
+            self._raise_if_other_pc_disconnected()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
@@ -158,6 +187,7 @@ class TargetTransferFlow:
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
                     self._raise_if_migration_error()
+                    self._raise_if_other_pc_disconnected()
                     if self._accept_plug_into_ac_power_if_showing():
                         continue
                     if self.transfer_progress_screen.is_showing(timeout=0.5):
@@ -265,6 +295,7 @@ class TargetTransferFlow:
         finished = False
         while True:
             self._raise_if_migration_error()
+            self._raise_if_other_pc_disconnected()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if not self.transfer_progress_screen.is_showing(timeout=0.5):
