@@ -78,6 +78,14 @@ negative-path check. The full negative-path validation (all three steps, each wr
 value confirmed against its error banner, exact wording from "dell screens flow.pdf")
 moved to tools/adhoc/ -- invoked deliberately when verifying error messages, never as
 part of this default path.
+
+Bug fixed here, confirmed directly by the user (2026-10-13): "Add a desktop shortcut
+before you go" (a SupportAssist shortcut-creation offer) can appear at ANY point
+between app launch and reaching pairing-discovery -- not confirmed to one specific
+phase. Raced continuously via _accept_desktop_shortcut_if_showing() in every polling
+loop in this class (same "race it continuously" treatment as
+NetworkDisconnectedDialog/PlugIntoAcPowerDialog), clicking "Create shortcut" whenever
+it appears.
 """
 
 import time
@@ -85,7 +93,7 @@ import time
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import (
     TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog, NetworkDisconnectedDialog,
-    PlugIntoAcPowerDialog,
+    PlugIntoAcPowerDialog, DesktopShortcutDialog,
 )
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
@@ -134,6 +142,7 @@ class SignInFlow:
         self.trust_network_dialog = TrustNetworkDialog(self.app_session)
         self.network_disconnected_dialog = NetworkDisconnectedDialog(self.app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(self.app_session)
+        self.desktop_shortcut_dialog = DesktopShortcutDialog(self.app_session)
         self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
         self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
@@ -239,6 +248,8 @@ class SignInFlow:
                     "waited and clicked Cancel"
                 )
                 continue
+            if self._accept_desktop_shortcut_if_showing():
+                continue
             if not self.pairing_discovery_screen.is_showing(timeout=1.0):
                 found = True
                 break
@@ -275,6 +286,19 @@ class SignInFlow:
                 "transition."
             )
 
+    def _accept_desktop_shortcut_if_showing(self) -> bool:
+        """Confirmed directly by the user (2026-10-13): "Add a desktop shortcut before
+        you go" can appear at ANY point between app launch and reaching
+        pairing-discovery -- not confirmed to one specific phase ("we are not sure at
+        what phase it can appear"), so this is raced in every polling loop in this
+        class, same "race it continuously" treatment as NetworkDisconnectedDialog/
+        PlugIntoAcPowerDialog. Not fatal -- clicks "Create shortcut" and lets the
+        caller's loop continue."""
+        if self.desktop_shortcut_dialog.accept(timeout=0.1):
+            self.log.success('"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"')
+            return True
+        return False
+
     def _already_signed_in(self) -> bool:
         # Confirmed via live log inspection (2026-10-05): the app can silently refresh a
         # cached OIDC refresh token (its own TrySilentLoginAsync, logged as
@@ -284,6 +308,8 @@ class SignInFlow:
         # already-signed-in screens have been observed; check for all of them before
         # assuming the sign-in button must be there.
         self.log.info("Checking for already-signed-in shortcuts before the Welcome screen")
+
+        self._accept_desktop_shortcut_if_showing()  # clear it if present before the real checks below
 
         if self.pairing_discovery_screen.is_showing(timeout=3.0):
             self.log.success("Already signed in: pairing-discovery screen already showing")
@@ -345,6 +371,8 @@ class SignInFlow:
             deadline = time.monotonic() + wait_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
+                if self._accept_desktop_shortcut_if_showing():
+                    continue
                 if find_new_browser_window_hwnd(known_hwnds) is not None:
                     return True
 
@@ -478,6 +506,8 @@ class SignInFlow:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self._accept_desktop_shortcut_if_showing():
+                continue
             if find_new_browser_window_hwnd(known_hwnds) is not None:
                 return True
             time.sleep(0.5)
@@ -508,6 +538,8 @@ class SignInFlow:
         matched_phrase = None
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self._accept_desktop_shortcut_if_showing():
+                continue
             if self.sign_in_failed_dialog.is_showing(timeout=0.1):
                 return "failed"
             if transition_matched_at is None:
@@ -650,6 +682,8 @@ class SignInFlow:
         appeared = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            if self._accept_desktop_shortcut_if_showing():
+                continue
             if is_uac_prompt_showing():
                 appeared = True
                 break
@@ -662,6 +696,8 @@ class SignInFlow:
         resolve_deadline = time.monotonic() + max(remaining, 5.0)
         while time.monotonic() < resolve_deadline:
             self._assert_app_alive()
+            if self._accept_desktop_shortcut_if_showing():
+                continue
             if not is_uac_prompt_showing():
                 self.log.success("UAC prompt resolved (consent.exe exited)")
                 return True
@@ -740,6 +776,8 @@ class SignInFlow:
                     "\"Plug into AC power\" appeared while waiting for pairing-discovery "
                     "-- waited and clicked Cancel"
                 )
+                continue
+            if self._accept_desktop_shortcut_if_showing():
                 continue
             if self.pairing_discovery_screen.is_showing(timeout=0.1):
                 if trust_network_accepted:
