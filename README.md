@@ -31,6 +31,10 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    uv run python -m orchestration.role_runner --role source --run-id <id>
    uv run python utils/run_coordination_service.py
    ```
+   Target also takes `--launch {exe,mock,simulator}` (default `exe`): `simulator`
+   launches the Target PC UI app indirectly via the CDM Simulator WPF app (mimics Dell
+   SupportAssist, which isn't really integrated yet) instead of launching it directly --
+   requires `DDA_CDM_SIMULATOR_PATH`. Ignored for `--role source`.
 
 **WinAppDriver, Windows Developer Mode, and required Python packages are all
 auto-detected and auto-installed/enabled on first run** -- `utils/prerequisites.py`'s
@@ -256,3 +260,5 @@ their own role (plus `DDA_COORDINATION_SERVICE_URL`, which both must agree on). 
 | `DDA_WINAPPDRIVER_INSTALL_PATHS` | default OK | default OK | Semicolon-separated search paths used by the auto-install check. |
 | `DDA_NODE_INSTALL_PATHS` | default OK | not used | Only needed for the GlassFloor mock-server dev launch mode, not a normal run. |
 | `DDA_MOCK_SERVER_PORT` | default OK | not used | Same as above -- dev-only. |
+| `DDA_CDM_SIMULATOR_PATH` | **Required if `--launch simulator`** | not used | Path to `CDMSimulatorWPF.exe` -- the WPF app that mimics Dell SupportAssist (not really integrated yet) and launches the Target PC UI app on its own behalf. Not needed for `--launch exe`/`mock` (the default). |
+| `DDA_CDM_SIMULATOR_EXE_NAME` / `DDA_CDM_SIMULATOR_PROCESS_NAME` | default OK | not used | Only change if a different CDM Simulator build/process name is in play. |

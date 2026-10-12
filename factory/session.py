@@ -45,9 +45,12 @@ import requests
 from loguru import logger
 
 from components.base_component import BaseComponent
+from components.target.cdm_simulator import CdmSimulatorWindow
 from factory import capabilities as caps
 from factory.config import (
     BROWSER_PROCESS_NAMES,
+    CDM_SIMULATOR_EXE_NAME,
+    CDM_SIMULATOR_PROCESS_NAME,
     SIGN_IN_WINDOW_TITLE_KEYWORDS,
     SOURCE_EXE_NAME,
     SOURCE_PROCESS_NAME,
@@ -263,6 +266,85 @@ def _launch_then_attach(
     return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
 
 
+def _launch_via_simulator_then_attach(
+    build_path: str,
+    simulator_path: str,
+    app_arguments: Optional[list] = None,
+    exe_name: str = TARGET_EXE_NAME,
+    process_name: str = TARGET_PROCESS_NAME,
+) -> WinAppDriverSession:
+    """Launches the Target PC UI app INDIRECTLY, via the CDM Simulator WPF app, which
+    mimics Dell SupportAssist's role (real SupportAssist integration isn't built yet).
+    Confirmed from a user-supplied screenshot (2026-10-12): paste the Target PC UI exe
+    path into the simulator's "Exe:" textbox, confirm "Auto-respond" is on, click
+    "Launch" -- the simulator then launches the Target PC UI app itself.
+
+    Returns a session attached directly to the Target PC UI's own window -- same
+    return shape/contract as _launch_then_attach(), so callers (Session.get()) don't
+    need to know or care which launch path produced it.
+
+    The simulator's own WinAppDriver session is deliberately never quit() here:
+    Session.close() tears down the Target/Source app via
+    _kill_existing_instances(self._exe_name) -- an OS-level process kill by name, not a
+    WebDriver session delete -- and WinAppDriver itself via a plain elevated
+    Stop-Process (no process-tree kill, see kill_winappdriver()'s own docstring);
+    neither one touches the simulator process. It needs to keep running for the rest
+    of the migration anyway, so Auto-respond keeps answering the backend
+    Init/Job/Migration/Completed protocol. The simulator is instead cleaned up
+    preemptively at the START of the next run (below), the same "kill stale instances
+    before a fresh launch" pattern already used for the Target/Source exe and
+    WinAppDriver itself.
+
+    No live hardware access to verify any of this against the real simulator -- the
+    two-step launch-then-separately-attach dance for the simulator itself reuses the
+    exact pattern _launch_then_attach() already proved live for the Target PC UI app,
+    rather than assuming the simulator's own launch behaves differently.
+    """
+    ensure_winappdriver_running()
+    _kill_existing_instances(exe_name)
+    _kill_existing_instances(CDM_SIMULATOR_EXE_NAME)
+
+    # Step 1: launch the simulator itself.
+    try:
+        requests.post(
+            f"{WINAPPDRIVER_URL}/session",
+            json=caps.app_launch_capabilities(simulator_path),
+            timeout=LAUNCH_ATTEMPT_TIMEOUT,
+        )
+    except requests.exceptions.RequestException:
+        pass
+
+    simulator_hwnd_hex = poll_until(
+        lambda: _find_main_window_hwnd(CDM_SIMULATOR_PROCESS_NAME),
+        timeout=WINDOW_POLL_TIMEOUT, interval=WINDOW_POLL_INTERVAL,
+    )
+    resp = requests.post(
+        f"{WINAPPDRIVER_URL}/session", json=caps.app_attach_capabilities(simulator_hwnd_hex), timeout=30
+    )
+    resp.raise_for_status()
+    simulator_session = WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+
+    # Step 2: drive the simulator's UI -- paste the Target PC UI exe path, confirm
+    # Auto-respond is on, click Launch.
+    simulator_window = CdmSimulatorWindow(simulator_session)
+    simulator_window.set_target_exe_path(build_path)
+    simulator_window.ensure_auto_respond_enabled()
+    simulator_window.launch()
+
+    # Step 3: the simulator now launches the Target PC UI app itself -- poll for ITS
+    # window, same as _launch_then_attach()'s own step 2.
+    hwnd_hex = poll_until(
+        lambda: _find_main_window_hwnd(process_name), timeout=WINDOW_POLL_TIMEOUT, interval=WINDOW_POLL_INTERVAL,
+    )
+
+    # Step 4: attach -- this is the real session, same contract as
+    # _launch_then_attach()'s own final step. simulator_session is deliberately left
+    # open/un-quit -- see docstring above.
+    resp = requests.post(f"{WINAPPDRIVER_URL}/session", json=caps.app_attach_capabilities(hwnd_hex), timeout=30)
+    resp.raise_for_status()
+    return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+
+
 # ---------------------------------------------------------------------------
 # Browser-window finding -- carried over unchanged from the removed
 # factory/browser_driver_factory.py. See that history in this file's own
@@ -438,7 +520,18 @@ class Session:
         role: MachineRole = MachineRole.TARGET,
         build_path: Optional[str] = None,
         app_arguments: Optional[list] = None,
+        launch_mode: str = "exe",
+        simulator_path: Optional[str] = None,
     ) -> "Session":
+        """launch_mode/simulator_path only matter for role=TARGET: "exe" and "mock"
+        both launch the Target PC UI app directly (today's one existing behavior --
+        "mock" is reserved for the separate GlassFloor entitlement mock server,
+        utils/mock_server.py, not wired in here); "simulator" launches it indirectly
+        via the CDM Simulator WPF app instead (see
+        _launch_via_simulator_then_attach()), and requires simulator_path. Source has
+        no equivalent launcher concept -- always launches directly regardless of
+        launch_mode.
+        """
         exe_name, process_name = (
             (SOURCE_EXE_NAME, SOURCE_PROCESS_NAME) if role is MachineRole.SOURCE
             else (TARGET_EXE_NAME, TARGET_PROCESS_NAME)
@@ -451,7 +544,16 @@ class Session:
                 raise ValueError("build_path is required to create a new session")
             session = cls()
             session._exe_name = exe_name
-            session.app = _launch_then_attach(build_path, app_arguments, exe_name=exe_name, process_name=process_name)
+            if role is MachineRole.TARGET and launch_mode == "simulator":
+                if not simulator_path:
+                    raise ValueError("simulator_path is required when launch_mode='simulator'")
+                session.app = _launch_via_simulator_then_attach(
+                    build_path, simulator_path, app_arguments, exe_name=exe_name, process_name=process_name
+                )
+            else:
+                session.app = _launch_then_attach(
+                    build_path, app_arguments, exe_name=exe_name, process_name=process_name
+                )
             cls._instances[role] = session
             return session
 

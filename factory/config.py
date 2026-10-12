@@ -39,6 +39,15 @@ SOURCE_PROCESS_NAME = os.environ.get("DDA_SOURCE_PROCESS_NAME", "DellDataAssista
 
 MOCK_SERVER_DEFAULT_PORT = int(os.environ.get("DDA_MOCK_SERVER_PORT", "8443"))
 
+# CDM Simulator WPF app ("CDMSimulatorUI") -- mimics Dell SupportAssist's role in
+# launching the Target PC UI app (real SupportAssist integration isn't built yet).
+# Confirmed from a user-supplied screenshot (2026-10-12). CDM_SIMULATOR_PATH has no
+# hardcoded default -- machine-specific, same reasoning as DDA_TARGET_BUILD_PATH --
+# only required when --launch simulator is actually used (see orchestration/role_runner.py).
+CDM_SIMULATOR_EXE_NAME = os.environ.get("DDA_CDM_SIMULATOR_EXE_NAME", "CDMSimulatorWPF.exe")
+CDM_SIMULATOR_PROCESS_NAME = os.environ.get("DDA_CDM_SIMULATOR_PROCESS_NAME", "CDMSimulatorWPF")
+CDM_SIMULATOR_PATH = os.environ.get("DDA_CDM_SIMULATOR_PATH")
+
 # Address of the Coordination Service (coordination_service/app.py) -- the one channel
 # through which the independent Source and Target automation processes exchange
 # hand-off values (the pairing code, and later similar signals). Defaults to localhost

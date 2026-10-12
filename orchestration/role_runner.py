@@ -85,13 +85,21 @@ class TargetRunner:
     this."""
 
     @staticmethod
-    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]]) -> None:
+    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]], launch_mode: str = "exe") -> None:
         build_path = _require_env("DDA_TARGET_BUILD_PATH")
         username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
         password = _require_env("DDA_TARGET_SIGNIN_PASSWORD")
         otp = _require_env("DDA_TARGET_OTP_STATIC_VALUE")
+        # Confirmed from a user-supplied screenshot (2026-10-12): "simulator" launches
+        # the Target PC UI app indirectly via the CDM Simulator WPF app (mimics Dell
+        # SupportAssist, not yet really integrated) -- see
+        # factory/session.py's _launch_via_simulator_then_attach(). "exe"/"mock" both
+        # launch it directly, today's one existing behavior.
+        simulator_path = _require_env("DDA_CDM_SIMULATOR_PATH") if launch_mode == "simulator" else None
 
-        session = Session.get(MachineRole.TARGET, build_path=build_path)
+        session = Session.get(
+            MachineRole.TARGET, build_path=build_path, launch_mode=launch_mode, simulator_path=simulator_path,
+        )
         try:
             # SignInFlow.run() already owns its own cleanup-on-failure internally (see
             # its own try/except BaseException) -- but a failure AFTER it returns
@@ -131,7 +139,11 @@ class SourceRunner:
     to post_pairing_steps, supplied by whichever scenario function called this."""
 
     @staticmethod
-    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]]) -> None:
+    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]], launch_mode: str = "exe") -> None:
+        # launch_mode is accepted (unused) only so this shares one call signature with
+        # TargetRunner.run() -- see RoleRunner.run(), which must not branch on role.
+        # Source has no SupportAssist/CDM-simulator launch concept; it always launches
+        # directly via _launch_then_attach(), same as Target's own "exe"/"mock" modes.
         build_path = _require_env("DDA_SOURCE_BUILD_PATH")
 
         session = Session.get(MachineRole.SOURCE, build_path=build_path)
@@ -150,12 +162,19 @@ class SourceRunner:
 
 class RoleRunner:
     @staticmethod
-    def run(role: MachineRole, run_id: str, runner_class, post_pairing_steps: List[Callable[[Session], None]]) -> None:
+    def run(
+        role: MachineRole,
+        run_id: str,
+        runner_class,
+        post_pairing_steps: List[Callable[[Session], None]],
+        launch_mode: str = "exe",
+    ) -> None:
         """The thin, universal wrapper -- the one place prerequisites/reporting happen,
         exactly once, regardless of role or scenario. Does not branch on role itself:
         by the time a scenario function calls this, it has already resolved role into a
         concrete runner_class (TargetRunner or SourceRunner) and the step list that
-        applies to it."""
+        applies to it. launch_mode is passed through unchanged -- TargetRunner.run()
+        acts on it, SourceRunner.run() accepts and ignores it (see its own docstring)."""
         # Standalone machine-level setup gate (dev mode, WinAppDriver installed +
         # launchable, Python packages, browser cleanup) -- same checks regardless of
         # role. Lives in utils/, not in factory/ (see its own module docstring,
@@ -166,7 +185,7 @@ class RoleRunner:
         ActionReporter.start_run(run_id, role.value)
 
         try:
-            runner_class.run(run_id, post_pairing_steps)
+            runner_class.run(run_id, post_pairing_steps, launch_mode=launch_mode)
         finally:
             # A report must exist for this run whether it succeeded or failed -- see
             # PROJECT_PLAN.md Sec 4.8.
@@ -190,7 +209,7 @@ def full_transfer_source(session: Session) -> None:
     transfer_flow.wait_for_migration_to_complete()
 
 
-def full_transfer(role: MachineRole, run_id: str) -> None:
+def full_transfer(role: MachineRole, run_id: str, launch_mode: str = "exe") -> None:
     """The one scenario that exists today: the shared prefix (sign-in + pairing for
     Target, pairing for Source), then a complete file transfer, for whichever role this
     process is.
@@ -204,9 +223,9 @@ def full_transfer(role: MachineRole, run_id: str) -> None:
     silently running as Source.
     """
     if role is MachineRole.TARGET:
-        RoleRunner.run(role, run_id, TargetRunner, [full_transfer_target])
+        RoleRunner.run(role, run_id, TargetRunner, [full_transfer_target], launch_mode=launch_mode)
     elif role is MachineRole.SOURCE:
-        RoleRunner.run(role, run_id, SourceRunner, [full_transfer_source])
+        RoleRunner.run(role, run_id, SourceRunner, [full_transfer_source], launch_mode=launch_mode)
     else:
         raise RoleRunnerError(f"Unknown role: {role!r}")
 
@@ -225,8 +244,22 @@ if __name__ == "__main__":
         help="Which post-pairing flow sequence to run (default: full_transfer). "
              "Both machines should be given the same scenario name.",
     )
+    parser.add_argument(
+        "--launch", default="exe", choices=["mock", "exe", "simulator"],
+        help="How to launch the Target PC UI app (Target role only -- ignored for "
+             "Source, which has no equivalent launcher concept). 'exe'/'mock': launch "
+             "it directly, today's default behavior ('mock' is reserved for the "
+             "separate GlassFloor entitlement mock server, utils/mock_server.py, not "
+             "wired in here -- currently identical to 'exe'). 'simulator': launch it "
+             "indirectly via the CDM Simulator WPF app, which mimics Dell SupportAssist "
+             "(real SupportAssist integration isn't built yet) -- requires "
+             "DDA_CDM_SIMULATOR_PATH to be set.",
+    )
     args = parser.parse_args()
 
     role = MachineRole.TARGET if args.role == "target" else MachineRole.SOURCE
-    SCENARIOS[args.scenario](role, args.run_id)
-    print(f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}, scenario={args.scenario!r}.")
+    SCENARIOS[args.scenario](role, args.run_id, launch_mode=args.launch)
+    print(
+        f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}, "
+        f"scenario={args.scenario!r}, launch={args.launch!r}."
+    )
