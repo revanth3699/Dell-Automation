@@ -4,19 +4,15 @@ PC UI app and auto-responding to its backend Init/Job/Migration/Completed protoc
 messages, used in place of real SupportAssist integration (not built yet). Confirmed
 from a user-supplied screenshot (2026-10-12).
 
-The "Exe:" textbox has no confirmed accessible Name (a plain WPF TextBox next to a
-separate "Exe:" Label, not independently confirmed live) -- found positionally instead
-(the first Edit control in the window), same convention already used by
-components/target/pairing_code_entry_screen.py for its own unconfirmed WPF textboxes.
-Not included as a locator constant here for that reason -- see
-CdmSimulatorWindow._find_exe_textbox().
-
-The Launch button and Auto-respond checkbox's visible Content text IS their accessible
-Name by default WPF UI Automation behavior (no explicit AutomationProperties.Name set)
--- the same assumption already relied on throughout this codebase for WPF/WinUI
-buttons (e.g. "Finish", "Back to Home") and confirmed correct every time it was later
-verified live.
+Bug fixed here, confirmed via a live UI-tree dump (2026-10-12): unlike the Target PC
+UI's WebView2/React-rendered controls (where visible button text IS the accessible
+Name), this app's WPF controls all report their generic class name as Name (e.g.
+Name="Button" for every single button) -- the real, stable identifier here is
+AutomationId instead, confirmed via a raw /source dump of the live window:
+LaunchTargetPcButton, AutoRespondCheckBox, and TargetPcLocationText (the "Exe:"
+textbox -- also confirmed via the same dump, so no longer found positionally).
 """
 
-LAUNCH_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Launch"]')
-AUTO_RESPOND_CHECKBOX_LOCATOR = ("xpath", '//CheckBox[@Name="Auto-respond"]')
+LAUNCH_BUTTON_LOCATOR = ("xpath", '//Button[@AutomationId="LaunchTargetPcButton"]')
+AUTO_RESPOND_CHECKBOX_LOCATOR = ("xpath", '//CheckBox[@AutomationId="AutoRespondCheckBox"]')
+EXE_TEXTBOX_LOCATOR = ("xpath", '//Edit[@AutomationId="TargetPcLocationText"]')

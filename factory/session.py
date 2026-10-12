@@ -295,24 +295,29 @@ def _launch_via_simulator_then_attach(
     before a fresh launch" pattern already used for the Target/Source exe and
     WinAppDriver itself.
 
-    No live hardware access to verify any of this against the real simulator -- the
-    two-step launch-then-separately-attach dance for the simulator itself reuses the
-    exact pattern _launch_then_attach() already proved live for the Target PC UI app,
-    rather than assuming the simulator's own launch behaves differently.
+    Bug fixed here, confirmed via a live test (2026-10-12): the simulator CRASHES
+    almost immediately unless launched with its own directory as the working
+    directory (it evidently looks for some resource/config next to the exe) --
+    confirmed directly by comparing `Start-Process` with and without
+    `-WorkingDirectory` set to the exe's own folder. WinAppDriver's "app" launch
+    capability has no way to specify a working directory, so asking WinAppDriver to
+    spawn the simulator itself (the original approach here, mirroring
+    _launch_then_attach()) reliably launched it into an immediate crash -- confirmed
+    via a live WinAppDriver response ("Failed to locate opened application window")
+    and the process being gone moments later, reproduced even with a generous
+    ms:waitForAppLaunch. Launches the simulator directly via subprocess.Popen with
+    cwd set instead (same pattern utils/mock_server.py's start_mock_server() already
+    uses for its own cwd-sensitive process), then attaches WinAppDriver to its window
+    afterward -- never via the "app" capability for the simulator specifically.
     """
     ensure_winappdriver_running()
     _kill_existing_instances(exe_name)
     _kill_existing_instances(CDM_SIMULATOR_EXE_NAME)
 
-    # Step 1: launch the simulator itself.
-    try:
-        requests.post(
-            f"{WINAPPDRIVER_URL}/session",
-            json=caps.app_launch_capabilities(simulator_path),
-            timeout=LAUNCH_ATTEMPT_TIMEOUT,
-        )
-    except requests.exceptions.RequestException:
-        pass
+    # Step 1: launch the simulator itself -- directly, with its own folder as the
+    # working directory (see the "Bug fixed here" note above), not via WinAppDriver's
+    # "app" capability.
+    subprocess.Popen([simulator_path], cwd=str(Path(simulator_path).parent))
 
     simulator_hwnd_hex = poll_until(
         lambda: _find_main_window_hwnd(CDM_SIMULATOR_PROCESS_NAME),
