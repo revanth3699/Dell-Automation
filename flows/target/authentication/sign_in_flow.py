@@ -85,6 +85,7 @@ import time
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import (
     TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog, NetworkDisconnectedDialog,
+    PlugIntoAcPowerDialog,
 )
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
@@ -132,6 +133,7 @@ class SignInFlow:
         self.welcome_back_screen = WelcomeBackScreen(self.app_session)
         self.trust_network_dialog = TrustNetworkDialog(self.app_session)
         self.network_disconnected_dialog = NetworkDisconnectedDialog(self.app_session)
+        self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(self.app_session)
         self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
         self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
@@ -229,6 +231,12 @@ class SignInFlow:
                 self.log.warning(
                     "\"This PC isn't connected to a network\" appeared while waiting for "
                     "Source PC -- waited and clicked Check again"
+                )
+                continue
+            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+                self.log.warning(
+                    "\"Plug into AC power\" appeared while waiting for Source PC -- "
+                    "waited and clicked Cancel"
                 )
                 continue
             if not self.pairing_discovery_screen.is_showing(timeout=1.0):
@@ -725,6 +733,12 @@ class SignInFlow:
                 self.log.warning(
                     "\"This PC isn't connected to a network\" appeared while waiting for "
                     "pairing-discovery -- waited and clicked Check again"
+                )
+                continue
+            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+                self.log.warning(
+                    "\"Plug into AC power\" appeared while waiting for pairing-discovery "
+                    "-- waited and clicked Cancel"
                 )
                 continue
             if self.pairing_discovery_screen.is_showing(timeout=0.1):

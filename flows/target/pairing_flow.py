@@ -20,7 +20,7 @@ from typing import Optional
 import requests
 
 from components.base_component import ComponentActionError
-from components.target.common_dialogs import NetworkDisconnectedDialog
+from components.target.common_dialogs import NetworkDisconnectedDialog, PlugIntoAcPowerDialog
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
@@ -55,6 +55,7 @@ class TargetPairingFlow:
         self.pairing_code_entry_screen = PairingCodeEntryScreen(app_session)
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
+        self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
 
     def _poll_with_network_recovery(self, condition_fn, timeout: float, poll_interval: float = 1.0) -> bool:
         """Polls condition_fn() every poll_interval seconds up to timeout, transparently
@@ -66,6 +67,11 @@ class TargetPairingFlow:
         "Check again" button, so this just calls that and keeps waiting on the original
         condition. Both `_wait_for_screen()` and `_submit_code_and_confirm()` below go
         through this, since the dialog isn't specific to either one.
+
+        Also races the "Plug into AC power" low-battery warning the same way (confirmed
+        directly by the user via a live screenshot, 2026-10-12: can also appear at any
+        point, same as the network dialog) -- PlugIntoAcPowerDialog.accept() waits 15s
+        before clicking Cancel.
 
         Uses the same NetworkDisconnectedDialog as flows/target/authentication/
         sign_in_flow.py and flows/source/pairing_flow.py (not a separate copy) -- see
@@ -80,6 +86,9 @@ class TargetPairingFlow:
                     "\"This PC isn't connected to a network\" appeared -- waited and "
                     "clicked Check again"
                 )
+                continue
+            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+                self.log.info("\"Plug into AC power\" appeared -- waited and clicked Cancel")
                 continue
             time.sleep(poll_interval)
         return False

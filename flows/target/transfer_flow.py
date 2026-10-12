@@ -71,7 +71,7 @@ it appears, same pattern as every other dialog race here.
 
 import time
 
-from components.target.common_dialogs import CloseAppsDialog, MigrationErrorDialog
+from components.target.common_dialogs import CloseAppsDialog, MigrationErrorDialog, PlugIntoAcPowerDialog
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
@@ -97,6 +97,7 @@ class TargetTransferFlow:
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
+        self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def _raise_if_migration_error(self) -> None:
@@ -107,6 +108,20 @@ class TargetTransferFlow:
         if self.migration_error_dialog.is_showing(timeout=0.1):
             error_text = self.migration_error_dialog.read_error_text()
             raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+
+    def _accept_plug_into_ac_power_if_showing(self) -> bool:
+        """Shared by every wait loop in this class, same reasoning as
+        _raise_if_migration_error(). Confirmed directly by the user via a live
+        screenshot (2026-10-12): "Plug into AC power" (a low-battery warning) can
+        appear layered over any screen during the migration -- transfer is the
+        longest-running wait in this whole flow (up to 30 minutes), so the most likely
+        place to actually hit a real low-battery condition. Not fatal -- clicks Cancel
+        (after PlugIntoAcPowerDialog's own 15s wait) and lets the caller's loop
+        continue."""
+        if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+            self.log.warning('"Plug into AC power" appeared -- waited and clicked Cancel')
+            return True
+        return False
 
     def start_transfer(self, screen_timeout: float = 300.0, progress_screen_timeout: float = 30.0) -> None:
         """Waits up to screen_timeout for "Your files are ready to move" -- the
@@ -123,6 +138,8 @@ class TargetTransferFlow:
         confirmed_accounts = False
         while time.monotonic() < deadline:
             self._raise_if_migration_error()
+            if self._accept_plug_into_ac_power_if_showing():
+                continue
             if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
                 # Confirmed necessary, same reasoning as the confirm-accounts dialog:
                 # check for the close-apps dialog one more time, right here, before
@@ -141,6 +158,8 @@ class TargetTransferFlow:
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
                     self._raise_if_migration_error()
+                    if self._accept_plug_into_ac_power_if_showing():
+                        continue
                     if self.transfer_progress_screen.is_showing(timeout=0.5):
                         self.log.success(
                             "Transfer in progress -- \"We're moving your files and "
@@ -246,6 +265,8 @@ class TargetTransferFlow:
         finished = False
         while True:
             self._raise_if_migration_error()
+            if self._accept_plug_into_ac_power_if_showing():
+                continue
             if not self.transfer_progress_screen.is_showing(timeout=0.5):
                 finished = True
                 break

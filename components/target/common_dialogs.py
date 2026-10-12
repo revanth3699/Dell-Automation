@@ -13,6 +13,10 @@ from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, 
 from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR, MIGRATION_ERROR_HEADING_LOCATOR
 from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR, NETWORK_DISCONNECTED_HEADING_LOCATOR
+from locators.target.plug_into_ac_power_dialog import (
+    PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR,
+    PLUG_INTO_AC_POWER_HEADING_LOCATOR,
+)
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_HEADING_LOCATOR, SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_HEADING_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR, TRUST_NETWORK_HEADING_LOCATOR
@@ -176,6 +180,42 @@ class NetworkDisconnectedDialog:
             return False
         time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
         self._check_again_button.click(timeout=2.0)
+        return True
+
+
+class PlugIntoAcPowerDialog:
+    """"Plug into AC power" -- a low-battery warning confirmed from a user-supplied
+    screenshot (2026-10-12): "Be sure this PC is plugged into AC power to avoid delays
+    while we migrate your files and settings." Can appear layered over any screen
+    during the migration -- not tied to one specific step, same "race it continuously"
+    treatment as NetworkDisconnectedDialog.
+
+    Per explicit user direction: waits PLUG_IN_DELAY_SECONDS before clicking Cancel
+    (rather than immediately), giving the user a real chance to actually plug the PC in
+    before dismissing the warning.
+    """
+
+    PLUG_IN_DELAY_SECONDS = 15.0
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(
+            app_session, *PLUG_INTO_AC_POWER_HEADING_LOCATOR, "PlugIntoAcPowerHeading"
+        )
+        self._cancel_button = BaseComponent(
+            app_session, *PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR, "PlugIntoAcPowerCancelButton"
+        )
+
+    def is_showing(self, timeout: float = 0.1) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def accept(self, timeout: float = 2.0) -> bool:
+        """Clicks Cancel if the dialog is showing, after waiting PLUG_IN_DELAY_SECONDS
+        first. Returns whether it was present at all (same pattern as every other
+        dialog in this module)."""
+        if not self._heading.exists(timeout=timeout):
+            return False
+        time.sleep(self.PLUG_IN_DELAY_SECONDS)
+        self._cancel_button.click(timeout=2.0)
         return True
 
 
