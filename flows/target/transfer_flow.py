@@ -73,6 +73,7 @@ import time
 
 from components.target.common_dialogs import (
     CloseAppsDialog,
+    DesktopShortcutDialog,
     MigrationErrorDialog,
     OtherPcNetworkDisconnectedDialog,
     PlugIntoAcPowerDialog,
@@ -104,6 +105,7 @@ class TargetTransferFlow:
         self.migration_error_dialog = MigrationErrorDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
+        self.desktop_shortcut_dialog = DesktopShortcutDialog(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def _raise_if_migration_error(self) -> None:
@@ -148,6 +150,21 @@ class TargetTransferFlow:
         continue."""
         if self.plug_into_ac_power_dialog.accept(timeout=0.1):
             self.log.warning('"Plug into AC power" appeared -- waited and clicked Cancel')
+            return True
+        return False
+
+    def _accept_desktop_shortcut_if_showing(self) -> bool:
+        """Confirmed directly by the user via a live screenshot (2026-10-13): "Add a
+        desktop shortcut before you go" -- its own wording places it near the very end
+        of the flow, so this is only raced in wait_for_completion()'s final
+        home-confirmation wait, not every loop in this file (unlike
+        _accept_plug_into_ac_power_if_showing(), which can genuinely appear anywhere).
+        Not fatal -- clicks "Create shortcut" per explicit user direction and lets the
+        caller's loop continue."""
+        if self.desktop_shortcut_dialog.accept(timeout=0.1):
+            self.log.success(
+                '"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"'
+            )
             return True
         return False
 
@@ -263,8 +280,11 @@ class TargetTransferFlow:
         the "here" link -- clicking "here" was the previous wrong action) ->
         "Your migration is now complete" -> click "download a PDF", then click
         "Back to Home" -> back on the Welcome-back home screen, confirmed via its
-        "Nothing's lost from your old PC" text (not just the heading, which this
-        screen also shows during the unrelated already-signed-in sign-in shortcut).
+        "Sign Out" button (not just the heading, which this screen also shows during
+        the unrelated already-signed-in sign-in shortcut; "Nothing's lost from your old
+        PC" was tried first but never appeared on a real run, see WelcomeBackScreen's
+        own docstring). "Add a desktop shortcut before you go" is raced during this
+        final wait too -- confirmed to appear near the very end of the flow.
 
         Every step here is now a required gate (raises TransferFlowError if a screen
         doesn't appear in time), not optional -- this is the one real, confirmed path,
@@ -328,10 +348,25 @@ class TargetTransferFlow:
         self.migration_complete_screen.click_download_pdf_link()
         self.migration_complete_screen.click_back_to_home()
 
-        self.log.info(
-            'Confirming return to the home screen ("Nothing\'s lost from your old PC")...'
-        )
-        if not self.welcome_back_screen.is_home_confirmed(timeout=home_timeout):
+        self.log.info('Confirming return to the home screen ("Sign Out" visible)...')
+        # Bug fixed here, confirmed directly by the user via a live screenshot
+        # (2026-10-13): "Add a desktop shortcut before you go" can appear layered over
+        # this exact wait -- a plain single is_home_confirmed() call had no way to
+        # notice or click through it, so it would just burn the whole home_timeout.
+        # Restructured as an explicit poll loop (do-while, same reasoning as
+        # wait_for_completion()'s transfer-finished wait above) that races it every
+        # cycle, same pattern as every other dialog race in this file.
+        deadline = time.monotonic() + home_timeout
+        home_confirmed = False
+        while True:
+            if self._accept_desktop_shortcut_if_showing():
+                continue
+            if self.welcome_back_screen.is_home_confirmed(timeout=0.5):
+                home_confirmed = True
+                break
+            if time.monotonic() >= deadline:
+                break
+        if not home_confirmed:
             raise TransferFlowError(
                 f"Did not confirm return to the home screen within {home_timeout:.0f}s "
                 "after clicking Back to Home"

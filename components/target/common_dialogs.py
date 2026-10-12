@@ -10,6 +10,10 @@ from typing import Optional
 
 from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR, CLOSE_APPS_HEADING_LOCATOR
+from locators.target.desktop_shortcut_dialog import (
+    CREATE_SHORTCUT_BUTTON_LOCATOR,
+    DESKTOP_SHORTCUT_HEADING_LOCATOR,
+)
 from assertions.target.migration_preparation_transition import TRANSITION_PHRASES
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR, MIGRATION_ERROR_HEADING_LOCATOR
 from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR, NETWORK_DISCONNECTED_HEADING_LOCATOR
@@ -253,6 +257,32 @@ class OtherPcNetworkDisconnectedDialog:
         MigrationErrorDialog.read_error_text()) -- unlike every other dialog's
         accept()/retry(), this doesn't re-check presence itself."""
         self._cancel_transfer_button.click(timeout=timeout)
+
+
+class DesktopShortcutDialog:
+    """"Add a desktop shortcut before you go" -- confirmed from a user-supplied
+    screenshot (2026-10-13): shown near the very end of the Target flow (per its own
+    "before you go" wording), offering to create a desktop shortcut back into the app
+    via SupportAssist. Has "No, thanks" and "Create shortcut" buttons -- per explicit
+    user direction, accept() always clicks "Create shortcut".
+    """
+
+    def __init__(self, app_session):
+        self._heading = BaseComponent(app_session, *DESKTOP_SHORTCUT_HEADING_LOCATOR, "DesktopShortcutHeading")
+        self._create_shortcut_button = BaseComponent(
+            app_session, *CREATE_SHORTCUT_BUTTON_LOCATOR, "CreateShortcutButton"
+        )
+
+    def is_showing(self, timeout: float = 0.1) -> bool:
+        return self._heading.exists(timeout=timeout)
+
+    def accept(self, timeout: float = 2.0) -> bool:
+        """Clicks "Create shortcut" if the dialog is showing. Returns whether it was
+        present at all (same pattern as every other dialog in this module)."""
+        if not self._heading.exists(timeout=timeout):
+            return False
+        self._create_shortcut_button.click()
+        return True
 
 
 class MigrationErrorDialog:
