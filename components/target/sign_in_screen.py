@@ -10,7 +10,7 @@ from components.base_component import BaseComponent
 from locators.target.welcome_screen import SIGN_IN_BUTTON_LOCATOR
 from locators.target.welcome_back_screen import (
     GET_STARTED_BUTTON_LOCATOR,
-    NOTHING_LOST_TEXT_LOCATOR,
+    SIGN_OUT_BUTTON_LOCATOR,
     WELCOME_BACK_HEADING_LOCATOR,
 )
 
@@ -41,7 +41,7 @@ class WelcomeBackScreen:
     def __init__(self, app_session):
         self._heading = BaseComponent(app_session, *WELCOME_BACK_HEADING_LOCATOR, "WelcomeBackHeading")
         self._get_started_button = BaseComponent(app_session, *GET_STARTED_BUTTON_LOCATOR, "GetStartedButton")
-        self._nothing_lost_text = BaseComponent(app_session, *NOTHING_LOST_TEXT_LOCATOR, "NothingLostText")
+        self._sign_out_button = BaseComponent(app_session, *SIGN_OUT_BUTTON_LOCATOR, "SignOutButton")
 
     def is_showing(self, timeout: float = 1.0) -> bool:
         return self._heading.exists(timeout=timeout)
@@ -51,8 +51,14 @@ class WelcomeBackScreen:
 
     def is_home_confirmed(self, timeout: float = 2.0) -> bool:
         """Confirms we're genuinely back on this screen post-migration (after
-        MigrationCompleteScreen.click_back_to_home()), via the "Nothing's lost from
-        your old PC" bullet text -- distinct from is_showing()'s heading-only check,
-        which this screen's own original already-signed-in-shortcut use (SignInFlow)
-        doesn't need."""
-        return self._nothing_lost_text.exists(timeout=timeout)
+        MigrationCompleteScreen.click_back_to_home()), via the "Sign Out" button --
+        distinct from is_showing()'s heading-only check, which this screen's own
+        original already-signed-in-shortcut use (SignInFlow) doesn't need.
+
+        Bug fixed here, confirmed directly by the user via a live run (2026-10-13):
+        this used to check for the "Nothing's lost from your old PC" bullet text,
+        which timed out (never found within 30s) on a real post-migration run --
+        replaced with the "Sign Out" button, confirmed visible on this screen via a
+        user-supplied screenshot.
+        """
+        return self._sign_out_button.exists(timeout=timeout)
