@@ -64,42 +64,35 @@ class SourceTransferFlow:
         self.log.success("Ready-to-migrate screen confirmed")
 
     def wait_for_migration_to_complete(
-        self, migrating_timeout: float = 60.0, summary_timeout: float = 1800.0, complete_timeout: float = 1800.0
+        self, migrating_timeout: float = 60.0, summary_timeout: float = 1800.0
     ) -> None:
         """Call after wait_for_transfer_to_start() returns. Confirmed from user-supplied
         screenshots: "We're migrating your data now." (confirms migration actually
-        started, 2026-10-07) -> "Your migration summary is ready." (confirms it
-        finished, 2026-10-07) -> "We've completed your migration." (the real final
-        screen, confirmed 2026-10-09). The first two need no click, just confirmation
-        the sequence is progressing; the third has the "Close" button that's actually
-        clicked.
+        started, 2026-10-07) -> "Your migration summary is ready." (the real final
+        screen on Source -- confirmed via a live run, 2026-10-13). The first needs no
+        click, just confirmation the sequence is progressing; the second has the
+        "Close" button that's actually clicked.
 
-        Bug fixed here, confirmed directly by the user (2026-10-09): Close used to be
-        clicked on "Your migration summary is ready." -- that was premature, not the
-        app's own intended final action. "We've completed your migration." only appears
-        once Target PC's own user clicks Finish and Target is redirected back to its
-        home screen, so complete_timeout is a genuinely cross-machine, human-paced wait
-        with no fixed bound -- defaults to 30 minutes, same reasoning as summary_timeout.
+        Bug fixed here, confirmed directly by the user via a live run (2026-10-13):
+        this used to treat "Your migration summary is ready." as a pure text
+        confirmation and wait for a LATER screen, "We've completed your migration."
+        (supposedly shown only once Target PC's own user clicks Finish and returns to
+        its home screen), before clicking Close -- a live run showed that later text
+        never appearing within a long wait (50+ seconds polled, still False) even
+        though "Your migration summary is ready." sat there the whole time with its
+        own visible, clickable Close button. Close is now clicked directly on this
+        screen instead, confirmed via BOTH its heading and its body text (see
+        TransferProgressScreen.is_summary_confirmed()) rather than the heading alone.
         """
         self.log.info('Waiting for "We\'re migrating your data now."...')
         if not self._poll_until_showing(self.transfer_progress_screen.is_migrating, migrating_timeout):
             raise RuntimeError(f'"We\'re migrating your data now." never appeared within {migrating_timeout:.0f}s')
         self.log.success("Migrating-data screen confirmed")
 
-        self.log.info('Waiting for "Your migration summary is ready."...')
-        if not self._poll_until_showing(self.transfer_progress_screen.is_summary_ready, summary_timeout):
+        self.log.info('Waiting for "Your migration summary is ready." (heading + body text)...')
+        if not self._poll_until_showing(self.transfer_progress_screen.is_summary_confirmed, summary_timeout):
             raise RuntimeError(
-                f'"Your migration summary is ready." never appeared within {summary_timeout:.0f}s'
+                f'"Your migration summary is ready." never fully confirmed within {summary_timeout:.0f}s'
             )
-        self.log.success("Migration summary ready")
-
-        self.log.info(
-            'Waiting for "We\'ve completed your migration." (appears only after Target '
-            "PC's own user clicks Finish and returns to its home screen)..."
-        )
-        if not self._poll_until_showing(self.transfer_progress_screen.is_migration_complete, complete_timeout):
-            raise RuntimeError(
-                f'"We\'ve completed your migration." never appeared within {complete_timeout:.0f}s'
-            )
-        self.log.success("Migration complete confirmed -- clicking Close")
-        self.transfer_progress_screen.close_migration_complete()
+        self.log.success("Migration summary confirmed -- clicking Close")
+        self.transfer_progress_screen.close_summary()
