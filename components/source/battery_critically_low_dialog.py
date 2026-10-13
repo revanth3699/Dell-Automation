@@ -18,7 +18,7 @@ from locators.source.battery_critically_low_dialog import CANCEL_BUTTON_LOCATOR
 
 
 class BatteryCriticallyLowDialog:
-    BATTERY_CRITICALLY_LOW_DELAY_SECONDS = 20.0
+    BATTERY_CRITICALLY_LOW_DELAY_SECONDS = 10.0
 
     def __init__(self, app_session):
         self._cancel_button = BaseComponent(app_session, *CANCEL_BUTTON_LOCATOR, "BatteryCriticallyLowCancelButton")
