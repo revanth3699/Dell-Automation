@@ -158,22 +158,31 @@ def _parse_category_names(region_text: str) -> List[str]:
     return names
 
 
-def _find_section_end(full_text: str, search_start: int, count_pattern: str, empty_text: str, section_label: str):
+def _find_section_end(full_text: str, search_start: int, count_pattern: str, empty_texts, section_label: str):
     """Returns the re.Match that marks the end of one section's content, trying the
     "<Section>: N" count marker first and falling back to the section's own
-    confirmed "There were no failed ..." empty-case text (which, confirmed live
-    2026-10-14, appears INSTEAD of a count marker when N is 0 -- not "...: 0").
-    Raises if neither is found anywhere after search_start."""
+    confirmed empty-case text (which, confirmed live 2026-10-14, appears INSTEAD of a
+    count marker when N is 0 -- not "...: 0").
+
+    empty_texts is a tuple, not a single string -- confirmed live (2026-10-14) across
+    two different real reports that the empty-case wording itself varies: one report
+    used "There were no settings copied."/"There were no failed settings.", while a
+    later report (0 settings copied, from what looks like a different app build) used
+    "There were no successful settings." instead for the exact same "Settings copied"
+    section. Every known wording is tried in order; raises only if none match.
+
+    Raises if nothing is found anywhere after search_start."""
     match = re.search(count_pattern, full_text[search_start:])
     if match is not None:
         return _OffsetMatch(match, search_start)
-    match = re.search(re.escape(empty_text), full_text[search_start:])
-    if match is not None:
-        return _OffsetMatch(match, search_start)
+    for empty_text in empty_texts:
+        match = re.search(re.escape(empty_text), full_text[search_start:])
+        if match is not None:
+            return _OffsetMatch(match, search_start)
     raise ValueError(
-        f"Could not find either {count_pattern!r} or {empty_text!r} for the {section_label!r} "
-        "section -- report format may have changed; this parser needs re-checking "
-        "against a fresh sample."
+        f"Could not find {count_pattern!r} or any of {empty_texts!r} for the "
+        f"{section_label!r} section -- report format may have changed; this parser "
+        "needs re-checking against a fresh sample."
     )
 
 
@@ -202,19 +211,20 @@ def parse_report(pdf_path: Path) -> MigrationReportData:
     # copied: N"-shaped text earlier in the document (there isn't one, but this is
     # cheap insurance) can't be picked up out of order.
     settings_not_migrated_end = _find_section_end(
-        full_text, 0, r"Settings not migrated:\s*\d+", "There were no failed settings.", "Settings not migrated"
+        full_text, 0, r"Settings not migrated:\s*\d+",
+        ("There were no failed settings.",), "Settings not migrated",
     )
     settings_copied_end = _find_section_end(
         full_text, settings_not_migrated_end.end(), r"Settings copied:\s*\d+",
-        "There were no settings copied.", "Settings copied",
+        ("There were no settings copied.", "There were no successful settings."), "Settings copied",
     )
     files_not_migrated_end = _find_section_end(
         full_text, settings_copied_end.end(), r"Files not migrated:\s*\d+",
-        "There were no failed files.", "Files not migrated",
+        ("There were no failed files.",), "Files not migrated",
     )
     files_copied_end = _find_section_end(
         full_text, files_not_migrated_end.end(), r"Files copied:\s*\d+",
-        "There were no files copied.", "Files copied",
+        ("There were no files copied.", "There were no successful files."), "Files copied",
     )
 
     settings_not_migrated_region = full_text[0:settings_not_migrated_end.start()]
