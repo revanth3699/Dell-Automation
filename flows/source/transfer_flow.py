@@ -91,30 +91,29 @@ class SourceTransferFlow:
             self.confirm_cancel_dialog.click_no_dont_cancel()
         return True
 
-    def _raise_if_other_pc_disconnected(self) -> None:
+    def _check_other_pc_disconnected(self) -> bool:
         """Shared by every wait loop in this class, same reasoning as
         _check_battery_critically_low(). Confirmed directly by the user via a live
         screenshot (2026-10-14): "The other PC isn't connected to a network." means
-        the Target PC lost its network connection -- nothing Source can retry
-        locally, so this clicks "Cancel transfer" and raises immediately, aborting
-        the run. Mirrors flows/target/transfer_flow.py's own
-        _raise_if_other_pc_disconnected() (there, "the other PC" means Source; here,
-        it means Target)."""
-        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-            self.log.error(
-                "The other PC isn't connected to a network. appeared -- clicking "
-                "Cancel transfer and aborting"
-            )
-            self.other_pc_network_disconnected_dialog.click_cancel_transfer()
-            raise RuntimeError(
-                "Migration failed: The other PC isn't connected to a network. appeared -- "
-                "the Target PC lost network connectivity; clicked Cancel transfer"
-            )
+        the Target PC lost its network connection.
+
+        Bug fixed here, confirmed directly by the user (2026-10-14): this used to
+        click "Cancel transfer" and then raise, aborting the whole run (mirroring
+        Target's own OtherPcNetworkDisconnectedDialog, which IS confirmed terminal
+        there) -- but on Source this isn't fatal. Just clicks "Cancel transfer" and
+        lets the caller's loop continue, same "race it, click through, keep going"
+        pattern as every other dialog in this class."""
+        if not other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            return False
+        self.other_pc_network_disconnected_dialog.click_cancel_transfer()
+        self.log.warning("The other PC isn't connected to a network. appeared -- clicked Cancel transfer")
+        return True
 
     def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            self._raise_if_other_pc_disconnected()
+            if self._check_other_pc_disconnected():
+                continue
             if self._check_battery_critically_low():
                 continue
             if check(timeout=1.0):
@@ -216,7 +215,8 @@ class SourceTransferFlow:
         migration_complete = None
         dismiss_action = None
         while time.monotonic() < deadline:
-            self._raise_if_other_pc_disconnected()
+            if self._check_other_pc_disconnected():
+                continue
             if self._check_battery_critically_low():
                 continue
             if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=0.1):
