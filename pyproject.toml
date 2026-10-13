@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv",
     "loguru",
     "Pillow",
+    "pypdf>=6.20.1",
 ]
 
 [dependency-groups]

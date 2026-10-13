@@ -125,23 +125,29 @@ dell-automation/
 │                                planned" doc -- check this, not this README, for
 │                                current per-file/per-phase status.
 │
-└── utils/                      Supporting utilities, deliberately separate from
-    │                           factory/ (2026-10-07): factory/ is drivers/sessions/
-    │                           config; these are the helpers everything else reaches for.
-    ├── prerequisites.py         Standalone one-time pass/fail gate, run once before
-    │                           automation starts.
-    ├── coordination_client.py   The pairing-code hand-off client (talks to
-    │                           coordination_service/app.py).
-    ├── mock_server.py           GlassFloor entitlement mock-server launcher (dev use).
-    ├── ocr.py                   Windows-native OCR fallback for UIA reads that come
-    │                           back incomplete.
-    ├── retry.py                 The one shared @retry decorator for flaky WinAppDriver
-    │                           interactions.
-    ├── wait_utils.py             poll_until(...) -- the one shared explicit-wait primitive.
-    ├── keep_app_alive.py         Dev script: watches for and relaunches a crashed
-    │                           app/WinAppDriver pair.
-    └── run_coordination_service.py  Starts the Coordination Service and prints the
-                                   address to give the other machine.
+├── utils/                      Supporting utilities, deliberately separate from
+│   │                           factory/ (2026-10-07): factory/ is drivers/sessions/
+│   │                           config; these are the helpers everything else reaches for.
+│   ├── prerequisites.py         Standalone one-time pass/fail gate, run once before
+│   │                           automation starts.
+│   ├── coordination_client.py   The pairing-code hand-off client (talks to
+│   │                           coordination_service/app.py).
+│   ├── mock_server.py           GlassFloor entitlement mock-server launcher (dev use).
+│   ├── ocr.py                   Windows-native OCR fallback for UIA reads that come
+│   │                           back incomplete.
+│   ├── retry.py                 The one shared @retry decorator for flaky WinAppDriver
+│   │                           interactions.
+│   ├── wait_utils.py             poll_until(...) -- the one shared explicit-wait primitive.
+│   ├── keep_app_alive.py         Dev script: watches for and relaunches a crashed
+│   │                           app/WinAppDriver pair.
+│   └── run_coordination_service.py  Starts the Coordination Service and prints the
+│                                  address to give the other machine.
+│
+└── validation/                 Standalone PDF-migration-report validator -- run
+    │                           manually ON the Target PC any time after a migration;
+    │                           NOT wired into orchestration/role_runner.py. See
+    │                           "PDF migration-report validation" below.
+    └── output/                   Generated HTML reports land here (gitignored).
 ```
 
 ## Architecture: layers and import direction
@@ -237,6 +243,74 @@ and calls `ActionReporter.current().record(...)`. `build_report()` renders every
 accumulated so far into one self-contained `reports/output/<run_id>_<role>_<timestamp>.html`
 and refreshes `reports/output/index.html` (a cross-run list) -- called from
 `RoleRunner.run()`'s `finally` for a live run, or `pytest_sessionfinish` for a pytest run.
+
+## PDF migration-report validation
+
+A standalone tool (`validation/`), separate from the live automation run above --
+`orchestration/role_runner.py` never calls it, and it isn't part of any `--scenario`.
+Run it manually, ON the Target PC, any time after a migration finishes. It cross-checks
+a Dell Migrate `MigrationReport-*.pdf`'s own claims (which files and settings
+categories it says it copied) against what's **actually** on this PC: files checked for
+real existence on disk, and settings checked by reading the live Windows registry.
+
+### Usage
+
+```
+uv run python -m validation.validate_migration
+uv run python -m validation.validate_migration --report "<path to a specific .pdf>"
+uv run python -m validation.validate_migration --no-html
+```
+
+- No args: auto-picks the most recently modified `MigrationReport-*/*.pdf` under
+  `C:\ProgramData\Dell\SupportAssist\CDM\Reports\MigrationReports\`.
+- `--report <path>`: validates one specific report instead of auto-picking.
+- `--no-html`: console output only, skips writing the HTML report.
+
+Prints a console summary and (unless `--no-html`) writes a self-contained HTML report
+(donut chart, collapsible per-category detail -- same self-contained style as the main
+run reports, no external files needed to view it) to
+`validation/output/<report-name>_validation_<timestamp>.html`. Exit code `0` if every
+checkable item matched; `1` if anything didn't, or the report/backup data couldn't be
+found or parsed at all.
+
+### What it actually checks
+
+- **Files**: every path under the report's "Files copied" section is checked for real
+  existence on disk (size is reported too). "Files not migrated" is printed as
+  informational context only -- the report itself already says those failed, so
+  there's nothing to re-check.
+- **Settings**: the PDF report only gives category *names* ("High Contrast", "Taskbar
+  Settings", etc.) under "Settings copied" -- it does **not** give the actual values
+  that were supposed to be applied. Those come from
+  `C:\ProgramData\Dell\SupportAssist\CDM\SettingsBackup\<GUID>\Registry\*.reg` -- Dell's
+  own `.reg` export of the expected values (captured on the Source PC, SID-swapped to
+  Target, left behind as a byproduct of the real migration) -- matched to each category
+  *name* via the GUID-to-name mapping recorded in
+  `C:\ProgramData\Dell\SupportAssist\CDM\logs\TargetPc\DellDataAssistant-*.log`. Each
+  expected registry value is then read live (via `winreg`) and compared against what the
+  backup says it should be.
+
+### Known limitations
+
+- `SettingsBackup\` is a single shared folder that reflects only the **most recent**
+  migration run (confirmed live) -- always validate the report that matches the most
+  recent migration, not an older one picked from history.
+- A small set of known-volatile value names (e.g. `TaskbarStateLastRun`, `WSENudge*`)
+  are deliberately excluded from comparison -- they change on their own regardless of
+  whether the migration was correct.
+- A mismatch is re-confirmed by re-reading the same value up to 3 times, 0.3s apart,
+  before being reported, which catches a value that's genuinely flapping *while the
+  validator is running*. It cannot catch, and isn't meant to catch, drift *between*
+  separate validator runs (e.g. something else on the PC changing a value in the
+  minutes between two runs). A result flagged `unstable` means the re-reads themselves
+  disagreed with each other.
+- Some settings categories aren't registry-based at all (backed up via other file
+  types) or have no GUID/log mapping available -- these are reported with an
+  explanatory note instead of a match/mismatch verdict, since there's nothing to
+  compare yet.
+
+Requires `pypdf` -- already pinned in `pyproject.toml`/`uv.lock`, so a plain `uv sync`
+is all that's needed; no separate install step.
 
 ## Environment variables
 
