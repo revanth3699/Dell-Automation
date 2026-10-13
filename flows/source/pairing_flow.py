@@ -32,9 +32,9 @@ actions, called only after the matching assertion confirms presence.
 Confirmed from a user-supplied screenshot (2026-10-14): "Your battery is critically
 low." can also appear unpredictably during this flow -- same "race it continuously"
 treatment as the trust-network/network-disconnected dialogs, raced in both the
-discovery-wait loop and _publish_loop(). Dismissed immediately via Cancel, no delay
-first (distinct from Target's PlugIntoAcPowerDialog, which waits before cancelling --
-this dialog reports the battery as already critical, not just a low-battery warning).
+discovery-wait loop and _publish_loop(). Dismissed via Cancel only after a delay
+(BatteryCriticallyLowDialog.BATTERY_CRITICALLY_LOW_DELAY_SECONDS, per explicit user
+direction, 2026-10-13), same reasoning as Target's PlugIntoAcPowerDialog.
 
 Bug fixed here, confirmed via user-supplied screenshots (2026-10-13): clicking Cancel
 on BatteryCriticallyLowDialog does NOT just dismiss it -- it triggers
