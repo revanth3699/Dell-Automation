@@ -60,9 +60,11 @@ import time
 
 from components.source.battery_critically_low_dialog import BatteryCriticallyLowDialog
 from components.source.confirm_cancel_dialog import ConfirmCancelDialog
+from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
 from components.source.transfer_progress_screen import TransferProgressScreen
 from assertions.source import battery_critically_low_dialog as battery_critically_low_assertions
 from assertions.source import confirm_cancel_dialog as confirm_cancel_assertions
+from assertions.source import other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions
 from assertions.source import transfer_progress_screen as transfer_progress_assertions
 from factory.logger_factory import LoggerFactory
 
@@ -73,6 +75,7 @@ class SourceTransferFlow:
         self.transfer_progress_screen = TransferProgressScreen(app_session)
         self.battery_critically_low_dialog = BatteryCriticallyLowDialog(app_session)
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
+        self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.log = LoggerFactory.get_logger("source")
 
     def _check_battery_critically_low(self) -> bool:
@@ -88,9 +91,30 @@ class SourceTransferFlow:
             self.confirm_cancel_dialog.click_no_dont_cancel()
         return True
 
+    def _raise_if_other_pc_disconnected(self) -> None:
+        """Shared by every wait loop in this class, same reasoning as
+        _check_battery_critically_low(). Confirmed directly by the user via a live
+        screenshot (2026-10-14): "The other PC isn't connected to a network." means
+        the Target PC lost its network connection -- nothing Source can retry
+        locally, so this clicks "Cancel transfer" and raises immediately, aborting
+        the run. Mirrors flows/target/transfer_flow.py's own
+        _raise_if_other_pc_disconnected() (there, "the other PC" means Source; here,
+        it means Target)."""
+        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            self.log.error(
+                "The other PC isn't connected to a network. appeared -- clicking "
+                "Cancel transfer and aborting"
+            )
+            self.other_pc_network_disconnected_dialog.click_cancel_transfer()
+            raise RuntimeError(
+                "Migration failed: The other PC isn't connected to a network. appeared -- "
+                "the Target PC lost network connectivity; clicked Cancel transfer"
+            )
+
     def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            self._raise_if_other_pc_disconnected()
             if self._check_battery_critically_low():
                 continue
             if check(timeout=1.0):
@@ -188,6 +212,7 @@ class SourceTransferFlow:
         migration_complete = None
         dismiss_action = None
         while time.monotonic() < deadline:
+            self._raise_if_other_pc_disconnected()
             if self._check_battery_critically_low():
                 continue
             if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=0.1):

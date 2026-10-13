@@ -45,6 +45,14 @@ too (via "No, don't cancel") immediately after every click_cancel() -- see
 assertions/source/confirm_cancel_dialog.py's own docstring. This also folds the two
 previously-separate inline battery-dialog checks (discovery-wait loop and
 _publish_loop()) into one shared method, so this new handling only needed writing once.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "The other PC isn't connected
+to a network." (the Target PC lost its network connection) can also appear
+unpredictably during this flow -- raced in both loops the same way, via
+_raise_if_other_pc_disconnected(). Unlike every other dialog here, this one is a
+terminal failure, not something to click through and keep going: it clicks "Cancel
+transfer" and raises immediately, same treatment as
+flows/target/transfer_flow.py's own mirror-image dialog.
 """
 
 import time
@@ -55,6 +63,7 @@ import requests
 from components.source.battery_critically_low_dialog import BatteryCriticallyLowDialog
 from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.network_disconnected_dialog import NetworkDisconnectedDialog
+from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
 from components.source.pairing_code_screen import PairingCodeScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
@@ -62,6 +71,7 @@ from assertions.source import (
     battery_critically_low_dialog as battery_critically_low_assertions,
     confirm_cancel_dialog as confirm_cancel_assertions,
     network_disconnected_dialog as network_disconnected_assertions,
+    other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
     pairing_code_screen as pairing_code_assertions,
     searching_screen as searching_screen_assertions,
     trust_network_dialog as trust_network_assertions,
@@ -94,7 +104,27 @@ class SourcePairingFlow:
         self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
         self.battery_critically_low_dialog = BatteryCriticallyLowDialog(app_session)
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
+        self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.pairing_code_screen = PairingCodeScreen(app_session)
+
+    def _raise_if_other_pc_disconnected(self) -> None:
+        """Shared by every wait loop in this class, same reasoning as
+        _assert_app_alive(). Confirmed directly by the user via a live screenshot
+        (2026-10-14): "The other PC isn't connected to a network." means the Target
+        PC lost its network connection -- nothing Source can retry locally, so this
+        clicks "Cancel transfer" and raises immediately, aborting the run. Mirrors
+        flows/target/transfer_flow.py's own _raise_if_other_pc_disconnected() (there,
+        "the other PC" means Source; here, it means Target)."""
+        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            self.log.error(
+                "The other PC isn't connected to a network. appeared -- clicking "
+                "Cancel transfer and aborting"
+            )
+            self.other_pc_network_disconnected_dialog.click_cancel_transfer()
+            raise SourcePairingError(
+                "Pairing failed: The other PC isn't connected to a network. appeared -- "
+                "the Target PC lost network connectivity; clicked Cancel transfer"
+            )
 
     def _check_battery_critically_low(self) -> bool:
         if not battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
@@ -151,6 +181,7 @@ class SourcePairingFlow:
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
+                self._raise_if_other_pc_disconnected()
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                     self.network_disconnected_dialog.click_check_again()
                     self.log.warning(
@@ -194,6 +225,7 @@ class SourcePairingFlow:
 
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            self._raise_if_other_pc_disconnected()
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
