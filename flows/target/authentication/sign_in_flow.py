@@ -289,7 +289,19 @@ class SignInFlow:
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "Plug into AC power appeared while waiting for Source PC -- "
-                    "waited and clicked Cancel"
+                    "waited and clicked Cancel transfer"
+                )
+                self._recover_from_plug_into_ac_power_reset()
+                # Bug avoided here: a plain `continue` would immediately hit the
+                # "pairing-discovery not showing -> found=True" check below and
+                # falsely declare success -- we just got bounced all the way back to
+                # Welcome back, pairing-discovery hasn't cleared because Source was
+                # found, it's just not showing YET because we're back near the start.
+                # Re-runs the same re-entry wait used right after sign-in to
+                # legitimately get back to pairing-discovery (or further, if Source
+                # was found in the meantime) before resuming this search.
+                self._wait_for_trust_network_then_pairing_discovery(
+                    remaining=deadline - time.monotonic()
                 )
                 continue
             if self._accept_desktop_shortcut_if_showing():
@@ -328,6 +340,36 @@ class SignInFlow:
                 f"The Target app window is gone (process {TARGET_PROCESS_NAME!r} not "
                 "found) -- it most likely crashed mid-run, not a normal screen "
                 "transition."
+            )
+
+    def _recover_from_plug_into_ac_power_reset(self) -> None:
+        """Confirmed directly by the user via three live screenshots (2026-10-14):
+        clicking "Cancel transfer" on the "Plug into AC power" dialog does NOT cancel
+        anything -- it bounces all the way back to the "Welcome back" home screen
+        (WelcomeBackScreen), the exact same screen the already-signed-in shortcut
+        lands on. Its own blue "Get started" button must be clicked again to
+        re-enter -- which replays the same checking-your-PC/trust-network sequence
+        from scratch, re-showing the identical dialog if the battery is still low.
+        Confirmed scope (explicit user direction): this reset only happens BEFORE
+        pairing (Source isn't found/involved yet at this point), so there's no
+        cross-machine state to recover here -- plain re-entry is enough.
+
+        Called right after click_cancel() at every call site in this class that
+        races PlugIntoAcPowerDialog; callers still do their own `continue` afterward
+        (or, for wait_for_source_pc(), re-run the pairing-discovery wait -- see
+        there) since clicking Get started alone doesn't re-establish whichever exact
+        screen the caller was originally waiting for.
+        """
+        if welcome_back_assertions.is_showing(self.app_session, timeout=2.0):
+            self.welcome_back_screen.click_get_started()
+            self.log.warning(
+                "Cancel transfer reset to the Welcome back home screen -- clicked "
+                "Get started to re-enter"
+            )
+        else:
+            self.log.warning(
+                "Cancel transfer clicked but Welcome back screen not confirmed -- "
+                "continuing to poll as normal"
             )
 
     def _accept_desktop_shortcut_if_showing(self) -> bool:
@@ -877,8 +919,9 @@ class SignInFlow:
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "Plug into AC power appeared while waiting for pairing-discovery "
-                    "-- waited and clicked Cancel"
+                    "-- waited and clicked Cancel transfer"
                 )
+                self._recover_from_plug_into_ac_power_reset()
                 continue
             if self._accept_desktop_shortcut_if_showing():
                 continue
