@@ -24,6 +24,7 @@ from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR
 from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR
 from locators.target.other_pc_network_disconnected_dialog import CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.plug_into_ac_power_dialog import PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR
+from locators.target.regional_settings_not_supported_dialog import CLOSE_BUTTON_LOCATOR as REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR
@@ -193,6 +194,28 @@ class DesktopShortcutDialog:
 
     def click_create_shortcut(self) -> None:
         self._create_shortcut_button.click()
+
+
+class RegionalSettingsNotSupportedDialog:
+    """"Set both of your PCs to the same supported region" -- confirmed from a live run
+    (2026-10-14), appearing while Target waits for pairing-discovery right after
+    sign-in: Target and Source PCs are set to different, incompatible regions.
+    Confirmed directly by the user: Target-only, and treated as an immediate,
+    unrecoverable failure -- click Close, then the caller raises and aborts the run,
+    same terminal pattern as OtherPcNetworkDisconnectedDialog. See
+    assertions/target/regional_settings_not_supported_dialog.py's is_showing() (and its
+    own docstring for the heading-text correction history).
+    """
+
+    def __init__(self, app_session):
+        self._close_button = BaseComponent(
+            app_session, *REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR, "RegionalSettingsNotSupportedCloseButton"
+        )
+
+    def click_close(self, timeout: float = 2.0) -> None:
+        """Clicks Close. Callers check is_showing() first and only call this once they
+        already know the dialog is present -- this never re-checks presence itself."""
+        self._close_button.click(timeout=timeout)
 
 
 class MigrationErrorDialog:

@@ -95,7 +95,7 @@ import time
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import (
     TrustNetworkDialog, SignInFailedDialog, NetworkDisconnectedDialog,
-    PlugIntoAcPowerDialog, DesktopShortcutDialog,
+    PlugIntoAcPowerDialog, DesktopShortcutDialog, RegionalSettingsNotSupportedDialog,
 )
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
@@ -109,6 +109,7 @@ from assertions.target import (
     pairing_discovery_screen as pairing_discovery_assertions,
     password_step as password_step_assertions,
     plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+    regional_settings_not_supported_dialog as regional_settings_not_supported_assertions,
     restore_pages_dialog as restore_pages_assertions,
     sign_in_failed_dialog as sign_in_failed_assertions,
     trust_network_dialog as trust_network_assertions,
@@ -181,6 +182,7 @@ class SignInFlow:
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(self.app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
+        self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(self.app_session)
         self.pairing_code_entry_screen = PairingCodeEntryScreen(self.app_session)
 
     def run(self, step_timeout: float = 20.0, overall_timeout: float = 300.0) -> None:
@@ -827,6 +829,16 @@ class SignInFlow:
         already showing, that's success too (downstream wait_for_source_pc() already
         treats pairing-discovery not showing as "nothing to wait for", so this doesn't
         need any other change to fall through correctly).
+
+        Bug fixed here, confirmed via a live run (2026-10-14): "Set both of your PCs to
+        the same supported region" (Target and Source set to different, incompatible
+        regions) can appear layered over this exact wait -- observed directly via a live
+        screenshot showing it over the post-sign-in "Test, we're checking..." transition
+        screen, right in this loop's window. Nothing here before this fix checked for it
+        at all, so a real occurrence would have burned the entire remaining budget before
+        raising a generic "did not reach pairing-discovery" error. Per explicit user
+        direction (2026-10-14): fatal, not recoverable by waiting -- clicks Close and
+        raises SignInError immediately.
         """
         self.log.info(
             "Waiting for pairing-discovery ('We're looking for your other PC'), racing "
@@ -842,6 +854,17 @@ class SignInFlow:
                     "The sign-in-failed dialog (We couldn't sign you in) appeared "
                     "while waiting for pairing-discovery -- an earlier transition-screen "
                     "match had looked like success, but sign-in did not actually succeed."
+                )
+            if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+                self.log.error(
+                    "Set both of your PCs to the same supported region appeared while "
+                    "waiting for pairing-discovery -- clicking Close and aborting"
+                )
+                self.regional_settings_not_supported_dialog.click_close()
+                raise SignInError(
+                    "Migration failed: Set both of your PCs to the same supported region "
+                    "appeared -- Target and Source PCs are set to different regions; "
+                    "clicked Close"
                 )
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
