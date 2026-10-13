@@ -66,6 +66,12 @@ check_other_pc_disconnected() moved to flows/source/common_dialogs.py, shared wi
 SourcePairingFlow -- both flows previously carried their own verbatim copy of each.
 This flow still owns its own component instances (constructed in __init__, unchanged);
 only the checking logic itself is shared.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "Your regional settings aren't
+supported." is also raced every cycle here, via
+raise_if_regional_settings_not_supported() (also flows/source/common_dialogs.py).
+Fatal on Source -- clicking its "Close" button closes the app entirely, so this clicks
+Close then raises immediately rather than letting the loop continue.
 """
 
 import time
@@ -73,10 +79,15 @@ import time
 from components.source.battery_critically_low_dialog import BatteryCriticallyLowDialog
 from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
+from components.source.regional_settings_not_supported_dialog import RegionalSettingsNotSupportedDialog
 from components.source.transfer_progress_screen import TransferProgressScreen
 from assertions.source import transfer_progress_screen as transfer_progress_assertions
 from factory.logger_factory import LoggerFactory
-from flows.source.common_dialogs import check_battery_critically_low, check_other_pc_disconnected
+from flows.source.common_dialogs import (
+    check_battery_critically_low,
+    check_other_pc_disconnected,
+    raise_if_regional_settings_not_supported,
+)
 
 
 class SourceTransferFlow:
@@ -86,11 +97,15 @@ class SourceTransferFlow:
         self.battery_critically_low_dialog = BatteryCriticallyLowDialog(app_session)
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
+        self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.log = LoggerFactory.get_logger("source")
 
     def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            raise_if_regional_settings_not_supported(
+                self.app_session, self.regional_settings_not_supported_dialog, self.log
+            )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
             if check_battery_critically_low(
@@ -196,6 +211,9 @@ class SourceTransferFlow:
         migration_complete = None
         dismiss_action = None
         while time.monotonic() < deadline:
+            raise_if_regional_settings_not_supported(
+                self.app_session, self.regional_settings_not_supported_dialog, self.log
+            )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
             if check_battery_critically_low(
