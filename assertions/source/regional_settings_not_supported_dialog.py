@@ -12,12 +12,24 @@ raise_if_regional_settings_not_supported().
 
 Never a click target, so it lives here rather than in locators/ -- per explicit user
 direction (2026-10-14).
+
+Bug fixed here, confirmed via a live run (2026-10-14): the original locator did an
+exact @Name="Your regional settings aren't supported." match -- the apostrophe in
+"aren't" hit this project's own documented curly-vs-straight-apostrophe trap (see
+CLAUDE.md's Gotchas section and assertions/target/sign_in_failed_dialog.py's history),
+so is_showing() returned False forever against a screen genuinely on screen (confirmed
+live via a user-supplied screenshot showing the dialog present while the log showed
+nothing but repeated False checks). Replaced with contains() on an apostrophe-free,
+distinctive substring, same fix pattern as every other apostrophe-containing heading in
+this project.
 """
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "Your regional settings aren't supported."
-REGIONAL_SETTINGS_NOT_SUPPORTED_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
+# Apostrophe-free substring of "Your regional settings aren't supported." -- avoids the
+# exact-match apostrophe-mismatch trap (see module docstring above).
+HEADING_CONTAINS_TEXT = "Your regional settings"
+REGIONAL_SETTINGS_NOT_SUPPORTED_HEADING_LOCATOR = ("xpath", f'//*[contains(@Name, "{HEADING_CONTAINS_TEXT}")]')
 
 
 def is_showing(session, timeout: float = 0.1) -> bool:
