@@ -51,9 +51,21 @@ on BatteryCriticallyLowDialog does NOT just dismiss it -- it triggers
 ConfirmCancelDialog ("Are you sure you want to cancel?"), asking to confirm cancelling
 the WHOLE migration. Without handling this, the run would sit on that confirmation
 until its own timeout, or (worse) could accidentally cancel the migration if something
-else clicked through it. _check_battery_critically_low() now checks for and dismisses
-it immediately (via "No, don't cancel") right after every click_cancel() -- see
+else clicked through it. check_battery_critically_low() (see
+flows/source/common_dialogs.py) checks for and dismisses it immediately (via "No,
+don't cancel") right after every click_cancel() -- see
 assertions/source/confirm_cancel_dialog.py's own docstring.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "The other PC isn't connected
+to a network." (the Target PC lost its network connection) is also raced every cycle
+here, via check_other_pc_disconnected() -- NOT fatal on Source (unlike Target's own
+mirror-image dialog), just clicked through and the loop keeps going.
+
+Per explicit user direction (2026-10-14): check_battery_critically_low() and
+check_other_pc_disconnected() moved to flows/source/common_dialogs.py, shared with
+SourcePairingFlow -- both flows previously carried their own verbatim copy of each.
+This flow still owns its own component instances (constructed in __init__, unchanged);
+only the checking logic itself is shared.
 """
 
 import time
@@ -62,11 +74,9 @@ from components.source.battery_critically_low_dialog import BatteryCriticallyLow
 from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
 from components.source.transfer_progress_screen import TransferProgressScreen
-from assertions.source import battery_critically_low_dialog as battery_critically_low_assertions
-from assertions.source import confirm_cancel_dialog as confirm_cancel_assertions
-from assertions.source import other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions
 from assertions.source import transfer_progress_screen as transfer_progress_assertions
 from factory.logger_factory import LoggerFactory
+from flows.source.common_dialogs import check_battery_critically_low, check_other_pc_disconnected
 
 
 class SourceTransferFlow:
@@ -78,43 +88,14 @@ class SourceTransferFlow:
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.log = LoggerFactory.get_logger("source")
 
-    def _check_battery_critically_low(self) -> bool:
-        if not battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
-            return False
-        self.log.warning('Your battery is critically low. appeared -- clicking Cancel')
-        self.battery_critically_low_dialog.click_cancel()
-        if confirm_cancel_assertions.is_showing(self.app_session, timeout=2.0):
-            self.log.warning(
-                'Are you sure you want to cancel? appeared after dismissing the '
-                "battery dialog -- clicking No, don't cancel"
-            )
-            self.confirm_cancel_dialog.click_no_dont_cancel()
-        return True
-
-    def _check_other_pc_disconnected(self) -> bool:
-        """Shared by every wait loop in this class, same reasoning as
-        _check_battery_critically_low(). Confirmed directly by the user via a live
-        screenshot (2026-10-14): "The other PC isn't connected to a network." means
-        the Target PC lost its network connection.
-
-        Bug fixed here, confirmed directly by the user (2026-10-14): this used to
-        click "Cancel transfer" and then raise, aborting the whole run (mirroring
-        Target's own OtherPcNetworkDisconnectedDialog, which IS confirmed terminal
-        there) -- but on Source this isn't fatal. Just clicks "Cancel transfer" and
-        lets the caller's loop continue, same "race it, click through, keep going"
-        pattern as every other dialog in this class."""
-        if not other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-            return False
-        self.other_pc_network_disconnected_dialog.click_cancel_transfer()
-        self.log.warning("The other PC isn't connected to a network. appeared -- clicked Cancel transfer")
-        return True
-
     def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self._check_other_pc_disconnected():
+            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
-            if self._check_battery_critically_low():
+            if check_battery_critically_low(
+                self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log
+            ):
                 continue
             if check(timeout=1.0):
                 return True
@@ -215,9 +196,11 @@ class SourceTransferFlow:
         migration_complete = None
         dismiss_action = None
         while time.monotonic() < deadline:
-            if self._check_other_pc_disconnected():
+            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
-            if self._check_battery_critically_low():
+            if check_battery_critically_low(
+                self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log
+            ):
                 continue
             if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=0.1):
                 self.log.warning(

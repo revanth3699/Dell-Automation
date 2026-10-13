@@ -39,20 +39,26 @@ direction, 2026-10-13), same reasoning as Target's PlugIntoAcPowerDialog.
 Bug fixed here, confirmed via user-supplied screenshots (2026-10-13): clicking Cancel
 on BatteryCriticallyLowDialog does NOT just dismiss it -- it triggers
 ConfirmCancelDialog ("Are you sure you want to cancel?"), asking to confirm cancelling
-the whole pairing/migration. Both call sites now go through the single
-_check_battery_critically_low() helper, which dismisses that follow-up confirmation
-too (via "No, don't cancel") immediately after every click_cancel() -- see
-assertions/source/confirm_cancel_dialog.py's own docstring. This also folds the two
-previously-separate inline battery-dialog checks (discovery-wait loop and
-_publish_loop()) into one shared method, so this new handling only needed writing once.
+the whole pairing/migration. check_battery_critically_low() (see
+flows/source/common_dialogs.py) dismisses that follow-up confirmation too (via "No,
+don't cancel") immediately after every click_cancel() -- see
+assertions/source/confirm_cancel_dialog.py's own docstring.
 
 Confirmed from a user-supplied screenshot (2026-10-14): "The other PC isn't connected
 to a network." (the Target PC lost its network connection) can also appear
 unpredictably during this flow -- raced in both loops the same way, via
-_check_other_pc_disconnected(). Bug fixed here, confirmed directly by the user
-(2026-10-14): this used to click "Cancel transfer" and then abort the whole run
-(mirroring Target's own equivalent dialog, which IS confirmed terminal there) -- on
-Source it isn't fatal, just clicked through and the loop keeps going.
+check_other_pc_disconnected() (also flows/source/common_dialogs.py). Bug fixed here,
+confirmed directly by the user (2026-10-14): this used to click "Cancel transfer" and
+then abort the whole run (mirroring Target's own equivalent dialog, which IS confirmed
+terminal there) -- on Source it isn't fatal, just clicked through and the loop keeps
+going.
+
+Per explicit user direction (2026-10-14): these two checks moved out to
+flows/source/common_dialogs.py, shared with SourceTransferFlow -- both flows
+previously carried their own verbatim copy of each, which is exactly why the
+non-fatal-on-Source fix above had to be applied by hand in two places. Each flow still
+owns its own component instances (constructed in __init__, unchanged); only the
+checking logic itself is shared.
 """
 
 import time
@@ -68,15 +74,13 @@ from components.source.pairing_code_screen import PairingCodeScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
 from assertions.source import (
-    battery_critically_low_dialog as battery_critically_low_assertions,
-    confirm_cancel_dialog as confirm_cancel_assertions,
     network_disconnected_dialog as network_disconnected_assertions,
-    other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
     pairing_code_screen as pairing_code_assertions,
     searching_screen as searching_screen_assertions,
     trust_network_dialog as trust_network_assertions,
     welcome_screen as welcome_screen_assertions,
 )
+from flows.source.common_dialogs import check_battery_critically_low, check_other_pc_disconnected
 from factory.config import SOURCE_PROCESS_NAME
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
@@ -106,37 +110,6 @@ class SourcePairingFlow:
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.pairing_code_screen = PairingCodeScreen(app_session)
-
-    def _check_other_pc_disconnected(self) -> bool:
-        """Shared by every wait loop in this class, same reasoning as
-        _check_battery_critically_low(). Confirmed directly by the user via a live
-        screenshot (2026-10-14): "The other PC isn't connected to a network." means
-        the Target PC lost its network connection.
-
-        Bug fixed here, confirmed directly by the user (2026-10-14): this used to
-        click "Cancel transfer" and then raise, aborting the whole run (mirroring
-        Target's own OtherPcNetworkDisconnectedDialog, which IS confirmed terminal
-        there) -- but on Source this isn't fatal. Just clicks "Cancel transfer" and
-        lets the caller's loop continue, same "race it, click through, keep going"
-        pattern as every other dialog in this class."""
-        if not other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-            return False
-        self.other_pc_network_disconnected_dialog.click_cancel_transfer()
-        self.log.warning("The other PC isn't connected to a network. appeared -- clicked Cancel transfer")
-        return True
-
-    def _check_battery_critically_low(self) -> bool:
-        if not battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
-            return False
-        self.battery_critically_low_dialog.click_cancel()
-        self.log.warning('Your battery is critically low. appeared -- clicked Cancel')
-        if confirm_cancel_assertions.is_showing(self.app_session, timeout=2.0):
-            self.confirm_cancel_dialog.click_no_dont_cancel()
-            self.log.warning(
-                'Are you sure you want to cancel? appeared after dismissing the '
-                "battery dialog -- clicked No, don't cancel"
-            )
-        return True
 
     def _assert_app_alive(self) -> None:
         """Confirmed live (2026-10-06): the Source app can crash mid-wait (same
@@ -180,7 +153,7 @@ class SourcePairingFlow:
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
-                if self._check_other_pc_disconnected():
+                if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                     continue
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                     self.network_disconnected_dialog.click_check_again()
@@ -192,7 +165,7 @@ class SourcePairingFlow:
                 if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
                     self.trust_network_dialog.click_yes_continue()
                     self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
-                if self._check_battery_critically_low():
+                if check_battery_critically_low(self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log):
                     continue
                 if pairing_code_assertions.is_showing(self.app_session, timeout=2.0):
                     break
@@ -225,7 +198,7 @@ class SourcePairingFlow:
 
         while time.monotonic() < deadline:
             self._assert_app_alive()
-            if self._check_other_pc_disconnected():
+            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
@@ -238,7 +211,7 @@ class SourcePairingFlow:
                 self.trust_network_dialog.click_yes_continue()
                 self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
                 continue
-            if self._check_battery_critically_low():
+            if check_battery_critically_low(self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log):
                 continue
             if not pairing_code_assertions.is_showing(self.app_session, timeout=1.0):
                 self.log.success("Pairing-code screen no longer showing -- Target has paired")
