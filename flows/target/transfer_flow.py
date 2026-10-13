@@ -63,6 +63,14 @@ confirmed to appear here too, but raced defensively (same terminal treatment as 
 other PC isn't connected to a network.": click Close, then raise and abort) in all
 three wait loops in this file, since it wasn't disproven here either and the check is
 cheap.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "Install one or more browsers
+to migrate your bookmarks" can appear right after clicking the migrate button, if the
+Source PC has a browser (e.g. Firefox) installed that this (Target) PC doesn't. Not
+fatal -- raced in the inner wait loop (waiting for "We're moving your files and
+settings" after the click) alongside the close-apps dialog, since that's confirmed to
+be where it actually shows up. Per explicit user direction: clicks Rescan once (after a
+delay), then Skip to continue without those bookmarks.
 """
 
 import time
@@ -71,6 +79,7 @@ from components.target.app_window import AppWindow
 from components.target.common_dialogs import (
     CloseAppsDialog,
     DesktopShortcutDialog,
+    InstallBrowsersToMigrateBookmarksDialog,
     MigrationErrorDialog,
     OtherPcNetworkDisconnectedDialog,
     PlugIntoAcPowerDialog,
@@ -85,6 +94,7 @@ from assertions.target import (
     confirm_accounts_dialog as confirm_accounts_assertions,
     close_apps_dialog as close_apps_assertions,
     desktop_shortcut_dialog as desktop_shortcut_assertions,
+    install_browsers_to_migrate_bookmarks_dialog as install_browsers_assertions,
     migration_complete_screen as migration_complete_assertions,
     migration_error_dialog as migration_error_assertions,
     migration_summary_screen as migration_summary_assertions,
@@ -101,8 +111,9 @@ RECLICK_INTERVAL_SECONDS = 3.0
 
 # Per explicit user direction (2026-10-14): clicking "download a PDF" opens the PDF file
 # (in an external viewer/browser), which takes a moment -- give it time before clicking
-# "Back to Home", rather than clicking through immediately.
-PDF_OPEN_WAIT_SECONDS = 30.0
+# "Back to Home", rather than clicking through immediately. Reduced from 30.0 to 5.0
+# per explicit user direction (2026-10-14).
+PDF_OPEN_WAIT_SECONDS = 5.0
 
 
 class TransferFlowError(Exception):
@@ -123,6 +134,7 @@ class TargetTransferFlow:
         self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(app_session)
+        self.install_browsers_dialog = InstallBrowsersToMigrateBookmarksDialog(app_session)
         self.app_window = AppWindow(app_session)
         self.log = LoggerFactory.get_logger("target")
 
@@ -190,6 +202,31 @@ class TargetTransferFlow:
             return True
         return False
 
+    def _accept_install_browsers_dialog_if_showing(self) -> bool:
+        """Confirmed directly by the user via a live screenshot (2026-10-14): "Install
+        one or more browsers to migrate your bookmarks" appears right after clicking
+        the migrate button when the Source PC has a browser (e.g. Firefox) installed
+        that this (Target) PC doesn't. Not fatal -- per explicit user direction, waits
+        and clicks Rescan once (giving it one chance), then re-checks is_showing()
+        before clicking Skip (same re-check-before-the-next-click pattern used
+        elsewhere in this project, e.g. flows/source/common_dialogs.py's
+        check_battery_critically_low()) -- if Rescan already cleared the dialog
+        (browser now detected), Skip is skipped too since there is nothing left to
+        dismiss."""
+        if not install_browsers_assertions.is_showing(self.app_session, timeout=0.1):
+            return False
+        self.install_browsers_dialog.click_rescan()
+        self.log.warning(
+            "Install one or more browsers to migrate your bookmarks appeared -- "
+            "waited and clicked Rescan"
+        )
+        if install_browsers_assertions.is_showing(self.app_session, timeout=1.0):
+            self.install_browsers_dialog.click_skip()
+            self.log.warning("Still showing after Rescan -- clicked Skip to continue without those bookmarks")
+        else:
+            self.log.success("Dialog cleared after Rescan -- browser now detected, no Skip needed")
+        return True
+
     def _accept_desktop_shortcut_if_showing(self) -> bool:
         """Confirmed directly by the user via a live screenshot (2026-10-13): "Add a
         desktop shortcut before you go" -- its own wording places it near the very end
@@ -247,6 +284,8 @@ class TargetTransferFlow:
                     self._raise_if_other_pc_disconnected()
                     self._raise_if_regional_settings_not_supported()
                     if self._accept_plug_into_ac_power_if_showing():
+                        continue
+                    if self._accept_install_browsers_dialog_if_showing():
                         continue
                     if transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
                         self.log.success(
