@@ -54,6 +54,15 @@ Every is_X_showing()/is_X_confirmed() assertion is imported directly from
 assertions/target/<name>.py and called with the raw app_session; components/target/ now
 holds only click/type actions, called only after the matching assertion confirms
 presence.
+
+"Set both of your PCs to the same supported region" means Target and Source PCs are
+set to different, incompatible regions. Confirmed via a live run (2026-10-14) to appear
+while waiting for pairing-discovery in
+flows/target/authentication/sign_in_flow.py -- well before this flow runs -- not yet
+confirmed to appear here too, but raced defensively (same terminal treatment as "The
+other PC isn't connected to a network.": click Close, then raise and abort) in all
+three wait loops in this file, since it wasn't disproven here either and the check is
+cheap.
 """
 
 import time
@@ -65,6 +74,7 @@ from components.target.common_dialogs import (
     MigrationErrorDialog,
     OtherPcNetworkDisconnectedDialog,
     PlugIntoAcPowerDialog,
+    RegionalSettingsNotSupportedDialog,
 )
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
@@ -80,6 +90,7 @@ from assertions.target import (
     migration_summary_screen as migration_summary_assertions,
     other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
     plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+    regional_settings_not_supported_dialog as regional_settings_not_supported_assertions,
     transfer_progress_screen as transfer_progress_assertions,
     transfer_receive_screen as transfer_receive_assertions,
     welcome_back_screen as welcome_back_assertions,
@@ -109,6 +120,7 @@ class TargetTransferFlow:
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
+        self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(app_session)
         self.app_window = AppWindow(app_session)
@@ -143,6 +155,24 @@ class TargetTransferFlow:
             raise TransferFlowError(
                 "Migration failed: The other PC isn't connected to a network. appeared -- "
                 "the Source PC lost network connectivity mid-transfer; clicked Cancel transfer"
+            )
+
+    def _raise_if_regional_settings_not_supported(self) -> None:
+        """Shared by every wait loop in this class, same reasoning as
+        _raise_if_migration_error(). Confirmed directly by the user via a live
+        screenshot (2026-10-14): "Your regional settings aren't supported." means
+        Target and Source PCs are set to different, incompatible regions -- nothing to
+        retry, so per explicit user direction this clicks Close and raises
+        immediately, aborting the run."""
+        if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+            self.log.error(
+                "Your regional settings aren't supported. appeared -- clicking "
+                "Close and aborting"
+            )
+            self.regional_settings_not_supported_dialog.click_close()
+            raise TransferFlowError(
+                "Migration failed: Your regional settings aren't supported. appeared -- "
+                "Target and Source PCs are set to different regions; clicked Close"
             )
 
     def _accept_plug_into_ac_power_if_showing(self) -> bool:
@@ -192,6 +222,7 @@ class TargetTransferFlow:
         while time.monotonic() < deadline:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if transfer_receive_assertions.wait_until_showing(self.app_session, timeout=0.5):
@@ -214,6 +245,7 @@ class TargetTransferFlow:
                 while time.monotonic() < progress_deadline:
                     self._raise_if_migration_error()
                     self._raise_if_other_pc_disconnected()
+                    self._raise_if_regional_settings_not_supported()
                     if self._accept_plug_into_ac_power_if_showing():
                         continue
                     if transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
@@ -320,6 +352,7 @@ class TargetTransferFlow:
         while True:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if not transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
