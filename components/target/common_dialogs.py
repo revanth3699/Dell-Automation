@@ -20,10 +20,15 @@ import time
 from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR
 from locators.target.desktop_shortcut_dialog import CREATE_SHORTCUT_BUTTON_LOCATOR
+from locators.target.install_browsers_to_migrate_bookmarks_dialog import (
+    RESCAN_BUTTON_LOCATOR,
+    SKIP_BUTTON_LOCATOR,
+)
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR
 from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR
 from locators.target.other_pc_network_disconnected_dialog import CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.plug_into_ac_power_dialog import PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR
+from locators.target.regional_settings_not_supported_dialog import CLOSE_BUTTON_LOCATOR as REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
 from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
 from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR
@@ -117,6 +122,14 @@ class NetworkDisconnectedDialog:
     Per explicit user direction: waits CHECK_AGAIN_DELAY_SECONDS before clicking Check
     again (rather than immediately), since the underlying network condition is likely
     transient -- an instant re-check would probably just hit the same failure again.
+
+    Bug fixed here, confirmed live (2026-10-14): a long delay between "is the dialog
+    showing" and "click its button" creates a real race -- if whatever triggered it
+    (no network) resolves on its own during the wait, the dialog can clear itself
+    before the click fires, and the plain click() then fails outright instead of just
+    finding nothing to dismiss. click_check_again() now re-checks the button's own
+    existence (not the heading -- no assertions/ import needed here, same element this
+    class already owns) right after the delay and no-ops if it's already gone.
     """
 
     CHECK_AGAIN_DELAY_SECONDS = 30.0
@@ -126,6 +139,8 @@ class NetworkDisconnectedDialog:
 
     def click_check_again(self) -> None:
         time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
+        if not self._check_again_button.exists(timeout=1.0):
+            return
         self._check_again_button.click(timeout=2.0)
 
 
@@ -139,6 +154,20 @@ class PlugIntoAcPowerDialog:
     Per explicit user direction: waits PLUG_IN_DELAY_SECONDS before clicking Cancel
     (rather than immediately), giving the user a real chance to actually plug the PC in
     before dismissing the warning.
+
+    Bug fixed here, confirmed live (2026-10-14): a real run's log showed the heading
+    detected (PlugIntoAcPowerHeading: True), then click_cancel()'s click failing
+    outright ("Condition not met within 2.0s") after the 15s wait, repeatedly, every
+    single cycle across two separate real runs -- an initial guess (the dialog
+    clearing itself during the wait) turned out wrong, confirmed by attaching
+    read-only to a real session with the dialog actually showing: the button's real
+    accessible name is "Cancel transfer", not "Cancel" -- see
+    locators/target/plug_into_ac_power_dialog.py. The real bug was a wrong locator,
+    not a race; it just happened to fail the same way every time instead of
+    intermittently. click_cancel() still re-checks the button's own existence right
+    after the delay and no-ops if it's gone (kept as defensive insurance against the
+    genuine race this was originally mistaken for -- e.g. power really does get
+    plugged in during the wait), but the real fix is the corrected locator.
     """
 
     PLUG_IN_DELAY_SECONDS = 15.0
@@ -150,6 +179,8 @@ class PlugIntoAcPowerDialog:
 
     def click_cancel(self) -> None:
         time.sleep(self.PLUG_IN_DELAY_SECONDS)
+        if not self._cancel_button.exists(timeout=1.0):
+            return
         self._cancel_button.click(timeout=2.0)
 
 
@@ -193,6 +224,56 @@ class DesktopShortcutDialog:
 
     def click_create_shortcut(self) -> None:
         self._create_shortcut_button.click()
+
+
+class RegionalSettingsNotSupportedDialog:
+    """"Set both of your PCs to the same supported region" -- confirmed from a live run
+    (2026-10-14), appearing while Target waits for pairing-discovery right after
+    sign-in: Target and Source PCs are set to different, incompatible regions.
+    Confirmed directly by the user: Target-only, and treated as an immediate,
+    unrecoverable failure -- click Close, then the caller raises and aborts the run,
+    same terminal pattern as OtherPcNetworkDisconnectedDialog. See
+    assertions/target/regional_settings_not_supported_dialog.py's is_showing() (and its
+    own docstring for the heading-text correction history).
+    """
+
+    def __init__(self, app_session):
+        self._close_button = BaseComponent(
+            app_session, *REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR, "RegionalSettingsNotSupportedCloseButton"
+        )
+
+    def click_close(self, timeout: float = 2.0) -> None:
+        """Clicks Close. Callers check is_showing() first and only call this once they
+        already know the dialog is present -- this never re-checks presence itself."""
+        self._close_button.click(timeout=timeout)
+
+
+class InstallBrowsersToMigrateBookmarksDialog:
+    """"Install one or more browsers to migrate your bookmarks" -- confirmed from a
+    user-supplied screenshot (2026-10-14): appears right after clicking the migrate
+    button ("Bring everything over for me") when the Source PC has a browser (e.g.
+    Firefox) installed that this (Target) PC doesn't, so that browser's bookmarks
+    can't be migrated. Has "Skip" and "Rescan" buttons. Not fatal -- per explicit user
+    direction, click_rescan() waits RESCAN_DELAY_SECONDS then clicks Rescan (giving it
+    one chance in case the browser gets installed/detected in the meantime);
+    click_skip() is a separate, plain click so the caller can re-check is_showing()
+    between the two (see flows/target/transfer_flow.py) and skip the second click if
+    Rescan already cleared the dialog. See
+    assertions/target/install_browsers_to_migrate_bookmarks_dialog.py's is_showing().
+    """
+
+    RESCAN_DELAY_SECONDS = 10.0
+
+    def __init__(self, app_session):
+        self._rescan_button = BaseComponent(app_session, *RESCAN_BUTTON_LOCATOR, "InstallBrowsersRescanButton")
+        self._skip_button = BaseComponent(app_session, *SKIP_BUTTON_LOCATOR, "InstallBrowsersSkipButton")
+
+    def click_rescan(self) -> None:
+        time.sleep(self.RESCAN_DELAY_SECONDS)
+        self._rescan_button.click(timeout=2.0)
+
+    def click_skip(self) -> None:
+        self._skip_button.click(timeout=2.0)
 
 
 class MigrationErrorDialog:

@@ -1,11 +1,12 @@
 """Expected heading text + locator + assertion function for
 components.source.battery_critically_low_dialog.BatteryCriticallyLowDialog ("Your
 battery is critically low." -- "You'll need to plug this PC into AC power to
-continue."). Confirmed from a user-supplied screenshot (2026-10-14). Distinct from
-Target's "Plug into AC power" (a low-battery warning, waited out before clicking
-Cancel) -- this one is "critically low", not just a warning, so per explicit user
-direction it's dismissed immediately, no wait first. Never a click target, so it lives
-here rather than in locators/ -- per explicit user direction (2026-10-14).
+continue."). Confirmed from a user-supplied screenshot (2026-10-14). Per explicit user
+direction (2026-10-13), dismissed via Cancel only after a delay (same reasoning as
+Target's "Plug into AC power" dialog -- see
+components/source/battery_critically_low_dialog.py's own docstring). Never a click
+target, so it lives here rather than in locators/ -- per explicit user direction
+(2026-10-14).
 """
 
 from assertions.common import text_exists

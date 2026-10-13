@@ -48,6 +48,7 @@ from components.base_component import BaseComponent
 from factory.config import SOURCE_PROCESS_NAME
 from utils.ocr import recognize_text
 from factory.session import _find_main_window_hwnd, bring_window_to_foreground
+from assertions.source import pairing_code_screen as pairing_code_assertions
 from locators.source.pairing_code_screen import (
     CANCEL_BUTTON_LOCATOR,
     CODE_BOX_LOCATORS,
@@ -301,7 +302,7 @@ class PairingCodeScreen:
         last_digits: dict = {}
         last_element_ids: dict = {}
         for attempt in range(attempts):
-            if not self.is_showing(timeout=0.1):
+            if not pairing_code_assertions.is_showing(self._session, timeout=0.1):
                 # Confirmed live (2026-10-09): the screen can advance (pairing already
                 # succeeded) in the middle of this method's own retry loop -- bail
                 # immediately instead of burning the rest of `attempts` on OCR reads of

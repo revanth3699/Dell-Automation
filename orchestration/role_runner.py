@@ -258,6 +258,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     role = MachineRole.TARGET if args.role == "target" else MachineRole.SOURCE
+
+    # Confirmed: Source has no launcher concept at all -- SourceRunner.run() accepts
+    # launch_mode only to share one call signature with TargetRunner.run() and
+    # silently ignores it (see its own docstring). Silently ignoring an explicit
+    # --launch here too would let --role source --launch simulator look like it did
+    # something when it didn't; reject it instead so --launch only ever works for
+    # --role target, per explicit user direction.
+    if role is MachineRole.SOURCE and args.launch != "exe":
+        parser.error("--launch only applies to --role target (Source has no launcher concept)")
+
     SCENARIOS[args.scenario](role, args.run_id, launch_mode=args.launch)
     print(
         f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}, "

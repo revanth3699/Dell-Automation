@@ -54,16 +54,36 @@ Every is_X_showing()/is_X_confirmed() assertion is imported directly from
 assertions/target/<name>.py and called with the raw app_session; components/target/ now
 holds only click/type actions, called only after the matching assertion confirms
 presence.
+
+"Set both of your PCs to the same supported region" means Target and Source PCs are
+set to different, incompatible regions. Confirmed via a live run (2026-10-14) to appear
+while waiting for pairing-discovery in
+flows/target/authentication/sign_in_flow.py -- well before this flow runs -- not yet
+confirmed to appear here too, but raced defensively (same terminal treatment as "The
+other PC isn't connected to a network.": click Close, then raise and abort) in all
+three wait loops in this file, since it wasn't disproven here either and the check is
+cheap.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "Install one or more browsers
+to migrate your bookmarks" can appear right after clicking the migrate button, if the
+Source PC has a browser (e.g. Firefox) installed that this (Target) PC doesn't. Not
+fatal -- raced in the inner wait loop (waiting for "We're moving your files and
+settings" after the click) alongside the close-apps dialog, since that's confirmed to
+be where it actually shows up. Per explicit user direction: clicks Rescan once (after a
+delay), then Skip to continue without those bookmarks.
 """
 
 import time
 
+from components.target.app_window import AppWindow
 from components.target.common_dialogs import (
     CloseAppsDialog,
     DesktopShortcutDialog,
+    InstallBrowsersToMigrateBookmarksDialog,
     MigrationErrorDialog,
     OtherPcNetworkDisconnectedDialog,
     PlugIntoAcPowerDialog,
+    RegionalSettingsNotSupportedDialog,
 )
 from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
@@ -74,11 +94,13 @@ from assertions.target import (
     confirm_accounts_dialog as confirm_accounts_assertions,
     close_apps_dialog as close_apps_assertions,
     desktop_shortcut_dialog as desktop_shortcut_assertions,
+    install_browsers_to_migrate_bookmarks_dialog as install_browsers_assertions,
     migration_complete_screen as migration_complete_assertions,
     migration_error_dialog as migration_error_assertions,
     migration_summary_screen as migration_summary_assertions,
     other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
     plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+    regional_settings_not_supported_dialog as regional_settings_not_supported_assertions,
     transfer_progress_screen as transfer_progress_assertions,
     transfer_receive_screen as transfer_receive_assertions,
     welcome_back_screen as welcome_back_assertions,
@@ -89,8 +111,9 @@ RECLICK_INTERVAL_SECONDS = 3.0
 
 # Per explicit user direction (2026-10-14): clicking "download a PDF" opens the PDF file
 # (in an external viewer/browser), which takes a moment -- give it time before clicking
-# "Back to Home", rather than clicking through immediately.
-PDF_OPEN_WAIT_SECONDS = 30.0
+# "Back to Home", rather than clicking through immediately. Reduced from 30.0 to 5.0
+# per explicit user direction (2026-10-14).
+PDF_OPEN_WAIT_SECONDS = 5.0
 
 
 class TransferFlowError(Exception):
@@ -108,8 +131,11 @@ class TargetTransferFlow:
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
+        self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(app_session)
+        self.install_browsers_dialog = InstallBrowsersToMigrateBookmarksDialog(app_session)
+        self.app_window = AppWindow(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def _raise_if_migration_error(self) -> None:
@@ -119,7 +145,7 @@ class TargetTransferFlow:
         is showing; a no-op otherwise."""
         if migration_error_assertions.is_showing(self.app_session, timeout=0.1):
             error_text = self.migration_error_dialog.read_error_text()
-            raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
+            raise TransferFlowError(f"Migration failed: Something went wrong appeared -- {error_text}")
 
     def _raise_if_other_pc_disconnected(self) -> None:
         """Shared by every wait loop in this class, same reasoning as
@@ -134,13 +160,31 @@ class TargetTransferFlow:
         here."""
         if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
             self.log.error(
-                '"The other PC isn\'t connected to a network." appeared -- clicking '
-                '"Cancel transfer" and aborting'
+                "The other PC isn't connected to a network. appeared -- clicking "
+                "Cancel transfer and aborting"
             )
             self.other_pc_network_disconnected_dialog.cancel_transfer()
             raise TransferFlowError(
-                'Migration failed: "The other PC isn\'t connected to a network." appeared -- '
+                "Migration failed: The other PC isn't connected to a network. appeared -- "
                 "the Source PC lost network connectivity mid-transfer; clicked Cancel transfer"
+            )
+
+    def _raise_if_regional_settings_not_supported(self) -> None:
+        """Shared by every wait loop in this class, same reasoning as
+        _raise_if_migration_error(). Confirmed directly by the user via a live
+        screenshot (2026-10-14): "Your regional settings aren't supported." means
+        Target and Source PCs are set to different, incompatible regions -- nothing to
+        retry, so per explicit user direction this clicks Close and raises
+        immediately, aborting the run."""
+        if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+            self.log.error(
+                "Your regional settings aren't supported. appeared -- clicking "
+                "Close and aborting"
+            )
+            self.regional_settings_not_supported_dialog.click_close()
+            raise TransferFlowError(
+                "Migration failed: Your regional settings aren't supported. appeared -- "
+                "Target and Source PCs are set to different regions; clicked Close"
             )
 
     def _accept_plug_into_ac_power_if_showing(self) -> bool:
@@ -154,9 +198,34 @@ class TargetTransferFlow:
         continue."""
         if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
             self.plug_into_ac_power_dialog.click_cancel()
-            self.log.warning('"Plug into AC power" appeared -- waited and clicked Cancel')
+            self.log.warning("Plug into AC power appeared -- waited and clicked Cancel")
             return True
         return False
+
+    def _accept_install_browsers_dialog_if_showing(self) -> bool:
+        """Confirmed directly by the user via a live screenshot (2026-10-14): "Install
+        one or more browsers to migrate your bookmarks" appears right after clicking
+        the migrate button when the Source PC has a browser (e.g. Firefox) installed
+        that this (Target) PC doesn't. Not fatal -- per explicit user direction, waits
+        and clicks Rescan once (giving it one chance), then re-checks is_showing()
+        before clicking Skip (same re-check-before-the-next-click pattern used
+        elsewhere in this project, e.g. flows/source/common_dialogs.py's
+        check_battery_critically_low()) -- if Rescan already cleared the dialog
+        (browser now detected), Skip is skipped too since there is nothing left to
+        dismiss."""
+        if not install_browsers_assertions.is_showing(self.app_session, timeout=0.1):
+            return False
+        self.install_browsers_dialog.click_rescan()
+        self.log.warning(
+            "Install one or more browsers to migrate your bookmarks appeared -- "
+            "waited and clicked Rescan"
+        )
+        if install_browsers_assertions.is_showing(self.app_session, timeout=1.0):
+            self.install_browsers_dialog.click_skip()
+            self.log.warning("Still showing after Rescan -- clicked Skip to continue without those bookmarks")
+        else:
+            self.log.success("Dialog cleared after Rescan -- browser now detected, no Skip needed")
+        return True
 
     def _accept_desktop_shortcut_if_showing(self) -> bool:
         """Confirmed directly by the user via a live screenshot (2026-10-13): "Add a
@@ -169,7 +238,7 @@ class TargetTransferFlow:
         if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
             self.desktop_shortcut_dialog.click_create_shortcut()
             self.log.success(
-                '"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"'
+                "Add a desktop shortcut before you go appeared -- clicked Create shortcut"
             )
             return True
         return False
@@ -184,12 +253,13 @@ class TargetTransferFlow:
         account-mismatch confirm dialog and the close-other-apps dialog the whole time
         too (see module docstring) and clicks through either.
         """
-        self.log.info('Waiting for "Your files are ready to move" (Target is preparing/scanning files)...')
+        self.log.info("Waiting for Your files are ready to move (Target is preparing/scanning files)...")
         deadline = time.monotonic() + screen_timeout
         confirmed_accounts = False
         while time.monotonic() < deadline:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if transfer_receive_assertions.wait_until_showing(self.app_session, timeout=0.5):
@@ -200,30 +270,33 @@ class TargetTransferFlow:
                 while close_apps_assertions.is_showing(self.app_session, timeout=0.1):
                     self.close_apps_dialog.click_close_application()
                     self.log.success(
-                        "\"We need to close all other applications\" appeared right "
+                        "We need to close all other applications appeared right "
                         "before clicking Migrate now -- clicked Close Application"
                     )
-                self.log.success('Files ready to move -- starting transfer ("Bring everything over for me")')
+                self.log.success("Files ready to move -- starting transfer (Bring everything over for me)")
                 self.transfer_receive_screen.start_transfer()
 
-                self.log.info('Waiting for "We\'re moving your files and settings"...')
+                self.log.info("Waiting for We're moving your files and settings...")
                 progress_deadline = time.monotonic() + progress_screen_timeout
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
                     self._raise_if_migration_error()
                     self._raise_if_other_pc_disconnected()
+                    self._raise_if_regional_settings_not_supported()
                     if self._accept_plug_into_ac_power_if_showing():
+                        continue
+                    if self._accept_install_browsers_dialog_if_showing():
                         continue
                     if transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
                         self.log.success(
-                            "Transfer in progress -- \"We're moving your files and "
-                            "settings\" confirmed"
+                            "Transfer in progress -- We're moving your files and "
+                            "settings confirmed"
                         )
                         return
                     if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
                         self.close_apps_dialog.click_close_application()
                         self.log.success(
-                            "\"We need to close all other applications\" appeared "
+                            "We need to close all other applications appeared "
                             "after clicking Migrate now -- clicked Close Application"
                         )
                     elif time.monotonic() - last_click >= RECLICK_INTERVAL_SECONDS:
@@ -241,19 +314,19 @@ class TargetTransferFlow:
                         # the check at the top of this loop iteration missed it.
                         if transfer_progress_assertions.is_showing(self.app_session, timeout=0.3):
                             self.log.success(
-                                "Transfer in progress -- \"We're moving your files and "
-                                "settings\" confirmed right before a re-click -- not "
+                                "Transfer in progress -- We're moving your files and "
+                                "settings confirmed right before a re-click -- not "
                                 "clicking again"
                             )
                             return
                         self.log.warning(
-                            "Still on \"Your files are ready to move\" -- Migrate now "
+                            "Still on Your files are ready to move -- Migrate now "
                             "may not have registered, clicking it again"
                         )
                         self.transfer_receive_screen.start_transfer()
                         last_click = time.monotonic()
                 raise TransferFlowError(
-                    '"We\'re moving your files and settings" never appeared within '
+                    "We're moving your files and settings never appeared within "
                     f"{progress_screen_timeout:.0f}s after clicking Migrate now"
                 )
             if not confirmed_accounts and confirm_accounts_assertions.is_showing(self.app_session, timeout=0.1):
@@ -266,11 +339,11 @@ class TargetTransferFlow:
             if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
                 self.close_apps_dialog.click_close_application()
                 self.log.success(
-                    "\"We need to close all other applications\" appeared -- clicked "
+                    "We need to close all other applications appeared -- clicked "
                     "Close Application"
                 )
         raise TransferFlowError(
-            f'"Your files are ready to move" screen never appeared within {screen_timeout:.0f}s'
+            f"Your files are ready to move screen never appeared within {screen_timeout:.0f}s"
         )
 
     def wait_for_completion(
@@ -293,11 +366,16 @@ class TargetTransferFlow:
 
         Every step here is now a required gate (raises TransferFlowError if a screen
         doesn't appear in time), not optional. Once is_home_confirmed() returns True,
-        this method returns normally; the caller's own Session.close() (already wired
-        in orchestration/role_runner.py's TargetRunner.run(), via its finally block) is
-        what actually closes the app.
+        the migration is genuinely done -- per explicit user direction (2026-10-14),
+        this now also clicks the app's own native window close button (top-right
+        "X", AutomationId="CloseButton" -- see components/target/app_window.py)
+        rather than leaving the window open for the caller's own Session.close()
+        (orchestration/role_runner.py's TargetRunner.run(), via its finally block) to
+        tear down via a plain process kill. Session.close() still runs regardless
+        (idempotent either way), so this isn't a substitute for that cleanup, just an
+        explicit, graceful close through the app's own UI first.
         """
-        self.log.info('Waiting for the transfer to finish ("We\'re moving your files and settings" to clear)...')
+        self.log.info("Waiting for the transfer to finish (We're moving your files and settings to clear)...")
         # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
         # e.g. "error 2969") can appear layered over this exact screen while it's still
         # showing "0 B/s"/"...minutes left" behind it. Races the error dialog every
@@ -313,6 +391,7 @@ class TargetTransferFlow:
         while True:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if not transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
@@ -324,30 +403,30 @@ class TargetTransferFlow:
             raise TransferFlowError(f"Transfer did not finish within {transfer_timeout:.0f}s")
         self.log.success("Transfer finished")
 
-        self.log.info('Waiting for "Here\'s a summary of your migration results"...')
+        self.log.info("Waiting for Here's a summary of your migration results...")
         if not migration_summary_assertions.is_showing(self.app_session, timeout=summary_timeout):
             raise TransferFlowError(
-                f'"Here\'s a summary of your migration results" never appeared within '
+                f"Here's a summary of your migration results never appeared within "
                 f"{summary_timeout:.0f}s after the transfer finished"
             )
-        self.log.success('Migration-summary screen confirmed -- clicking "Finish"')
+        self.log.success("Migration-summary screen confirmed -- clicking Finish")
         self.migration_summary_screen.click_finish()
 
-        self.log.info('Waiting for "Your migration is now complete"...')
+        self.log.info("Waiting for Your migration is now complete...")
         if not migration_complete_assertions.is_showing(self.app_session, timeout=complete_timeout):
             raise TransferFlowError(
-                f'"Your migration is now complete" never appeared within {complete_timeout:.0f}s '
+                f"Your migration is now complete never appeared within {complete_timeout:.0f}s "
                 "after clicking Finish"
             )
         self.log.success(
-            'Migration-complete screen confirmed -- clicking "download a PDF", then "Back to Home"'
+            "Migration-complete screen confirmed -- clicking download a PDF, then Back to Home"
         )
         self.migration_complete_screen.click_download_pdf_link()
         self.log.info(f"Waiting {PDF_OPEN_WAIT_SECONDS:.0f}s for the downloaded PDF to open...")
         time.sleep(PDF_OPEN_WAIT_SECONDS)
         self.migration_complete_screen.click_back_to_home()
 
-        self.log.info('Confirming return to the home screen ("Sign Out" visible)...')
+        self.log.info("Confirming return to the home screen (Sign Out visible)...")
         # Bug fixed here, confirmed directly by the user via a live screenshot
         # (2026-10-13): "Add a desktop shortcut before you go" can appear layered over
         # this exact wait -- a plain single is_home_confirmed() call had no way to
@@ -371,3 +450,6 @@ class TargetTransferFlow:
                 "after clicking Back to Home"
             )
         self.log.success("Confirmed back on the home screen -- migration flow complete")
+
+        self.log.info("Closing the app window")
+        self.app_window.click_close()
