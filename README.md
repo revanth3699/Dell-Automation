@@ -7,6 +7,9 @@ dialog/condition this automation watches for -- where it's checked, how long, an
 whether it's fatal or clicked through.
 See [TEST_SCENARIOS.md](TEST_SCENARIOS.md) for what scenarios/test cases this
 automation actually drives and verifies end to end, and what's confirmed live vs. not.
+See [FULL_TRANSFER_FLOW.md](FULL_TRANSFER_FLOW.md) for a precise, code-accurate
+flowchart of the full transfer scenario, one diagram per method, for reviewing or
+improving the automation itself.
 
 Status: sign-in, pairing (via the Coordination Service), and transfer are implemented
 and have run live for both Target and Source PCs; per-run HTML reporting is wired into

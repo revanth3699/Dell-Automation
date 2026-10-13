@@ -5,7 +5,11 @@ current `orchestration/role_runner.py`, `flows/`, and `validation/` source direc
 See [DIALOG_HANDLING.md](DIALOG_HANDLING.md) for the full catalog of individual
 unpredictable dialogs/error conditions each scenario below races against; this document
 is about the *scenarios* (the real sequences driven end to end), not the interrupting
-dialogs within them.
+dialogs within them. The diagrams below are simplified for readability -- see
+[FULL_TRANSFER_FLOW.md](FULL_TRANSFER_FLOW.md) for a precise, one-diagram-per-method
+breakdown that maps 1:1 to the actual code (every branch, every loop, every retry),
+intended for reviewing/improving the automation itself rather than just understanding
+what it covers.
 
 A note on confidence: some paths below are **confirmed live** (the user has watched a
 real run exercise them and confirmed the result); others are **built and import-
@@ -50,8 +54,8 @@ transfer, for whichever role the process is running as.
 flowchart TD
     Start(["App launched"]) --> ClickSignIn["Click Sign In"]
     ClickSignIn --> Shortcut{"Already signed in?"}
-    Shortcut -->|"Welcome-back shown"| GetStarted["Click Get Started"]
-    Shortcut -->|"pairing-discovery / trust-network /<br/>pairing-code-entry already showing"| SkipAhead["Skip credential entry entirely"]
+    Shortcut -->|"pairing-discovery already showing"| PairingDiscovery
+    Shortcut -->|"Welcome-back screen shown"| GetStarted["Click Get Started"]
     Shortcut -->|"no cached session"| Browser["External browser opens"]
     Browser --> Email["Email page (if shown)"]
     Email --> Password["Password page (if shown)"]
@@ -63,9 +67,8 @@ flowchart TD
     Retry --> OTPRight["Submit correct email/password/OTP"]
     OTPRight --> UAC2["Windows UAC approval"]
     GetStarted --> PairingDiscovery
-    SkipAhead --> PairingDiscovery
-    UAC2 --> PairingDiscovery["'We're looking for your other PC'"]
-    PairingDiscovery -->|"Source PC found"| CodeEntry["'Let's connect your two PCs'"]
+    UAC2 --> PairingDiscovery["'We're looking for your other PC'<br/>(trust-network dialog raced continuously<br/>here too -- click Yes if it appears, at any point)"]
+    PairingDiscovery -->|"Source PC found --<br/>or the app skipped straight to code entry"| CodeEntry["'Let's connect your two PCs'"]
     CodeEntry --> FetchCode["Fetch code from Coordination Service, type it<br/>(retries up to 3x if it rotates mid-entry)"]
     FetchCode --> AccountMismatch{"Account names differ?"}
     AccountMismatch -->|"yes"| ConfirmAccounts["Click Continue"]
