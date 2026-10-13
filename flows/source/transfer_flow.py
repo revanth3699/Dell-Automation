@@ -72,6 +72,18 @@ supported." is also raced every cycle here, via
 raise_if_regional_settings_not_supported() (also flows/source/common_dialogs.py).
 Fatal on Source -- clicking its "Close" button closes the app entirely, so this clicks
 Close then raises immediately rather than letting the loop continue.
+
+Bug fixed here, confirmed directly by the user via a live run (2026-10-14): both
+_poll_until_showing() and the final-screen loop in wait_for_migration_to_complete()
+used to let their own deadline (migrating_timeout/summary_timeout) keep ticking down
+while check_other_pc_disconnected()/check_battery_critically_low() were busy handling a
+recoverable dialog -- the battery-critically-low loop in particular is EXPECTED to
+repeat indefinitely until the user actually plugs the PC in, but after only two or
+three ~20s+ cycles the real screen-wait timeout had already elapsed, raising
+RuntimeError even though the dialog handling itself was working correctly. Both loops
+now extend their own deadline by however long each interrupting check actually took,
+so only genuine "nothing is happening" time counts against
+migrating_timeout/summary_timeout.
 """
 
 import time
@@ -103,14 +115,17 @@ class SourceTransferFlow:
     def _poll_until_showing(self, check, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            iteration_start = time.monotonic()
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+                deadline += time.monotonic() - iteration_start
                 continue
             if check_battery_critically_low(
                 self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log
             ):
+                deadline += time.monotonic() - iteration_start
                 continue
             if check(timeout=1.0):
                 return True
@@ -211,14 +226,17 @@ class SourceTransferFlow:
         migration_complete = None
         dismiss_action = None
         while time.monotonic() < deadline:
+            iteration_start = time.monotonic()
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+                deadline += time.monotonic() - iteration_start
                 continue
             if check_battery_critically_low(
                 self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log
             ):
+                deadline += time.monotonic() - iteration_start
                 continue
             if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=0.1):
                 self.log.warning(
