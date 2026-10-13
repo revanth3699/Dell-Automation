@@ -137,8 +137,12 @@ class SourceTransferFlow:
             Again" button, NOT a "Close" button -- dismissed via its own close icon
             instead (see components.source.transfer_progress_screen.click_close_icon()).
           - "Your migration summary is ready." -- the OTHER partial-migration outcome.
-            Has a "Close" button, same accessible name as the full-success screen's --
-            dismissed via click_close(), same as full success.
+            Has a "Close" button, same accessible name as the full-success screen's,
+            but dismissed via click_close_after_delay() instead of click_close() --
+            per explicit user direction (2026-10-13), this one waits
+            TransferProgressScreen.PARTIAL_SUMMARY_CLOSE_DELAY_SECONDS before clicking,
+            giving the user a chance to read the summary / use Show skipped files
+            first, rather than being dismissed immediately like full success.
 
         Also races, every cycle, the recoverable "We ran into a problem during your
         migration." error screen (confirmed via a user-supplied screenshot, 2026-10-13)
@@ -207,7 +211,7 @@ class SourceTransferFlow:
                 break
             if transfer_progress_assertions.is_migration_partial_summary_confirmed(self.app_session, timeout=1.0):
                 migration_complete = False
-                dismiss_action = self.transfer_progress_screen.click_close
+                dismiss_action = self.transfer_progress_screen.click_close_after_delay
                 break
         if migration_complete is None:
             raise RuntimeError(
