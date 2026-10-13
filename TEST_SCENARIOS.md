@@ -28,12 +28,63 @@ each role's fixed sign-in+pairing/pairing prefix, a scenario function supplying 
 post-pairing step list) is built specifically so a second scenario can be added without
 touching the prefix logic -- but nothing has used that yet.
 
+```mermaid
+flowchart TD
+    CLI["role_runner.py<br/>--role --run-id --scenario"] --> RoleCheck{"--role?"}
+    RoleCheck -->|target| TPrefix["TargetRunner<br/>SignInFlow.run + wait_for_source_pc<br/>+ TargetPairingFlow.enter_pairing_code..."]
+    RoleCheck -->|source| SPrefix["SourceRunner<br/>SourcePairingFlow.run"]
+    TPrefix --> TScenario["Scenario post-pairing steps<br/>full_transfer_target"]
+    SPrefix --> SScenario["Scenario post-pairing steps<br/>full_transfer_source"]
+    TScenario --> Cleanup["Session.close + build_report<br/>(finally -- always runs)"]
+    SScenario --> Cleanup
+```
+
 ## Scenario: `full_transfer`
 
 The one real scenario: sign-in (Target only) + pairing, then a complete file/settings
 transfer, for whichever role the process is running as.
 
 ### Target side (`TargetRunner` -> `SignInFlow` -> `TargetPairingFlow` -> `TargetTransferFlow`)
+
+```mermaid
+flowchart TD
+    Start(["App launched"]) --> ClickSignIn["Click Sign In"]
+    ClickSignIn --> Shortcut{"Already signed in?"}
+    Shortcut -->|"Welcome-back shown"| GetStarted["Click Get Started"]
+    Shortcut -->|"pairing-discovery / trust-network /<br/>pairing-code-entry already showing"| SkipAhead["Skip credential entry entirely"]
+    Shortcut -->|"no cached session"| Browser["External browser opens"]
+    Browser --> Email["Email page (if shown)"]
+    Email --> Password["Password page (if shown)"]
+    Password --> OTPWrong["Submit WRONG OTP on purpose<br/>(every run's first attempt, by design)"]
+    OTPWrong --> CancelOTP["Confirm error banner, click Cancel"]
+    CancelOTP --> UAC1["Windows UAC approval"]
+    UAC1 --> SignInFailed["'We couldn't sign you in' appears"]
+    SignInFailed --> Retry["Click Retry"]
+    Retry --> OTPRight["Submit correct email/password/OTP"]
+    OTPRight --> UAC2["Windows UAC approval"]
+    GetStarted --> PairingDiscovery
+    SkipAhead --> PairingDiscovery
+    UAC2 --> PairingDiscovery["'We're looking for your other PC'"]
+    PairingDiscovery -->|"Source PC found"| CodeEntry["'Let's connect your two PCs'"]
+    CodeEntry --> FetchCode["Fetch code from Coordination Service, type it<br/>(retries up to 3x if it rotates mid-entry)"]
+    FetchCode --> AccountMismatch{"Account names differ?"}
+    AccountMismatch -->|"yes"| ConfirmAccounts["Click Continue"]
+    AccountMismatch -->|"no"| ReadyToMove
+    ConfirmAccounts --> ReadyToMove["'Your files are ready to move'"]
+    ReadyToMove --> ClickMigrate["Click 'Bring everything over for me'<br/>(periodic re-click if it silently no-ops)"]
+    ClickMigrate --> Moving["'We're moving your files and settings'"]
+    Moving --> Summary["Migration summary -> click Finish"]
+    Summary --> Complete["'Your migration is now complete'"]
+    Complete --> DownloadPdf["Click 'download a PDF', wait"]
+    DownloadPdf --> BackHome["Click 'Back to Home'"]
+    BackHome --> WelcomeBack["Confirmed: Welcome-back home screen"]
+    WelcomeBack --> CloseWindow["Close app window"]
+    CloseWindow --> Done(["Scenario complete"])
+```
+*Dialog races (network disconnected, low battery, regional-settings mismatch, the
+"install browsers" prompt, etc.) are omitted above for clarity -- see
+[DIALOG_HANDLING.md](DIALOG_HANDLING.md) for exactly where each one interrupts this
+path and what happens.*
 
 | Stage | What's actually exercised | Confidence |
 |---|---|---|
@@ -49,6 +100,34 @@ transfer, for whichever role the process is running as.
 | Data/category selection | Not automated for either role -- both transfer flows begin at the "ready to move"/"ready to migrate" screens, i.e. after whatever data-selection step the app itself requires | **Not started.** The app is assumed to already be configured for a full transfer (or the user drives this step manually) before the automation's transfer stage begins |
 
 ### Source side (`SourceRunner` -> `SourcePairingFlow` -> `SourceTransferFlow`)
+
+```mermaid
+flowchart TD
+    Start(["App launched"]) --> Welcome["'Welcome to Dell Migrate.'"]
+    Welcome --> GetStarted["Click 'Let's get started'"]
+    GetStarted --> TrustNetwork{"Trust-network dialog shown?"}
+    TrustNetwork -->|"yes"| AcceptTrust["Click Yes, continue"]
+    TrustNetwork -->|"no"| Searching
+    AcceptTrust --> Searching["'We're searching for your new PC.'"]
+    Searching -->|"Target becomes discoverable"| PairingCode["'Let's finish linking your PCs.'"]
+    PairingCode --> PublishLoop["Read code (OCR fallback if needed),<br/>publish to Coordination Service,<br/>re-read every ~5s (code rotates ~59s)"]
+    PublishLoop -->|"Target enters correct code"| LinkedSuccess["'We've successfully linked your PCs.'<br/>(brief, not always shown)"]
+    LinkedSuccess --> ReadyMigrate["'Are you ready to start your migration?'"]
+    ReadyMigrate --> Migrating["'We're migrating your data now.'"]
+    Migrating --> EngineError{"'We ran into a problem...'?"}
+    EngineError -->|"yes"| TryAgain["Click Try Again"] --> Migrating
+    EngineError -->|"no"| FinalScreen{"Which final screen?"}
+    FinalScreen -->|"'We've completed<br/>your migration.'"| FullSuccess["Click Close<br/>(full success)"]
+    FinalScreen -->|"'Your migration is now<br/>complete.' (partial #1)"| PartialIcon["Dismiss via close icon<br/>(no Close button on this one)"]
+    FinalScreen -->|"'Your migration summary<br/>is ready.' (partial #2)"| PartialDelay["Wait, then click Close"]
+    FullSuccess --> Done(["Scenario complete"])
+    PartialIcon --> Done
+    PartialDelay --> Done
+```
+*Dialog races (network disconnected, battery critically low, regional-settings
+mismatch, the other PC disconnecting, "Welcome to Dell Migrate." reappearing, etc.) are
+omitted above for clarity -- see [DIALOG_HANDLING.md](DIALOG_HANDLING.md) for exactly
+where each one interrupts this path and what happens.*
 
 | Stage | What's actually exercised | Confidence |
 |---|---|---|
