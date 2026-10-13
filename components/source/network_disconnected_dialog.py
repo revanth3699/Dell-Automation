@@ -23,7 +23,7 @@ class NetworkDisconnectedDialog:
     likely transient -- an instant re-check would probably just hit the same failure
     again."""
 
-    CHECK_AGAIN_DELAY_SECONDS = 30.0
+    CHECK_AGAIN_DELAY_SECONDS = 10.0
 
     def __init__(self, app_session):
         self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
