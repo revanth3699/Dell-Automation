@@ -66,6 +66,19 @@ same way, via raise_if_regional_settings_not_supported() (also
 flows/source/common_dialogs.py). Unlike the other two shared checks, this one IS fatal
 on Source: clicking its "Close" button closes the app entirely, so it clicks Close then
 raises immediately instead of letting the loop continue.
+
+Bug fixed here, confirmed directly by the user via a live run (2026-10-14): both loops'
+own deadline (discovery_timeout/pairing_timeout) used to keep ticking down while a
+recoverable dialog was being handled -- the battery-critically-low loop in particular
+is EXPECTED to repeat indefinitely until the user actually plugs the PC in (each cycle
+burns BatteryCriticallyLowDialog's own 20s delay plus the ConfirmCancelDialog
+round-trip), but after only two or three cycles the surrounding discovery/publish
+timeout had already elapsed, raising SourcePairingError even though the dialog
+handling itself was working correctly. Both loops now extend their own deadline by
+however long each interrupting check (check_other_pc_disconnected()/
+network-disconnected/check_battery_critically_low()) actually took, so only genuine
+"nothing is happening" time counts against discovery_timeout/pairing_timeout --
+handling a recoverable dialog, however long it takes, no longer eats into that budget.
 """
 
 import time
@@ -165,11 +178,13 @@ class SourcePairingFlow:
             self.log.info(f"Waiting up to {discovery_timeout:.0f}s for the pairing-code screen...")
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
+                iteration_start = time.monotonic()
                 self._assert_app_alive()
                 raise_if_regional_settings_not_supported(
                     self.app_session, self.regional_settings_not_supported_dialog, self.log
                 )
                 if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+                    deadline += time.monotonic() - iteration_start
                     continue
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                     self.network_disconnected_dialog.click_check_again()
@@ -177,11 +192,13 @@ class SourcePairingFlow:
                         "This PC isn't connected to a network appeared mid-discovery-wait "
                         "-- waited and clicked Check again"
                     )
+                    deadline += time.monotonic() - iteration_start
                     continue
                 if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
                     self.trust_network_dialog.click_yes_continue()
                     self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
                 if check_battery_critically_low(self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log):
+                    deadline += time.monotonic() - iteration_start
                     continue
                 if pairing_code_assertions.is_showing(self.app_session, timeout=2.0):
                     break
@@ -213,11 +230,13 @@ class SourcePairingFlow:
         deadline = time.monotonic() + pairing_timeout
 
         while time.monotonic() < deadline:
+            iteration_start = time.monotonic()
             self._assert_app_alive()
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+                deadline += time.monotonic() - iteration_start
                 continue
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
@@ -225,12 +244,14 @@ class SourcePairingFlow:
                     "This PC isn't connected to a network appeared mid-publish-loop "
                     "-- waited and clicked Check again"
                 )
+                deadline += time.monotonic() - iteration_start
                 continue
             if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
                 self.trust_network_dialog.click_yes_continue()
                 self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
                 continue
             if check_battery_critically_low(self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log):
+                deadline += time.monotonic() - iteration_start
                 continue
             if not pairing_code_assertions.is_showing(self.app_session, timeout=1.0):
                 self.log.success("Pairing-code screen no longer showing -- Target has paired")
