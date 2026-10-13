@@ -4,12 +4,17 @@ NetworkDisconnectedDialog -- confirmed from the same user-supplied screenshots
 (2026-10-09); treated as symmetric across both roles since the body text ("Connect both
 of your PCs to the same network to continue") is explicitly about both PCs, not
 specific to one side's screen.
+
+Per explicit user direction (2026-10-14): the existence check (is_showing()) moved out
+to assertions/source/network_disconnected_dialog.py, called directly from flows/ -- this
+class now holds only the click_check_again() action (previously accept(), which
+checked AND clicked in one call).
 """
 
 import time
 
 from components.base_component import BaseComponent
-from locators.source.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR, HEADING_LOCATOR
+from locators.source.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR
 
 
 class NetworkDisconnectedDialog:
@@ -21,18 +26,8 @@ class NetworkDisconnectedDialog:
     CHECK_AGAIN_DELAY_SECONDS = 30.0
 
     def __init__(self, app_session):
-        self._heading = BaseComponent(app_session, *HEADING_LOCATOR, "NetworkDisconnectedHeading")
         self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
 
-    def is_showing(self, timeout: float = 0.1) -> bool:
-        return self._heading.exists(timeout=timeout)
-
-    def accept(self, timeout: float = 2.0) -> bool:
-        """Clicks "Check again" if the dialog is showing, after waiting
-        CHECK_AGAIN_DELAY_SECONDS first. Returns whether it was present at all (same
-        pattern as TrustNetworkDialog.accept())."""
-        if not self._heading.exists(timeout=timeout):
-            return False
+    def click_check_again(self) -> None:
         time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
         self._check_again_button.click(timeout=2.0)
-        return True

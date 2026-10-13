@@ -72,6 +72,20 @@ WINDOW_POLL_INTERVAL = 0.5  # poll quickly -- the renderer has been observed to 
                             # ~47s after becoming visible (see PROJECT_PLAN.md Sec 5.3b),
                             # so minimizing time-to-attach matters
 
+# Confirmed directly by the user (2026-10-14): a freshly-launched app's main window
+# handle existing (what Step 2 below polls for) is NOT the same as the app being ready
+# to interact with -- the window can still be mid-load (WebView2 content not yet
+# rendered) and/or not actually in the foreground. A click dispatched via UI Automation's
+# Invoke pattern can still report success at the API level in that state (the element is
+# findable in the tree) without the click doing anything visible -- the same class of
+# "click succeeds but nothing happens" problem already documented elsewhere in this
+# codebase for WebView2 content specifically. Bringing the window to the foreground
+# right after attach (the same bring_window_to_foreground() already used for the OCR
+# screenshot case in components/source/pairing_code_screen.py) and giving it a short,
+# fixed settle delay before returning control to the caller is a generic fix that
+# doesn't require guessing at a role-specific "first ready element" locator.
+APP_FOREGROUND_SETTLE_SECONDS = 2.0
+
 
 class MachineRole(str, Enum):
     SOURCE = "source"
@@ -229,6 +243,27 @@ def is_uac_prompt_showing() -> bool:
     ) == "yes"
 
 
+def _create_winappdriver_session(capabilities: dict, timeout: float = 30.0) -> WinAppDriverSession:
+    """POSTs to WinAppDriver's /session endpoint and returns the resulting session.
+
+    Confirmed live (2026-10-14): a failed session-creation request (e.g. a 400 Bad
+    Request when attaching to a window WinAppDriver rejects) used to be re-raised via a
+    bare resp.raise_for_status() with no visibility into WHY WinAppDriver rejected it --
+    requests.exceptions.HTTPError's own message is just the status line, not the
+    response body, so the actual reason was silently lost every time this happened. Logs
+    the response body on failure before raising, so the real rejection reason reaches
+    the log instead of a bare "400 Client Error: Bad Request".
+    """
+    resp = requests.post(f"{WINAPPDRIVER_URL}/session", json=capabilities, timeout=timeout)
+    if not resp.ok:
+        logger.error(
+            f"WinAppDriver rejected session creation (status={resp.status_code}): "
+            f"{resp.text!r} -- capabilities sent: {capabilities!r}"
+        )
+    resp.raise_for_status()
+    return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+
+
 def _launch_then_attach(
     build_path: str,
     app_arguments: Optional[list] = None,
@@ -261,9 +296,14 @@ def _launch_then_attach(
     )
 
     # Step 3: attach -- this is the real session.
-    resp = requests.post(f"{WINAPPDRIVER_URL}/session", json=caps.app_attach_capabilities(hwnd_hex), timeout=30)
-    resp.raise_for_status()
-    return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+    session = _create_winappdriver_session(caps.app_attach_capabilities(hwnd_hex))
+
+    # Step 4: bring the window to the foreground and give it a moment to actually finish
+    # rendering before any caller starts clicking -- see APP_FOREGROUND_SETTLE_SECONDS.
+    bring_window_to_foreground(hwnd_hex)
+    time.sleep(APP_FOREGROUND_SETTLE_SECONDS)
+
+    return session
 
 
 def _launch_via_simulator_then_attach(
@@ -323,11 +363,9 @@ def _launch_via_simulator_then_attach(
         lambda: _find_main_window_hwnd(CDM_SIMULATOR_PROCESS_NAME),
         timeout=WINDOW_POLL_TIMEOUT, interval=WINDOW_POLL_INTERVAL,
     )
-    resp = requests.post(
-        f"{WINAPPDRIVER_URL}/session", json=caps.app_attach_capabilities(simulator_hwnd_hex), timeout=30
-    )
-    resp.raise_for_status()
-    simulator_session = WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+    simulator_session = _create_winappdriver_session(caps.app_attach_capabilities(simulator_hwnd_hex))
+    bring_window_to_foreground(simulator_hwnd_hex)
+    time.sleep(APP_FOREGROUND_SETTLE_SECONDS)
 
     # Step 2: drive the simulator's UI -- paste the Target PC UI exe path, confirm
     # Auto-respond is on, click Launch.
@@ -345,9 +383,10 @@ def _launch_via_simulator_then_attach(
     # Step 4: attach -- this is the real session, same contract as
     # _launch_then_attach()'s own final step. simulator_session is deliberately left
     # open/un-quit -- see docstring above.
-    resp = requests.post(f"{WINAPPDRIVER_URL}/session", json=caps.app_attach_capabilities(hwnd_hex), timeout=30)
-    resp.raise_for_status()
-    return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+    session = _create_winappdriver_session(caps.app_attach_capabilities(hwnd_hex))
+    bring_window_to_foreground(hwnd_hex)
+    time.sleep(APP_FOREGROUND_SETTLE_SECONDS)
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -471,11 +510,27 @@ def find_new_browser_window_hwnd(known_hwnds: set) -> Optional[str]:
     already-running browser window (opens a new tab in it) instead of spawning a new one,
     in which case no hwnd is ever "new" even though the real sign-in page is genuinely
     showing.
+
+    Bug fixed here, confirmed live (2026-10-14): among the "new since snapshot" windows,
+    this used to always return the first one with no title check at all -- but Chrome can
+    bring up other incidental top-level windows (helper/legacy windows, notification
+    popups, etc.) around the same moment it opens the real sign-in tab, and one of those
+    can legitimately be "new" too. WinAppDriver then rejected the attach outright
+    ("<hwnd> is not a top level window handle") -- consistent with that hwnd being one of
+    those auxiliary windows rather than the real browser window, even though it passed
+    raw Win32 EnumWindows' own top-level/visible check. Now prefers a new window whose
+    title ALSO matches the sign-in page; only falls back to "first new window" (today's
+    old behavior) if none of the new windows have a matching title yet (e.g. the real
+    window's title hasn't finished loading).
     """
     windows = list_browser_windows_with_titles()
-    new_hwnds = [hwnd for hwnd, _ in windows if hwnd not in known_hwnds]
-    if new_hwnds:
-        return new_hwnds[0]
+    new_windows = [(hwnd, title) for hwnd, title in windows if hwnd not in known_hwnds]
+    if new_windows:
+        logger.debug(f"find_new_browser_window_hwnd: new windows since snapshot: {new_windows!r}")
+        for hwnd, title in new_windows:
+            if _title_matches_sign_in_page(title):
+                return hwnd
+        return new_windows[0][0]
     for hwnd, title in windows:
         if _title_matches_sign_in_page(title):
             return hwnd
@@ -483,13 +538,7 @@ def find_new_browser_window_hwnd(known_hwnds: set) -> Optional[str]:
 
 
 def _attach_to_browser_window(hwnd_hex: str) -> WinAppDriverSession:
-    resp = requests.post(
-        f"{WINAPPDRIVER_URL}/session",
-        json={"desiredCapabilities": {"appTopLevelWindow": hwnd_hex, "platformName": "Windows", "deviceName": "WindowsPC"}},
-        timeout=20,
-    )
-    resp.raise_for_status()
-    return WinAppDriverSession(WINAPPDRIVER_URL, resp.json()["sessionId"])
+    return _create_winappdriver_session(caps.app_attach_capabilities(hwnd_hex), timeout=20.0)
 
 
 def _close_browser_window(session: WinAppDriverSession) -> None:

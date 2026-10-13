@@ -10,10 +10,7 @@ screenshot (2026-10-06).
 from loguru import logger
 
 from components.base_component import BaseComponent
-from locators.target.transfer_receive_screen import (
-    BRING_EVERYTHING_OVER_BUTTON_LOCATOR,
-    FILES_READY_HEADING_LOCATOR,
-)
+from locators.target.transfer_receive_screen import BRING_EVERYTHING_OVER_BUTTON_LOCATOR
 
 # The three native window-chrome buttons (confirmed live, 2026-10-06, via a raw
 # //Button dump) -- excluded from the diagnostic fallback below so they never get
@@ -24,13 +21,9 @@ _KNOWN_CHROME_AUTOMATION_IDS = {"MinimizeButton", "MaximizeRestoreButton", "Clos
 class TransferReceiveScreen:
     def __init__(self, app_session):
         self._session = app_session
-        self._heading = BaseComponent(app_session, *FILES_READY_HEADING_LOCATOR, "FilesReadyHeading")
         self._bring_everything_over_button = BaseComponent(
             app_session, *BRING_EVERYTHING_OVER_BUTTON_LOCATOR, "BringEverythingOverButton"
         )
-
-    def wait_until_showing(self, timeout: float) -> bool:
-        return self._heading.exists(timeout=timeout)
 
     def start_transfer(self) -> None:
         """Clicks the default "Bring everything over for me" option (confirmed live,

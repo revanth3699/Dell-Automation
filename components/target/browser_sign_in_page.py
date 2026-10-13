@@ -1,7 +1,7 @@
 """
 Browser-hosted Dell sign-in page elements for the Target PC flow (Target-only: Source PC
-has no authentication step). This is the externally-opened OS-default browser, not the
-app window -- email, password, and email-OTP two-step verification steps, plus the
+has no authentication step at all). This is the externally-opened OS-default browser, not
+the app window -- email, password, and email-OTP two-step verification steps, plus the
 Chrome "Restore pages?" crash-recovery dialog that can interrupt any of them. Confirmed
 via live testing; see PROJECT_PLAN.md Sec 5.3c and tools/phase0_inspection_notes.md.
 
@@ -13,11 +13,19 @@ exercised. Flagged here, not assumed silently -- confirm/adjust once hit for rea
 Error-banner text and the account-lockout wording below are confirmed from a
 user-supplied flow diagram/screenshot set (dell screens flow.pdf, 2026-10-05), not yet
 independently confirmed live.
+
+Per explicit user direction (2026-10-14): existence checks (is_showing() on
+EmailStep/PasswordStep/OtpStep) moved out to assertions/target/email_step.py,
+assertions/target/password_step.py, and assertions/target/otp_step.py, called directly
+from flows/. RestorePagesDialog.dismiss_if_present() (which checked AND clicked in one
+call) is now click_close(), a pure action -- callers check
+assertions.target.restore_pages_dialog.is_showing() first. OtpStep.cancel() is now
+click_cancel() the same way.
 """
 
 from components.base_component import BaseComponent
 from locators.target.email_step import EMAIL_CONTINUE_BUTTON_LOCATOR, EMAIL_FIELD_LOCATOR
-from locators.target.error_banner import ERROR_BANNER_LOCATOR
+from assertions.target.error_banner import ERROR_BANNER_LOCATOR
 from locators.target.otp_step import OTP_BOX_NAMES, OTP_VERIFY_BUTTON_LOCATOR, OTP_CANCEL_BUTTON_LOCATOR, otp_box_locator
 from locators.target.password_step import PASSWORD_FIELD_LOCATOR, PASSWORD_SIGNIN_BUTTON_LOCATOR
 from locators.target.restore_pages_dialog import RESTORE_PAGES_CLOSE_BUTTON_LOCATOR
@@ -29,7 +37,8 @@ class RestorePagesDialog:
     own cleanup between test runs does). Confirmed to steal keyboard focus mid-typing if
     it pops up while a flow step is in progress, truncating whatever was being typed --
     dismiss defensively at the points this has actually been observed (right after
-    attach, and again at the password -> OTP page transition).
+    attach, and again at the password -> OTP page transition). See
+    assertions/target/restore_pages_dialog.py's is_showing().
     """
 
     def __init__(self, browser_session):
@@ -40,9 +49,8 @@ class RestorePagesDialog:
             browser_session, *RESTORE_PAGES_CLOSE_BUTTON_LOCATOR, "RestorePagesCloseButton", timeout=1.5
         )
 
-    def dismiss_if_present(self) -> None:
-        if self._close_button.exists(timeout=1.5):
-            self._close_button.click()
+    def click_close(self) -> None:
+        self._close_button.click()
 
 
 class EmailStep:
@@ -50,9 +58,6 @@ class EmailStep:
         self._field = BaseComponent(browser_session, *EMAIL_FIELD_LOCATOR, "EmailField", timeout=3.0)
         self._continue_button = BaseComponent(browser_session, *EMAIL_CONTINUE_BUTTON_LOCATOR, "EmailContinueButton")
         self._error_banner = BaseComponent(browser_session, *ERROR_BANNER_LOCATOR, "EmailErrorBanner", timeout=8.0)
-
-    def is_showing(self, timeout: float = 3.0) -> bool:
-        return self._field.exists(timeout=timeout)
 
     def submit(self, username: str, attempts: int = 3, advance_timeout: float = 15.0) -> bool:
         """Types the email and clicks Continue, then waits for the field to actually
@@ -89,9 +94,6 @@ class PasswordStep:
         self._signin_button = BaseComponent(browser_session, *PASSWORD_SIGNIN_BUTTON_LOCATOR, "PasswordSignInButton")
         self._error_banner = BaseComponent(browser_session, *ERROR_BANNER_LOCATOR, "PasswordErrorBanner", timeout=8.0)
 
-    def is_showing(self, timeout: float = 3.0) -> bool:
-        return self._field.exists(timeout=timeout)
-
     def submit(self, password: str, attempts: int = 3, advance_timeout: float = 15.0) -> bool:
         """Same verify+retry treatment as EmailStep.submit() -- see its docstring."""
         for attempt in range(attempts):
@@ -121,9 +123,6 @@ class OtpStep:
         self._cancel_button = BaseComponent(browser_session, *OTP_CANCEL_BUTTON_LOCATOR, "OtpCancelButton")
         self._error_banner = BaseComponent(browser_session, *ERROR_BANNER_LOCATOR, "OtpErrorBanner", timeout=8.0)
 
-    def is_showing(self, timeout: float) -> bool:
-        return self._boxes[0].exists(timeout=timeout)
-
     def submit(self, otp: str) -> None:
         for digit, box in zip(otp, self._boxes):
             box.type_text(digit)
@@ -139,15 +138,10 @@ class OtpStep:
         self._verify_button.click()
         return self._error_banner.exists(timeout=timeout)
 
-    def cancel(self, timeout: float = 2.0) -> bool:
+    def click_cancel(self) -> None:
         """Clicks the OTP page's own Cancel button (below Verify) -- confirmed directly
         by the user (2026-10-06) as the deliberate way to force a real sign-in
         cancellation for testing the cancel-and-retry path, rather than relying on real
         UAC behavior (unreliable to trigger on demand -- see
-        tools/_test_cancel_and_retry_live.py). Returns whether it was present at all
-        (same pattern as TrustNetworkDialog.accept()).
-        """
-        if not self._cancel_button.exists(timeout=timeout):
-            return False
+        tools/_test_cancel_and_retry_live.py)."""
         self._cancel_button.click()
-        return True

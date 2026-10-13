@@ -4,9 +4,7 @@ Confirmed from a user-supplied screenshot (2026-10-06): after pairing, the app s
 "We're preparing your files and settings in your previous PC" (can genuinely take a
 few minutes per its own on-screen text), then "Your files are ready to move".
 start_transfer() waits for that second screen and clicks the default "Bring everything
-over for me" option. Actually waiting for the transfer itself to finish is separate,
-not yet built (see this module's wait_for_completion() stub reference in
-PROJECT_PLAN.md) -- out of scope for what's confirmed/asked so far.
+over for me" option.
 
 Bug fixed here, confirmed live (2026-10-06): the account-mismatch confirm dialog
 ("Let's make sure we're connecting the right user accounts") does NOT reliably appear
@@ -26,47 +24,36 @@ confirmed guarantee it can't reappear if another conflicting app gets detected l
 
 Also, per explicit user direction (2026-10-06): the moment "Your files are ready to
 move" is detected, the close-apps dialog is checked AGAIN, directly, right before
-clicking "Migrate now" -- not just relying on the background race above. Same reasoning
-as the confirm-accounts dialog surprising us by appearing layered OVER a screen we
-thought was clear: a dialog detected one poll cycle earlier isn't a guarantee nothing
-new appeared in the moment right before the click itself.
+clicking "Migrate now" -- not just relying on the background race above.
 
 Confirmed from a user-supplied screenshot (2026-10-06): after that click, "We're moving
-your files and settings" (the actual transfer-progress screen -- percentages, ETA,
-transfer speed) appears. start_transfer() now polls for it to confirm the transfer
-genuinely started, rather than returning right after the click with no confirmation
-anything actually happened. Tracking progress/completion from there is separate, not
-yet built.
+your files and settings" (the actual transfer-progress screen) appears. start_transfer()
+now polls for it to confirm the transfer genuinely started.
 
 Bug fixed here, confirmed live (2026-10-06): the close-apps dialog can ALSO appear
 AFTER clicking Migrate now, layered over "Your files are ready to move" while waiting
-for "We're moving your files and settings" to show up -- confirmed via a live
-screenshot showing exactly this (the dialog over the still-visible "ready to move"
-screen, Migrate now already clicked). The wait for the progress screen was a single
-is_showing() call with no handling for this at all, so it would just burn the whole
-timeout and fail. Now races the close-apps dialog here too, same as everywhere else.
+for "We're moving your files and settings" to show up. Now races the close-apps dialog
+here too, same as everywhere else.
 
 Bug fixed here, confirmed live (2026-10-07): click_at_center() on "Migrate now"
 reported success (no exception) but confirmed via screenshot that the button visually
-never actually activated -- the same silent-click-doesn't-register class of problem,
-just surviving even the click_at_center() workaround this time. Rather than trust a
-single click, the wait for "We're moving your files and settings" now periodically
-re-clicks "Migrate now" (every RECLICK_INTERVAL_SECONDS) for as long as neither it nor
-the close-apps dialog has appeared -- since the button is presumably still right there
-on the unchanged "ready to move" screen if the first click didn't take.
+never actually activated. Rather than trust a single click, the wait for "We're moving
+your files and settings" now periodically re-clicks "Migrate now" (every
+RECLICK_INTERVAL_SECONDS) for as long as neither it nor the close-apps dialog has
+appeared.
 
 Bug fixed here, confirmed live (2026-10-08): a fatal engine-side error ("Something went
 wrong ... (error 2969). Please close and try again.") can appear layered over the
-transfer-progress screen mid-transfer -- confirmed both from a raw TargetPc log excerpt
-("Engine reported error 2969 on MigrationStatus (Status=false) after pairing ->
-FailurePage") and a live screenshot showing the dialog over the still-visible "0 B/s"/
-"...minutes left" progress screen. Nothing previously detected this: wait_for_completion()'s
-wait for the progress screen to clear was a single un-raced wait_until_gone() call, so
-it would have silently burned up to the full transfer_timeout (30 minutes default)
-before raising a generic "did not finish" error with the wrong cause attached. All
-three wait loops in this file (start_transfer()'s two, wait_for_completion()'s one) now
-race MigrationErrorDialog every cycle and raise immediately with the real error text if
-it appears, same pattern as every other dialog race here.
+transfer-progress screen mid-transfer. All three wait loops in this file
+(start_transfer()'s two, wait_for_completion()'s one) race the migration-error
+assertion every cycle and raise immediately with the real error text if it appears,
+same pattern as every other dialog race here.
+
+Per explicit user direction (2026-10-14): this file holds no existence-check locators.
+Every is_X_showing()/is_X_confirmed() assertion is imported directly from
+assertions/target/<name>.py and called with the raw app_session; components/target/ now
+holds only click/type actions, called only after the matching assertion confirms
+presence.
 """
 
 import time
@@ -82,11 +69,28 @@ from components.target.migration_complete_screen import MigrationCompleteScreen
 from components.target.migration_summary_screen import MigrationSummaryScreen
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog
 from components.target.sign_in_screen import WelcomeBackScreen
-from components.target.transfer_progress_screen import TransferProgressScreen
 from components.target.transfer_receive_screen import TransferReceiveScreen
+from assertions.target import (
+    confirm_accounts_dialog as confirm_accounts_assertions,
+    close_apps_dialog as close_apps_assertions,
+    desktop_shortcut_dialog as desktop_shortcut_assertions,
+    migration_complete_screen as migration_complete_assertions,
+    migration_error_dialog as migration_error_assertions,
+    migration_summary_screen as migration_summary_assertions,
+    other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
+    plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+    transfer_progress_screen as transfer_progress_assertions,
+    transfer_receive_screen as transfer_receive_assertions,
+    welcome_back_screen as welcome_back_assertions,
+)
 from factory.logger_factory import LoggerFactory
 
 RECLICK_INTERVAL_SECONDS = 3.0
+
+# Per explicit user direction (2026-10-14): clicking "download a PDF" opens the PDF file
+# (in an external viewer/browser), which takes a moment -- give it time before clicking
+# "Back to Home", rather than clicking through immediately.
+PDF_OPEN_WAIT_SECONDS = 30.0
 
 
 class TransferFlowError(Exception):
@@ -95,8 +99,8 @@ class TransferFlowError(Exception):
 
 class TargetTransferFlow:
     def __init__(self, app_session):
+        self.app_session = app_session
         self.transfer_receive_screen = TransferReceiveScreen(app_session)
-        self.transfer_progress_screen = TransferProgressScreen(app_session)
         self.migration_summary_screen = MigrationSummaryScreen(app_session)
         self.migration_complete_screen = MigrationCompleteScreen(app_session)
         self.welcome_back_screen = WelcomeBackScreen(app_session)
@@ -113,7 +117,7 @@ class TargetTransferFlow:
         2026-10-09: this exact 3-line check used to be copy-pasted at three separate
         call sites). Raises TransferFlowError immediately if "Something went wrong"
         is showing; a no-op otherwise."""
-        if self.migration_error_dialog.is_showing(timeout=0.1):
+        if migration_error_assertions.is_showing(self.app_session, timeout=0.1):
             error_text = self.migration_error_dialog.read_error_text()
             raise TransferFlowError(f'Migration failed: "Something went wrong" appeared -- {error_text}')
 
@@ -128,7 +132,7 @@ class TargetTransferFlow:
         is what then actually closes the app and WinAppDriver -- same cleanup path
         every other failure in this flow already goes through, nothing extra needed
         here."""
-        if self.other_pc_network_disconnected_dialog.is_showing(timeout=0.1):
+        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
             self.log.error(
                 '"The other PC isn\'t connected to a network." appeared -- clicking '
                 '"Cancel transfer" and aborting'
@@ -148,7 +152,8 @@ class TargetTransferFlow:
         place to actually hit a real low-battery condition. Not fatal -- clicks Cancel
         (after PlugIntoAcPowerDialog's own 15s wait) and lets the caller's loop
         continue."""
-        if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+        if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+            self.plug_into_ac_power_dialog.click_cancel()
             self.log.warning('"Plug into AC power" appeared -- waited and clicked Cancel')
             return True
         return False
@@ -161,7 +166,8 @@ class TargetTransferFlow:
         _accept_plug_into_ac_power_if_showing(), which can genuinely appear anywhere).
         Not fatal -- clicks "Create shortcut" per explicit user direction and lets the
         caller's loop continue."""
-        if self.desktop_shortcut_dialog.accept(timeout=0.1):
+        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
+            self.desktop_shortcut_dialog.click_create_shortcut()
             self.log.success(
                 '"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"'
             )
@@ -186,12 +192,13 @@ class TargetTransferFlow:
             self._raise_if_other_pc_disconnected()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
-            if self.transfer_receive_screen.wait_until_showing(timeout=0.5):
+            if transfer_receive_assertions.wait_until_showing(self.app_session, timeout=0.5):
                 # Confirmed necessary, same reasoning as the confirm-accounts dialog:
                 # check for the close-apps dialog one more time, right here, before
                 # clicking -- it can appear layered over this exact screen, and a check
                 # from an earlier poll cycle doesn't guarantee it's still clear now.
-                while self.close_apps_dialog.accept(timeout=0.1):
+                while close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+                    self.close_apps_dialog.click_close_application()
                     self.log.success(
                         "\"We need to close all other applications\" appeared right "
                         "before clicking Migrate now -- clicked Close Application"
@@ -207,13 +214,14 @@ class TargetTransferFlow:
                     self._raise_if_other_pc_disconnected()
                     if self._accept_plug_into_ac_power_if_showing():
                         continue
-                    if self.transfer_progress_screen.is_showing(timeout=0.5):
+                    if transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
                         self.log.success(
                             "Transfer in progress -- \"We're moving your files and "
                             "settings\" confirmed"
                         )
                         return
-                    if self.close_apps_dialog.accept(timeout=0.1):
+                    if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+                        self.close_apps_dialog.click_close_application()
                         self.log.success(
                             "\"We need to close all other applications\" appeared "
                             "after clicking Migrate now -- clicked Close Application"
@@ -231,7 +239,7 @@ class TargetTransferFlow:
                         # the close-apps/confirm-accounts dialogs elsewhere in this file.
                         # Stop (don't click) the moment this text is confirmed, even if
                         # the check at the top of this loop iteration missed it.
-                        if self.transfer_progress_screen.is_showing(timeout=0.3):
+                        if transfer_progress_assertions.is_showing(self.app_session, timeout=0.3):
                             self.log.success(
                                 "Transfer in progress -- \"We're moving your files and "
                                 "settings\" confirmed right before a re-click -- not "
@@ -248,13 +256,15 @@ class TargetTransferFlow:
                     '"We\'re moving your files and settings" never appeared within '
                     f"{progress_screen_timeout:.0f}s after clicking Migrate now"
                 )
-            if not confirmed_accounts and self.confirm_accounts_dialog.accept(timeout=0.1):
+            if not confirmed_accounts and confirm_accounts_assertions.is_showing(self.app_session, timeout=0.1):
+                self.confirm_accounts_dialog.click_continue()
                 self.log.success(
                     "Account-mismatch confirm dialog appeared during the "
                     "preparing-files wait -- clicked Continue"
                 )
                 confirmed_accounts = True
-            if self.close_apps_dialog.accept(timeout=0.1):
+            if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+                self.close_apps_dialog.click_close_application()
                 self.log.success(
                     "\"We need to close all other applications\" appeared -- clicked "
                     "Close Application"
@@ -273,44 +283,31 @@ class TargetTransferFlow:
         """Call after start_transfer() returns. Waits for "We're moving your files and
         settings" to clear (transfer finished -- defaults to 30 minutes since this is
         genuinely data-size-dependent), then drives the real, confirmed completion
-        sequence (2026-10-09, via live screenshots -- this REPLACES an earlier,
-        incorrect guess that treated the two follow-on screens as independent/optional):
+        sequence:
 
         "Here's a summary of your migration results" -> click "Finish" (top right, NOT
-        the "here" link -- clicking "here" was the previous wrong action) ->
-        "Your migration is now complete" -> click "download a PDF", then click
-        "Back to Home" -> back on the Welcome-back home screen, confirmed via its
-        "Sign Out" button (not just the heading, which this screen also shows during
-        the unrelated already-signed-in sign-in shortcut; "Nothing's lost from your old
-        PC" was tried first but never appeared on a real run, see WelcomeBackScreen's
-        own docstring). "Add a desktop shortcut before you go" is raced during this
-        final wait too -- confirmed to appear near the very end of the flow.
+        the "here" link) -> "Your migration is now complete" -> click "download a PDF",
+        then click "Back to Home" -> back on the Welcome-back home screen, confirmed via
+        its "Sign Out" button. "Add a desktop shortcut before you go" is raced during
+        this final wait too -- confirmed to appear near the very end of the flow.
 
         Every step here is now a required gate (raises TransferFlowError if a screen
-        doesn't appear in time), not optional -- this is the one real, confirmed path,
-        not a best-effort check. Once is_home_confirmed() returns True, this method
-        returns normally; the caller's own Session.close() (already wired in
-        orchestration/role_runner.py's TargetRunner.run(), via its finally block) is
-        what actually closes the app -- no separate in-app "close" action exists or is
-        needed here.
+        doesn't appear in time), not optional. Once is_home_confirmed() returns True,
+        this method returns normally; the caller's own Session.close() (already wired
+        in orchestration/role_runner.py's TargetRunner.run(), via its finally block) is
+        what actually closes the app.
         """
         self.log.info('Waiting for the transfer to finish ("We\'re moving your files and settings" to clear)...')
         # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
         # e.g. "error 2969") can appear layered over this exact screen while it's still
-        # showing "0 B/s"/"...minutes left" behind it. A plain wait_until_gone() call
-        # has no way to notice this -- it would just keep polling until the full
-        # transfer_timeout (up to 30 minutes) and then raise a generic "did not finish"
-        # error, hiding the real cause. Races the error dialog every cycle instead, same
-        # pattern as every other dialog race in this file.
+        # showing "0 B/s"/"...minutes left" behind it. Races the error dialog every
+        # cycle instead, same pattern as every other dialog race in this file.
         #
         # Bug fixed here, confirmed via code review (2026-10-09): this loop used to
         # check `time.monotonic() < deadline` BEFORE each attempt, so it could exit
         # having made zero checks if the deadline had already passed the instant this
-        # method was entered (e.g. transfer_timeout=0, or enough delay accumulated
-        # earlier in the run). Restructured as a do-while so at least one full check
-        # (error dialog + progress screen) always happens first, matching the
-        # guarantee BaseComponent.wait_until_gone() (what this loop replaced) already
-        # made.
+        # method was entered. Restructured as a do-while so at least one full check
+        # always happens first.
         deadline = time.monotonic() + transfer_timeout
         finished = False
         while True:
@@ -318,7 +315,7 @@ class TargetTransferFlow:
             self._raise_if_other_pc_disconnected()
             if self._accept_plug_into_ac_power_if_showing():
                 continue
-            if not self.transfer_progress_screen.is_showing(timeout=0.5):
+            if not transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
                 finished = True
                 break
             if time.monotonic() >= deadline:
@@ -328,7 +325,7 @@ class TargetTransferFlow:
         self.log.success("Transfer finished")
 
         self.log.info('Waiting for "Here\'s a summary of your migration results"...')
-        if not self.migration_summary_screen.is_showing(timeout=summary_timeout):
+        if not migration_summary_assertions.is_showing(self.app_session, timeout=summary_timeout):
             raise TransferFlowError(
                 f'"Here\'s a summary of your migration results" never appeared within '
                 f"{summary_timeout:.0f}s after the transfer finished"
@@ -337,7 +334,7 @@ class TargetTransferFlow:
         self.migration_summary_screen.click_finish()
 
         self.log.info('Waiting for "Your migration is now complete"...')
-        if not self.migration_complete_screen.is_showing(timeout=complete_timeout):
+        if not migration_complete_assertions.is_showing(self.app_session, timeout=complete_timeout):
             raise TransferFlowError(
                 f'"Your migration is now complete" never appeared within {complete_timeout:.0f}s '
                 "after clicking Finish"
@@ -346,6 +343,8 @@ class TargetTransferFlow:
             'Migration-complete screen confirmed -- clicking "download a PDF", then "Back to Home"'
         )
         self.migration_complete_screen.click_download_pdf_link()
+        self.log.info(f"Waiting {PDF_OPEN_WAIT_SECONDS:.0f}s for the downloaded PDF to open...")
+        time.sleep(PDF_OPEN_WAIT_SECONDS)
         self.migration_complete_screen.click_back_to_home()
 
         self.log.info('Confirming return to the home screen ("Sign Out" visible)...')
@@ -361,7 +360,7 @@ class TargetTransferFlow:
         while True:
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if self.welcome_back_screen.is_home_confirmed(timeout=0.5):
+            if welcome_back_assertions.is_home_confirmed(self.app_session, timeout=0.5):
                 home_confirmed = True
                 break
             if time.monotonic() >= deadline:

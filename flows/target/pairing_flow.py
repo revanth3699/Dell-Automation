@@ -1,4 +1,4 @@
-﻿"""
+"""
 TargetPairingFlow: orchestrates the pairing-code exchange once SignInFlow.run() has
 reached the pairing-discovery screen and SignInFlow.wait_for_source_pc() has confirmed
 Source PC was found. Confirmed sequence from a user-supplied flow diagram (dell screens
@@ -12,6 +12,11 @@ Target-PC-only, same as SignInFlow -- Source PC's side of this exchange (showing
 code) lives under flows/source/pairing_flow.py (SourcePairingFlow), which publishes the
 current code to the Coordination Service (see utils/coordination_client.py) for this
 flow to fetch -- see enter_pairing_code_from_coordination_service() below.
+
+Per explicit user direction (2026-10-14): this file holds no existence-check locators.
+Every is_X_showing() assertion is imported directly from assertions/target/<name>.py and
+called with the raw app_session; components/target/ now holds only click/type actions,
+called only after the matching assertion confirms presence.
 """
 
 import time
@@ -22,6 +27,12 @@ import requests
 from components.base_component import ComponentActionError
 from components.target.common_dialogs import NetworkDisconnectedDialog, PlugIntoAcPowerDialog
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
+from assertions.target import (
+    confirm_accounts_dialog as confirm_accounts_assertions,
+    network_disconnected_dialog as network_disconnected_assertions,
+    pairing_code_entry_screen as pairing_code_entry_assertions,
+    plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+)
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
 
@@ -62,32 +73,30 @@ class TargetPairingFlow:
         recovering from the "This PC isn't connected to a network." dialog if it appears
         in the meantime. Confirmed directly by the user via a live screenshot
         (2026-10-09): this dialog can appear at ANY point during pairing (not tied to one
-        specific step) and is not a terminal error -- NetworkDisconnectedDialog.accept()
-        (components/target/common_dialogs.py) already waits 30s before clicking its own
-        "Check again" button, so this just calls that and keeps waiting on the original
-        condition. Both `_wait_for_screen()` and `_submit_code_and_confirm()` below go
-        through this, since the dialog isn't specific to either one.
+        specific step) and is not a terminal error --
+        NetworkDisconnectedDialog.click_check_again() already waits 30s before clicking,
+        so this just checks is_showing() then calls that and keeps waiting on the
+        original condition. Both `_wait_for_screen()` and `_submit_code_and_confirm()`
+        below go through this, since the dialog isn't specific to either one.
 
         Also races the "Plug into AC power" low-battery warning the same way (confirmed
         directly by the user via a live screenshot, 2026-10-12: can also appear at any
-        point, same as the network dialog) -- PlugIntoAcPowerDialog.accept() waits 15s
-        before clicking Cancel.
-
-        Uses the same NetworkDisconnectedDialog as flows/target/authentication/
-        sign_in_flow.py and flows/source/pairing_flow.py (not a separate copy) -- see
-        that class's own docstring.
+        point, same as the network dialog) -- PlugIntoAcPowerDialog.click_cancel() waits
+        15s before clicking.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if condition_fn():
                 return True
-            if self.network_disconnected_dialog.accept(timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+                self.network_disconnected_dialog.click_check_again()
                 self.log.info(
                     "\"This PC isn't connected to a network\" appeared -- waited and "
                     "clicked Check again"
                 )
                 continue
-            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+                self.plug_into_ac_power_dialog.click_cancel()
                 self.log.info("\"Plug into AC power\" appeared -- waited and clicked Cancel")
                 continue
             time.sleep(poll_interval)
@@ -96,7 +105,7 @@ class TargetPairingFlow:
     def _wait_for_screen(self, screen_timeout: float) -> None:
         self.log.info("Waiting for the pairing-code entry screen (\"Let's connect your two PCs\")")
         if not self._poll_with_network_recovery(
-            lambda: self.pairing_code_entry_screen.is_showing(timeout=0.1), max(screen_timeout, 5.0)
+            lambda: pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1), max(screen_timeout, 5.0)
         ):
             raise PairingError(
                 "Pairing-code entry screen (\"Let's connect your two PCs\") never appeared "
@@ -109,7 +118,7 @@ class TargetPairingFlow:
 
         self.log.info("Waiting for the pairing-code entry screen to clear (code accepted)")
         if not self._poll_with_network_recovery(
-            lambda: not self.pairing_code_entry_screen.is_showing(timeout=0.1), advance_timeout
+            lambda: not pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1), advance_timeout
         ):
             raise PairingError(
                 f"Pairing-code entry screen still showing after {advance_timeout:.0f}s -- "
@@ -121,7 +130,8 @@ class TargetPairingFlow:
 
         # Not every pairing shows this -- only when the two PCs' account names differ
         # (confirmed from the reference diagram).
-        if self.confirm_accounts_dialog.accept(timeout=5.0):
+        if confirm_accounts_assertions.is_showing(self.app_session, timeout=5.0):
+            self.confirm_accounts_dialog.click_continue()
             self.log.success(
                 "Account-mismatch confirm dialog appeared (\"Let's make sure we're "
                 "connecting the right user accounts\") -- clicked Continue"

@@ -51,22 +51,17 @@ from factory.session import _find_main_window_hwnd, bring_window_to_foreground
 from locators.source.pairing_code_screen import (
     CANCEL_BUTTON_LOCATOR,
     CODE_BOX_LOCATORS,
-    HEADING_LOCATOR,
 )
 
 
 class PairingCodeScreen:
     def __init__(self, app_session):
         self._session = app_session
-        self._heading = BaseComponent(app_session, *HEADING_LOCATOR, "PairingCodeHeading")
         self._boxes = [
             BaseComponent(app_session, *locator, f"VerificationCodeBox{i}", timeout=1.0)
             for i, locator in enumerate(CODE_BOX_LOCATORS)
         ]
         self._cancel_button = BaseComponent(app_session, *CANCEL_BUTTON_LOCATOR, "PairingCodeCancelButton")
-
-    def is_showing(self, timeout: float = 2.0) -> bool:
-        return self._heading.exists(timeout=timeout)
 
     def _read_via_uia(self) -> tuple:
         """Returns ({position: digit}, {position: rect}, {position: element_id}) for

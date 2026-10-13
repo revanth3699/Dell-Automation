@@ -24,8 +24,8 @@ the actual pairing-code exchange -- is pairing-flow work, not yet built).
 Confirmed via a user-supplied flow diagram ("dell screens flow.pdf", 2026-10-05): the
 post-OTP transition screen above is NOT a reliable success signal by itself -- it can
 appear even when sign-in was cancelled or failed, in which case the app instead shows a
-"There was a problem signing in" / "Sign-in failed. Please try again." dialog (with its
-own Retry button) layered back over the Welcome screen. _run_fresh_auth_with_retry()
+"We couldn't sign you in" dialog (with its own Retry button) layered back over the
+Welcome screen. _run_fresh_auth_with_retry()
 races these two outcomes and, on failure, clicks Retry and repeats the whole
 browser-based email/password/OTP sequence from scratch, up to MAX_AUTH_RETRIES times.
 
@@ -33,7 +33,7 @@ Confirmed directly by the user (2026-10-06): this is not just a contingency for 
 failures -- the OTP step's own negative-path check (below) deliberately drives this same
 path on EVERY run's first attempt. Wrong OTP -> confirm the error banner -> click the
 OTP page's own Cancel button (never the correct code in that same pass) -> this still
-requires real UAC approval -> "There was a problem signing in" appears -> Retry -> a
+requires real UAC approval -> "We couldn't sign you in" appears -> Retry -> a
 second attempt submits correct values directly (no repeated negative checks) and
 completes normally. There is no separate "cancel path" from "retry on failure" -- clicking
 Cancel for the negative-path demo and recovering from a real failure both land on the
@@ -45,10 +45,12 @@ valid session even when the plain "Welcome to Dell" screen is showing (not just
 "Welcome back"), and reveals this only after Sign In is clicked, by skipping the browser
 entirely. See _already_signed_in() and _click_sign_in_with_retry() below.
 
-This file is the orchestration layer only -- it holds no locators. All screen/dialog
-elements live in components/target/ (Page Object layer), and the app+browser+WinAppDriver
-lifecycle lives in factory/session.py's `Session` (Factory layer, also target-only in
-practice since nothing else opens an external sign-in browser).
+Per explicit user direction (2026-10-14): this file holds no existence-check locators at
+all. Every is_X_showing()/is_X_confirmed() assertion is imported directly from
+assertions/target/<name>.py (built on assertions/common.py's poll+assert methods) and
+called with the raw app_session; components/target/ now holds only click/type actions,
+constructed fresh (or via self.<x> for ones used repeatedly) and called only after the
+matching assertion confirms presence.
 
 Takes a `Session` (factory/session.py), not a bare app WinAppDriverSession -- consolidated
 per explicit user direction (2026-10-06): "if any interaction is failed Desktop, default
@@ -92,12 +94,27 @@ import time
 
 from components.target.sign_in_screen import WelcomeScreen, WelcomeBackScreen
 from components.target.common_dialogs import (
-    TrustNetworkDialog, MigrationPreparationTransition, SignInFailedDialog, NetworkDisconnectedDialog,
+    TrustNetworkDialog, SignInFailedDialog, NetworkDisconnectedDialog,
     PlugIntoAcPowerDialog, DesktopShortcutDialog,
 )
 from components.target.browser_sign_in_page import RestorePagesDialog, EmailStep, PasswordStep, OtpStep
 from components.target.pairing_code_entry_screen import PairingCodeEntryScreen
-from components.target.pairing_discovery_screen import PairingDiscoveryScreen
+from assertions.target import (
+    desktop_shortcut_dialog as desktop_shortcut_assertions,
+    email_step as email_step_assertions,
+    migration_preparation_transition,
+    network_disconnected_dialog as network_disconnected_assertions,
+    otp_step as otp_step_assertions,
+    pairing_code_entry_screen as pairing_code_entry_assertions,
+    pairing_discovery_screen as pairing_discovery_assertions,
+    password_step as password_step_assertions,
+    plug_into_ac_power_dialog as plug_into_ac_power_assertions,
+    restore_pages_dialog as restore_pages_assertions,
+    sign_in_failed_dialog as sign_in_failed_assertions,
+    trust_network_dialog as trust_network_assertions,
+    welcome_back_screen as welcome_back_assertions,
+    welcome_screen as welcome_screen_assertions,
+)
 from factory.config import TARGET_PROCESS_NAME
 from factory.logger_factory import LoggerFactory
 from factory.session import _find_main_window_hwnd, find_new_browser_window_hwnd, is_uac_prompt_showing
@@ -107,10 +124,30 @@ class SignInError(Exception):
     pass
 
 
+class _LateSignInFailure(SignInError):
+    """Raised by _wait_for_trust_network_then_pairing_discovery() when the
+    sign-in-failed dialog ("We couldn't sign you in") is detected AFTER
+    _wait_for_auth_outcome had already declared "success" and moved on.
+
+    Confirmed live (2026-10-14): _wait_for_auth_outcome's own
+    AUTH_OUTCOME_CONFIRMATION_WINDOW (5s) is not always enough -- a live run committed to
+    "success" at the transition-screen match, closed the browser, then kept polling
+    _wait_for_trust_network_then_pairing_discovery for over a minute with zero progress,
+    while the real "We couldn't sign you in" dialog was showing the whole time (confirmed
+    via a user-supplied screenshot) -- that method never checked for it at all. Caught
+    only inside _run_fresh_auth_with_retry's attempt loop, where it downgrades the
+    tentative "success" back to "failed" and triggers the same Retry-and-redo recovery an
+    immediately-detected failure already gets; propagates like any other SignInError
+    everywhere else (e.g. the already-signed-in path, which has no retry mechanism to
+    recover into -- fail fast there instead of silently hanging).
+    """
+    pass
+
+
 class SignInFlow:
     # Confirmed via a user-supplied flow diagram ("dell screens flow.pdf", 2026-10-05):
     # the post-OTP transition screen can appear even when sign-in was cancelled/failed,
-    # and the app's own "There was a problem signing in" dialog has a Retry button that
+    # and the app's own "We couldn't sign you in" dialog has a Retry button that
     # restarts the browser-based sequence. This caps how many whole-flow restarts a
     # genuinely broken run gets before failing loudly instead of looping forever.
     MAX_AUTH_RETRIES = 3
@@ -119,7 +156,7 @@ class SignInFlow:
     # screen can appear FIRST and the sign-in-failed dialog supersede it moments later --
     # a real run cancelled OTP, approved the resulting UAC prompt, the transition phrase
     # matched immediately, _wait_for_auth_outcome declared "success" and moved on -- but
-    # the screen the user actually saw next was "There was a problem signing in", whose
+    # the screen the user actually saw next was "We couldn't sign you in", whose
     # Retry button never got clicked because the flow had already committed to success.
     # See _wait_for_auth_outcome's own docstring for the fix.
     AUTH_OUTCOME_CONFIRMATION_WINDOW = 5.0
@@ -143,9 +180,7 @@ class SignInFlow:
         self.network_disconnected_dialog = NetworkDisconnectedDialog(self.app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(self.app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(self.app_session)
-        self.migration_preparation_transition = MigrationPreparationTransition(self.app_session)
         self.sign_in_failed_dialog = SignInFailedDialog(self.app_session)
-        self.pairing_discovery_screen = PairingDiscoveryScreen(self.app_session)
         self.pairing_code_entry_screen = PairingCodeEntryScreen(self.app_session)
 
     def run(self, step_timeout: float = 20.0, overall_timeout: float = 300.0) -> None:
@@ -170,6 +205,11 @@ class SignInFlow:
                 opened_browser = self._click_sign_in_with_retry(known_hwnds)
 
                 if opened_browser:
+                    # _run_fresh_auth_with_retry() now confirms pairing-discovery itself
+                    # before returning (racing a late-arriving sign-in-failed dialog the
+                    # whole way there -- see _LateSignInFailure), so it is NOT followed
+                    # by another _wait_for_trust_network_then_pairing_discovery() call
+                    # here; that would just be a redundant (if harmless) re-check.
                     self._run_fresh_auth_with_retry(known_hwnds, step_timeout, deadline)
                 else:
                     self.log.info(
@@ -179,6 +219,7 @@ class SignInFlow:
                         "fresh sign-in) can still be gated behind manual UAC approval."
                     )
                     self._wait_for_uac_approval(remaining=deadline - time.monotonic())
+                    self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
             else:
                 self.log.info(
                     "App already signed in (cached session detected before the sign-in "
@@ -196,8 +237,7 @@ class SignInFlow:
                 # here if Get Started was actually just clicked.
                 if self._just_clicked_get_started:
                     self._wait_for_uac_approval(remaining=deadline - time.monotonic())
-
-            self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
+                self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
         except BaseException as exc:
             # BaseException, not Exception -- confirmed via live debris (2026-10-05): a
             # run interrupted externally (Ctrl+C, a background task killed) raises
@@ -222,27 +262,29 @@ class SignInFlow:
         timeout matches the app's own confirmed PairingTimeoutInMilliseconds (600000ms,
         10 minutes) -- see PROJECT_PLAN.md.
         """
-        if not self.pairing_discovery_screen.is_showing(timeout=2.0):
+        if not pairing_discovery_assertions.is_showing(self.app_session, timeout=2.0):
             self.log.info("wait_for_source_pc: pairing-discovery screen isn't showing -- nothing to wait for")
             return True
         self.log.info(f"Waiting up to {timeout:.0f}s for Source PC to be found...")
         # Polls directly rather than delegating the whole wait to
-        # PairingDiscoveryScreen.wait_until_source_found() in one call -- this can be a
-        # long wait (up to 600s, genuinely spent waiting on real-world Source-PC
-        # discovery), and a crashed Target app looks identical to "still searching" to
-        # that method's own internal poll, so it would otherwise burn the full timeout
-        # silently. See _assert_app_alive()'s docstring.
+        # assertions.target.pairing_discovery_screen.wait_until_source_found() in one
+        # call -- this can be a long wait (up to 600s, genuinely spent waiting on
+        # real-world Source-PC discovery), and a crashed Target app looks identical to
+        # "still searching" to that function's own internal poll, so it would otherwise
+        # burn the full timeout silently. See _assert_app_alive()'s docstring.
         deadline = time.monotonic() + timeout
         found = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
-            if self.network_disconnected_dialog.accept(timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+                self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
                     "\"This PC isn't connected to a network\" appeared while waiting for "
                     "Source PC -- waited and clicked Check again"
                 )
                 continue
-            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+                self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "\"Plug into AC power\" appeared while waiting for Source PC -- "
                     "waited and clicked Cancel"
@@ -250,7 +292,7 @@ class SignInFlow:
                 continue
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if not self.pairing_discovery_screen.is_showing(timeout=1.0):
+            if not pairing_discovery_assertions.is_showing(self.app_session, timeout=1.0):
                 found = True
                 break
         if found:
@@ -294,7 +336,8 @@ class SignInFlow:
         class, same "race it continuously" treatment as NetworkDisconnectedDialog/
         PlugIntoAcPowerDialog. Not fatal -- clicks "Create shortcut" and lets the
         caller's loop continue."""
-        if self.desktop_shortcut_dialog.accept(timeout=0.1):
+        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
+            self.desktop_shortcut_dialog.click_create_shortcut()
             self.log.success('"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"')
             return True
         return False
@@ -311,11 +354,12 @@ class SignInFlow:
 
         self._accept_desktop_shortcut_if_showing()  # clear it if present before the real checks below
 
-        if self.pairing_discovery_screen.is_showing(timeout=3.0):
+        if pairing_discovery_assertions.is_showing(self.app_session, timeout=3.0):
             self.log.success("Already signed in: pairing-discovery screen already showing")
             return True
 
-        if self.trust_network_dialog.accept(timeout=1.0):
+        if trust_network_assertions.is_showing(self.app_session, timeout=1.0):
+            self.trust_network_dialog.click_trust_network()
             self.log.success("Already signed in: trust-network dialog already showing -- accepted")
             return True
 
@@ -323,7 +367,7 @@ class SignInFlow:
         # user-supplied screenshot (2026-10-05). Unlike the two checks above, this is not
         # a no-op pass-through: the user confirmed directly that this screen's own blue
         # circular button must still be clicked to proceed.
-        if self.welcome_back_screen.is_showing(timeout=1.0):
+        if welcome_back_assertions.is_showing(self.app_session, timeout=1.0):
             self.log.info("Already signed in: 'Welcome back' screen showing -- clicking Get Started")
             self.welcome_back_screen.click_get_started()
             self._just_clicked_get_started = True
@@ -376,16 +420,16 @@ class SignInFlow:
                 if find_new_browser_window_hwnd(known_hwnds) is not None:
                     return True
 
-                matched = self.migration_preparation_transition.wait_until_any_showing(timeout=0.1)
+                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=0.1)
                 if matched:
                     self.log.success(
                         f"User is already logged in -- transition screen detected: {matched!r}"
                     )
                     return False
-                if self.trust_network_dialog.is_showing(timeout=0.1):
+                if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
                     self.log.success("User is already logged in -- trust-network dialog detected")
                     return False
-                if self.pairing_discovery_screen.is_showing(timeout=0.1):
+                if pairing_discovery_assertions.is_showing(self.app_session, timeout=0.1):
                     self.log.success("User is already logged in -- pairing-discovery screen detected")
                     return False
 
@@ -397,7 +441,7 @@ class SignInFlow:
             # recognize yet; proceed without a browser rather than re-clicking a button
             # that isn't there. If it's still showing, the click plausibly had no effect
             # at all, which is worth an actual retry.
-            if not self.welcome_screen.is_showing(timeout=1.0):
+            if not welcome_screen_assertions.is_showing(self.app_session, timeout=1.0):
                 self.log.info(
                     "Sign-in button no longer present after a full patient wait, with no "
                     "recognized post-auth screen either -- proceeding without a browser "
@@ -454,7 +498,8 @@ class SignInFlow:
             try:
                 self.log.success("Attached to the sign-in browser window")
                 restore_pages_dialog = RestorePagesDialog(browser_session)
-                restore_pages_dialog.dismiss_if_present()
+                if restore_pages_assertions.is_showing(browser_session):
+                    restore_pages_dialog.click_close()
 
                 self._handle_email_step_if_present(browser_session, step_timeout)
                 self._handle_password_step_if_present(browser_session, restore_pages_dialog, step_timeout)
@@ -474,7 +519,16 @@ class SignInFlow:
             self.log.success("Closed the sign-in browser window")
 
             if outcome == "success":
-                return
+                # Bug fixed here, confirmed live (2026-10-14): don't trust "success" yet
+                # -- it can still be superseded by a late-arriving sign-in-failed dialog
+                # (see _LateSignInFailure's own docstring). Keep racing it all the way to
+                # pairing-discovery; only a clean arrival there is the real end state.
+                try:
+                    self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
+                    return
+                except _LateSignInFailure as exc:
+                    self.log.error(str(exc))
+                    outcome = "failed"
 
             if outcome != "failed":
                 raise SignInError(
@@ -482,25 +536,41 @@ class SignInFlow:
                     "appeared within the time budget after OTP submission"
                 )
 
-            if run_negative_check:
-                self.log.success(
-                    "Negative-path check complete -- deliberately cancelled after the "
-                    "wrong-OTP demo, as designed. Clicking Retry to continue with "
-                    "correct values."
-                )
-            else:
-                self.log.error(
-                    f"Sign-in genuinely failed or was cancelled (attempt {attempt + 1}/"
-                    f"{self.MAX_AUTH_RETRIES}) -- clicking Retry and restarting the "
-                    "browser-based sequence"
-                )
-            known_hwnds = self.session.snapshot_browser_windows()  # re-snapshot before Retry opens a new window
-            if not self.sign_in_failed_dialog.retry():
-                raise SignInError("Sign-in-failed dialog disappeared before Retry could be clicked")
-            if not self._wait_for_new_browser(known_hwnds, timeout=30.0):
-                raise SignInError("Clicking Retry on the sign-in-failed dialog never opened a new browser window")
+            known_hwnds = self._retry_sign_in(run_negative_check, attempt, known_hwnds)
 
         raise SignInError(f"Sign-in kept failing after {self.MAX_AUTH_RETRIES} whole-flow retries")
+
+    def _retry_sign_in(self, run_negative_check: bool, attempt: int, known_hwnds: set) -> set:
+        """Clicks Retry on the sign-in-failed dialog and waits for the resulting new
+        browser window, returning the known_hwnds snapshot taken right before the click
+        (for the next attempt's attach_browser() call). Shared by both outcome ==
+        "failed" (detected right after OTP submission) and a late-arriving failure
+        (detected only once the post-auth wait for pairing-discovery was already
+        underway) -- see _LateSignInFailure.
+        """
+        if run_negative_check:
+            self.log.success(
+                "Negative-path check complete -- deliberately cancelled after the "
+                "wrong-OTP demo, as designed. Clicking Retry to continue with "
+                "correct values."
+            )
+        else:
+            self.log.error(
+                f"Sign-in genuinely failed or was cancelled (attempt {attempt + 1}/"
+                f"{self.MAX_AUTH_RETRIES}) -- clicking Retry and restarting the "
+                "browser-based sequence"
+            )
+        known_hwnds = self.session.snapshot_browser_windows()  # re-snapshot before Retry opens a new window
+        # Bug fixed here: the original combined SignInFailedDialog.retry() defaulted
+        # to timeout=2.0 (distinct from is_showing()'s own 0.1 default) -- preserved
+        # explicitly here since this call site needs that longer check, not the
+        # assertion function's generic default.
+        if not sign_in_failed_assertions.is_showing(self.app_session, timeout=2.0):
+            raise SignInError("Sign-in-failed dialog disappeared before Retry could be clicked")
+        self.sign_in_failed_dialog.click_retry()
+        if not self._wait_for_new_browser(known_hwnds, timeout=30.0):
+            raise SignInError("Clicking Retry on the sign-in-failed dialog never opened a new browser window")
+        return known_hwnds
 
     def _wait_for_new_browser(self, known_hwnds, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
@@ -526,7 +596,7 @@ class SignInFlow:
         can appear on the way to a cancelled/failed outcome too, and in that live run it
         did: the transition phrase matched right after UAC approval, this method returned
         "success" and the caller moved on, but the real screen that appeared moments
-        later was "There was a problem signing in" -- whose Retry button never got
+        later was "We couldn't sign you in" -- whose Retry button never got
         clicked because the flow had already committed. Once the transition phrase first
         matches, this now keeps polling for AUTH_OUTCOME_CONFIRMATION_WINDOW seconds for
         the failed dialog to supersede it (checked every iteration, same as before)
@@ -540,10 +610,10 @@ class SignInFlow:
             self._assert_app_alive()
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if self.sign_in_failed_dialog.is_showing(timeout=0.1):
+            if sign_in_failed_assertions.is_showing(self.app_session, timeout=0.1):
                 return "failed"
             if transition_matched_at is None:
-                matched = self.migration_preparation_transition.wait_until_any_showing(timeout=0.1)
+                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=0.1)
                 if matched:
                     matched_phrase = matched
                     transition_matched_at = time.monotonic()
@@ -575,12 +645,12 @@ class SignInFlow:
         # every single routine run was still unnecessary exposure. See tools/adhoc/ for
         # the dedicated negative-path error-message validation (all three steps,
         # deliberately invoked, not part of this default path).
-        email_step = EmailStep(browser_session)
-        if not email_step.is_showing(timeout=timeout):
+        if not email_step_assertions.is_showing(browser_session, timeout=timeout):
             self.log.info("Email step: field not present -- browser profile already has a session, skipping")
             return
         self.log.info("Email step: field present")
 
+        email_step = EmailStep(browser_session)
         self.log.info("Email step: submitting the correct username")
         if not email_step.submit(self.username):
             raise SignInError("Email step did not advance after retries -- Continue click never took effect")
@@ -597,13 +667,14 @@ class SignInFlow:
         # of OTP's own deliberate wrong-value-then-cancel below, which already happens
         # every run by design) was contributing to real account lockouts. See
         # tools/adhoc/ for the dedicated negative-path validation instead.
-        restore_pages_dialog.dismiss_if_present()
-        password_step = PasswordStep(browser_session)
-        if not password_step.is_showing(timeout=timeout):
+        if restore_pages_assertions.is_showing(browser_session):
+            restore_pages_dialog.click_close()
+        if not password_step_assertions.is_showing(browser_session, timeout=timeout):
             self.log.info("Password step: field not present -- already authenticated in this browser profile, skipping")
             return
         self.log.info("Password step: field present")
 
+        password_step = PasswordStep(browser_session)
         self.log.info("Password step: submitting the correct password")
         if not password_step.submit(self.password):
             raise SignInError("Password step did not advance after retries -- Sign In click never took effect")
@@ -623,11 +694,12 @@ class SignInFlow:
         On a retry pass (run_negative_check=False), submits the correct code directly --
         the negative check has already been proven once this run.
         """
-        otp_step = OtpStep(browser_session)
-        if not otp_step.is_showing(timeout=timeout):
+        if not otp_step_assertions.is_showing(browser_session, timeout=timeout):
             self.log.info("OTP step: boxes not present -- already past this step somehow, skipping")
             return
         self.log.info("OTP step: boxes present")
+
+        otp_step = OtpStep(browser_session)
 
         # Confirmed via testing: the first OTP box click can fail with a plain 500 from
         # WinAppDriver immediately after the password->OTP page transition, consistently
@@ -635,7 +707,8 @@ class SignInFlow:
         # new page load, not just right after the initial browser attach where it was
         # already handled once. Dismiss it again here, and give the page a moment to
         # finish settling before the first interaction.
-        restore_pages_dialog.dismiss_if_present()
+        if restore_pages_assertions.is_showing(browser_session):
+            restore_pages_dialog.click_close()
         time.sleep(1.0)
 
         if run_negative_check:
@@ -654,8 +727,7 @@ class SignInFlow:
                 "code -- the retry mechanism (the same path a genuine failure takes) "
                 "will complete this with correct values on the next pass"
             )
-            if not otp_step.cancel():
-                raise SignInError("OTP Cancel button not found/clicked after the negative check")
+            otp_step.click_cancel()
             self.log.info("OTP step: clicked Cancel")
             return
 
@@ -726,7 +798,7 @@ class SignInFlow:
         # method returns) already confirms the actual end state with its own budget.
         if not self._wait_for_uac_prompt_resolution(remaining=remaining):
             return
-        matched = self.migration_preparation_transition.wait_until_any_showing(timeout=max(remaining, 5.0))
+        matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=max(remaining, 5.0))
         if matched:
             self.log.success(f"UAC approved -- transition screen detected: {matched!r}")
 
@@ -765,13 +837,21 @@ class SignInFlow:
         trust_network_accepted = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
-            if self.network_disconnected_dialog.accept(timeout=0.1):
+            if sign_in_failed_assertions.is_showing(self.app_session, timeout=0.1):
+                raise _LateSignInFailure(
+                    "The sign-in-failed dialog (\"We couldn't sign you in\") appeared "
+                    "while waiting for pairing-discovery -- an earlier transition-screen "
+                    "match had looked like success, but sign-in did not actually succeed."
+                )
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+                self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
                     "\"This PC isn't connected to a network\" appeared while waiting for "
                     "pairing-discovery -- waited and clicked Check again"
                 )
                 continue
-            if self.plug_into_ac_power_dialog.accept(timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+                self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "\"Plug into AC power\" appeared while waiting for pairing-discovery "
                     "-- waited and clicked Cancel"
@@ -779,7 +859,7 @@ class SignInFlow:
                 continue
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if self.pairing_discovery_screen.is_showing(timeout=0.1):
+            if pairing_discovery_assertions.is_showing(self.app_session, timeout=0.1):
                 if trust_network_accepted:
                     self.log.success("Pairing-discovery screen confirmed (after accepting trust-network)")
                 else:
@@ -788,13 +868,14 @@ class SignInFlow:
                         "trust-network dialog never appeared)"
                     )
                 return
-            if self.pairing_code_entry_screen.is_showing(timeout=0.1):
+            if pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1):
                 self.log.success(
                     "Pairing-code-entry screen already showing -- pairing-discovery was "
                     "skipped entirely (Source PC was found immediately)"
                 )
                 return
-            if not trust_network_accepted and self.trust_network_dialog.accept(timeout=0.1):
+            if not trust_network_accepted and trust_network_assertions.is_showing(self.app_session, timeout=0.1):
+                self.trust_network_dialog.click_trust_network()
                 self.log.success("Trust-network dialog accepted -- continuing to watch for pairing-discovery")
                 trust_network_accepted = True
             time.sleep(0.5)
