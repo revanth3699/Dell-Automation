@@ -26,12 +26,14 @@ validation/output/*
 # at runtime, never meant to be committed, same reasoning as reports/output/ above.
 coordination_service/state.json
 
-# Markdown docs are kept local only, except the root README and CLAUDE.md (the
-# standing architecture/conventions reference for AI-assisted sessions on this repo
-# -- per explicit user direction, pushed so it's available in any clone/session).
+# Markdown docs are kept local only, except the root README, CLAUDE.md (the standing
+# architecture/conventions reference for AI-assisted sessions on this repo), and
+# DIALOG_HANDLING.md (the dialog-polling catalog, linked from README.md) -- per
+# explicit user direction, each pushed so it's available in any clone/session.
 *.md
 !/README.md
 !/CLAUDE.md
+!/DIALOG_HANDLING.md
 
 # Dev/debug scripts used only for building this framework locally (manual, piecemeal
 # testing of one flow/component at a time) -- never meant to be pushed. Kept on disk,

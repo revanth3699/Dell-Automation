@@ -2,6 +2,9 @@
 
 See PROJECT_PLAN.md for the full design, architecture, phased roadmap, and Phase 0 findings.
 See tools/phase0_inspection_notes.md for raw inspection notes and confirmed locators.
+See [DIALOG_HANDLING.md](DIALOG_HANDLING.md) for a full catalog of every unpredictable
+dialog/condition this automation watches for -- where it's checked, how long, and
+whether it's fatal or clicked through.
 
 Status: sign-in, pairing (via the Coordination Service), and transfer are implemented
 and have run live for both Target and Source PCs; per-run HTML reporting is wired into
