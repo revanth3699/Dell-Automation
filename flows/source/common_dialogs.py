@@ -15,6 +15,7 @@ naming, which holds several dialogs shared across Target's flows the same way.
 from assertions.source import battery_critically_low_dialog as battery_critically_low_assertions
 from assertions.source import confirm_cancel_dialog as confirm_cancel_assertions
 from assertions.source import other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions
+from assertions.source import regional_settings_not_supported_dialog as regional_settings_not_supported_assertions
 
 
 def check_other_pc_disconnected(app_session, dialog, log) -> bool:
@@ -46,3 +47,21 @@ def check_battery_critically_low(app_session, battery_dialog, confirm_cancel_dia
             "battery dialog -- clicked No, don't cancel"
         )
     return True
+
+
+def raise_if_regional_settings_not_supported(app_session, dialog, log) -> None:
+    """"Your regional settings aren't supported." -- confirmed fatal on Source per
+    explicit user direction (2026-10-14): clicking its "Close" button closes the app
+    entirely, so there is nothing left to retry locally. Unlike the two checks above
+    (which click through and let the caller's loop continue), this clicks Close then
+    raises immediately, aborting the run -- same "detect, dismiss, then raise" shape as
+    Target's own _raise_if_migration_error() in flows/target/transfer_flow.py."""
+    if not regional_settings_not_supported_assertions.is_showing(app_session, timeout=0.1):
+        return
+    dialog.click_close()
+    log.error("Your regional settings aren't supported. appeared -- clicked Close; the app is closing")
+    raise RuntimeError(
+        "Your regional settings aren't supported. appeared -- Source's region isn't "
+        "supported by Dell Data Assistant; clicked Close (the app closes itself after "
+        "this, nothing to retry)"
+    )

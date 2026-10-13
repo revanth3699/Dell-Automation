@@ -59,6 +59,13 @@ previously carried their own verbatim copy of each, which is exactly why the
 non-fatal-on-Source fix above had to be applied by hand in two places. Each flow still
 owns its own component instances (constructed in __init__, unchanged); only the
 checking logic itself is shared.
+
+Confirmed from a user-supplied screenshot (2026-10-14): "Your regional settings aren't
+supported." can also appear unpredictably during this flow -- raced in both loops the
+same way, via raise_if_regional_settings_not_supported() (also
+flows/source/common_dialogs.py). Unlike the other two shared checks, this one IS fatal
+on Source: clicking its "Close" button closes the app entirely, so it clicks Close then
+raises immediately instead of letting the loop continue.
 """
 
 import time
@@ -71,6 +78,7 @@ from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.network_disconnected_dialog import NetworkDisconnectedDialog
 from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
 from components.source.pairing_code_screen import PairingCodeScreen
+from components.source.regional_settings_not_supported_dialog import RegionalSettingsNotSupportedDialog
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
 from assertions.source import (
@@ -80,7 +88,11 @@ from assertions.source import (
     trust_network_dialog as trust_network_assertions,
     welcome_screen as welcome_screen_assertions,
 )
-from flows.source.common_dialogs import check_battery_critically_low, check_other_pc_disconnected
+from flows.source.common_dialogs import (
+    check_battery_critically_low,
+    check_other_pc_disconnected,
+    raise_if_regional_settings_not_supported,
+)
 from factory.config import SOURCE_PROCESS_NAME
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
@@ -109,6 +121,7 @@ class SourcePairingFlow:
         self.battery_critically_low_dialog = BatteryCriticallyLowDialog(app_session)
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
+        self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.pairing_code_screen = PairingCodeScreen(app_session)
 
     def _assert_app_alive(self) -> None:
@@ -153,6 +166,9 @@ class SourcePairingFlow:
             deadline = time.monotonic() + discovery_timeout
             while time.monotonic() < deadline:
                 self._assert_app_alive()
+                raise_if_regional_settings_not_supported(
+                    self.app_session, self.regional_settings_not_supported_dialog, self.log
+                )
                 if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                     continue
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
@@ -198,6 +214,9 @@ class SourcePairingFlow:
 
         while time.monotonic() < deadline:
             self._assert_app_alive()
+            raise_if_regional_settings_not_supported(
+                self.app_session, self.regional_settings_not_supported_dialog, self.log
+            )
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 continue
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
