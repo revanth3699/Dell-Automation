@@ -91,24 +91,24 @@ class TargetPairingFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.info(
-                    "\"This PC isn't connected to a network\" appeared -- waited and "
+                    "This PC isn't connected to a network appeared -- waited and "
                     "clicked Check again"
                 )
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
                 self.plug_into_ac_power_dialog.click_cancel()
-                self.log.info("\"Plug into AC power\" appeared -- waited and clicked Cancel")
+                self.log.info("Plug into AC power appeared -- waited and clicked Cancel")
                 continue
             time.sleep(poll_interval)
         return False
 
     def _wait_for_screen(self, screen_timeout: float) -> None:
-        self.log.info("Waiting for the pairing-code entry screen (\"Let's connect your two PCs\")")
+        self.log.info("Waiting for the pairing-code entry screen (Let's connect your two PCs)")
         if not self._poll_with_network_recovery(
             lambda: pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1), max(screen_timeout, 5.0)
         ):
             raise PairingError(
-                "Pairing-code entry screen (\"Let's connect your two PCs\") never appeared "
+                "Pairing-code entry screen (Let's connect your two PCs) never appeared "
                 "after Source PC was found"
             )
         self.log.success("Pairing-code entry screen showing")
@@ -133,8 +133,8 @@ class TargetPairingFlow:
         if confirm_accounts_assertions.is_showing(self.app_session, timeout=5.0):
             self.confirm_accounts_dialog.click_continue()
             self.log.success(
-                "Account-mismatch confirm dialog appeared (\"Let's make sure we're "
-                "connecting the right user accounts\") -- clicked Continue"
+                "Account-mismatch confirm dialog appeared (Let's make sure we're "
+                "connecting the right user accounts) -- clicked Continue"
             )
         else:
             self.log.info("Account-mismatch confirm dialog did not appear -- account names matched")

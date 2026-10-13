@@ -279,14 +279,14 @@ class SignInFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
-                    "\"This PC isn't connected to a network\" appeared while waiting for "
+                    "This PC isn't connected to a network appeared while waiting for "
                     "Source PC -- waited and clicked Check again"
                 )
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
-                    "\"Plug into AC power\" appeared while waiting for Source PC -- "
+                    "Plug into AC power appeared while waiting for Source PC -- "
                     "waited and clicked Cancel"
                 )
                 continue
@@ -338,7 +338,7 @@ class SignInFlow:
         caller's loop continue."""
         if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
             self.desktop_shortcut_dialog.click_create_shortcut()
-            self.log.success('"Add a desktop shortcut before you go" appeared -- clicked "Create shortcut"')
+            self.log.success("Add a desktop shortcut before you go appeared -- clicked Create shortcut")
             return True
         return False
 
@@ -839,21 +839,21 @@ class SignInFlow:
             self._assert_app_alive()
             if sign_in_failed_assertions.is_showing(self.app_session, timeout=0.1):
                 raise _LateSignInFailure(
-                    "The sign-in-failed dialog (\"We couldn't sign you in\") appeared "
+                    "The sign-in-failed dialog (We couldn't sign you in) appeared "
                     "while waiting for pairing-discovery -- an earlier transition-screen "
                     "match had looked like success, but sign-in did not actually succeed."
                 )
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
-                    "\"This PC isn't connected to a network\" appeared while waiting for "
+                    "This PC isn't connected to a network appeared while waiting for "
                     "pairing-discovery -- waited and clicked Check again"
                 )
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
-                    "\"Plug into AC power\" appeared while waiting for pairing-discovery "
+                    "Plug into AC power appeared while waiting for pairing-discovery "
                     "-- waited and clicked Cancel"
                 )
                 continue

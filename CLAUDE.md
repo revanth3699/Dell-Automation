@@ -160,7 +160,7 @@ loop in the affected flow checks them every cycle:
 while time.monotonic() < deadline:
     if some_dialog_assertions.is_showing(self.app_session, timeout=0.1):
         self.some_dialog.click_whatever()
-        self.log.warning('"..." appeared -- handled')
+        self.log.warning('... appeared -- handled')
         continue
     if the_real_thing_assertions.is_showing(self.app_session, timeout=1.0):
         break
@@ -201,6 +201,14 @@ as a flag-based prefix-skip and reverted; a generic solution is still open).
   possessive/contraction. If genuinely unsure which of two phrasings is real (e.g. a
   dialog might show different copy for different failure causes), assert on an
   `or`-combined `contains()` for both rather than guessing one.
+- **Don't wrap asserted UI text in literal double quotes in log messages or raised
+  error messages** (per explicit user direction, 2026-10-13) — write
+  `self.log.warning("Your battery is critically low. appeared -- clicking Cancel")`,
+  not `self.log.warning('"Your battery is critically low." appeared -- clicking
+  Cancel")`. This applies to runtime-visible strings only (`self.log.*()` calls and
+  `raise ...Error(...)` messages) — module/method docstrings are unaffected. XPath
+  locator values (`@Name="..."`) are also unaffected — this is about log/error text,
+  not locator syntax.
 - **A WinAppDriver click can report success without anything happening.** The element
   is found and the Invoke pattern completes at the API level even when the window is
   still loading or isn't in the foreground. `factory/session.py`'s launch functions

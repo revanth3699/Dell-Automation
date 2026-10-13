@@ -35,6 +35,16 @@ treatment as the trust-network/network-disconnected dialogs, raced in both the
 discovery-wait loop and _publish_loop(). Dismissed immediately via Cancel, no delay
 first (distinct from Target's PlugIntoAcPowerDialog, which waits before cancelling --
 this dialog reports the battery as already critical, not just a low-battery warning).
+
+Bug fixed here, confirmed via user-supplied screenshots (2026-10-13): clicking Cancel
+on BatteryCriticallyLowDialog does NOT just dismiss it -- it triggers
+ConfirmCancelDialog ("Are you sure you want to cancel?"), asking to confirm cancelling
+the whole pairing/migration. Both call sites now go through the single
+_check_battery_critically_low() helper, which dismisses that follow-up confirmation
+too (via "No, don't cancel") immediately after every click_cancel() -- see
+assertions/source/confirm_cancel_dialog.py's own docstring. This also folds the two
+previously-separate inline battery-dialog checks (discovery-wait loop and
+_publish_loop()) into one shared method, so this new handling only needed writing once.
 """
 
 import time
@@ -43,12 +53,14 @@ from typing import Optional
 import requests
 
 from components.source.battery_critically_low_dialog import BatteryCriticallyLowDialog
+from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.network_disconnected_dialog import NetworkDisconnectedDialog
 from components.source.pairing_code_screen import PairingCodeScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
 from assertions.source import (
     battery_critically_low_dialog as battery_critically_low_assertions,
+    confirm_cancel_dialog as confirm_cancel_assertions,
     network_disconnected_dialog as network_disconnected_assertions,
     pairing_code_screen as pairing_code_assertions,
     searching_screen as searching_screen_assertions,
@@ -81,7 +93,21 @@ class SourcePairingFlow:
         self.trust_network_dialog = TrustNetworkDialog(app_session)
         self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
         self.battery_critically_low_dialog = BatteryCriticallyLowDialog(app_session)
+        self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
         self.pairing_code_screen = PairingCodeScreen(app_session)
+
+    def _check_battery_critically_low(self) -> bool:
+        if not battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
+            return False
+        self.battery_critically_low_dialog.click_cancel()
+        self.log.warning('Your battery is critically low. appeared -- clicked Cancel')
+        if confirm_cancel_assertions.is_showing(self.app_session, timeout=2.0):
+            self.confirm_cancel_dialog.click_no_dont_cancel()
+            self.log.warning(
+                'Are you sure you want to cancel? appeared after dismissing the '
+                "battery dialog -- clicked No, don't cancel"
+            )
+        return True
 
     def _assert_app_alive(self) -> None:
         """Confirmed live (2026-10-06): the Source app can crash mid-wait (same
@@ -128,18 +154,14 @@ class SourcePairingFlow:
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                     self.network_disconnected_dialog.click_check_again()
                     self.log.warning(
-                        "\"This PC isn't connected to a network\" appeared mid-discovery-wait "
+                        "This PC isn't connected to a network appeared mid-discovery-wait "
                         "-- waited and clicked Check again"
                     )
                     continue
                 if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
                     self.trust_network_dialog.click_yes_continue()
                     self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
-                if battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
-                    self.battery_critically_low_dialog.click_cancel()
-                    self.log.warning(
-                        "\"Your battery is critically low.\" appeared mid-discovery-wait -- clicked Cancel"
-                    )
+                if self._check_battery_critically_low():
                     continue
                 if pairing_code_assertions.is_showing(self.app_session, timeout=2.0):
                     break
@@ -175,7 +197,7 @@ class SourcePairingFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
-                    "\"This PC isn't connected to a network\" appeared mid-publish-loop "
+                    "This PC isn't connected to a network appeared mid-publish-loop "
                     "-- waited and clicked Check again"
                 )
                 continue
@@ -183,11 +205,7 @@ class SourcePairingFlow:
                 self.trust_network_dialog.click_yes_continue()
                 self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
                 continue
-            if battery_critically_low_assertions.is_showing(self.app_session, timeout=0.1):
-                self.battery_critically_low_dialog.click_cancel()
-                self.log.warning(
-                    "\"Your battery is critically low.\" appeared mid-publish-loop -- clicked Cancel"
-                )
+            if self._check_battery_critically_low():
                 continue
             if not pairing_code_assertions.is_showing(self.app_session, timeout=1.0):
                 self.log.success("Pairing-code screen no longer showing -- Target has paired")
