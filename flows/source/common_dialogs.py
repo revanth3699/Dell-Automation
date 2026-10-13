@@ -5,6 +5,11 @@ exactly how the "other PC disconnected" dialog's non-fatal-on-Source fix had to 
 applied in two places by hand earlier today. Adding a new dialog that both flows need
 to race now means editing this one file, not hunting through both.
 
+check_welcome_screen() (2026-10-14, confirmed directly by the user): "Welcome to Dell
+Migrate." can reappear at any point during the Source flow, not just the one-off check
+already in SourcePairingFlow.run() before its main loop starts -- raced continuously in
+every loop in both flows, same as every other dialog here.
+
 Plain functions, not a shared base class: each flow already owns its own component
 instances (constructed once in its own __init__, same as before) and just passes them
 in here -- there's no new shared state or composed object to keep track of, only the
@@ -16,6 +21,7 @@ from assertions.source import battery_critically_low_dialog as battery_criticall
 from assertions.source import confirm_cancel_dialog as confirm_cancel_assertions
 from assertions.source import other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions
 from assertions.source import regional_settings_not_supported_dialog as regional_settings_not_supported_assertions
+from assertions.source import welcome_screen as welcome_screen_assertions
 
 
 def check_other_pc_disconnected(app_session, dialog, log) -> bool:
@@ -46,6 +52,19 @@ def check_battery_critically_low(app_session, battery_dialog, confirm_cancel_dia
             "Are you sure you want to cancel? appeared after dismissing the "
             "battery dialog -- clicked No, don't cancel"
         )
+    return True
+
+
+def check_welcome_screen(app_session, welcome_screen, log) -> bool:
+    """"Welcome to Dell Migrate." -- confirmed by the user (2026-10-14) to be able to
+    reappear at any point during the Source flow, not just at the very start of
+    SourcePairingFlow.run() (its original one-off check there is unchanged -- this is
+    for every OTHER point it could show up). Clicks "Let's get started" and lets the
+    caller's loop continue."""
+    if not welcome_screen_assertions.is_showing(app_session, timeout=0.1):
+        return False
+    welcome_screen.click_get_started()
+    log.warning("Welcome to Dell Migrate. appeared -- clicked Let's get started")
     return True
 
 

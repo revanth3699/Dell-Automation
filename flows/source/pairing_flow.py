@@ -79,6 +79,11 @@ however long each interrupting check (check_other_pc_disconnected()/
 network-disconnected/check_battery_critically_low()) actually took, so only genuine
 "nothing is happening" time counts against discovery_timeout/pairing_timeout --
 handling a recoverable dialog, however long it takes, no longer eats into that budget.
+
+Confirmed directly by the user (2026-10-14): "Welcome to Dell Migrate." can also
+reappear at any point during this flow, not just the one-off check at the very start of
+run() (which stays, unchanged, for the normal first-launch case) -- raced in both loops
+too, via check_welcome_screen() (also flows/source/common_dialogs.py).
 """
 
 import time
@@ -104,6 +109,7 @@ from assertions.source import (
 from flows.source.common_dialogs import (
     check_battery_critically_low,
     check_other_pc_disconnected,
+    check_welcome_screen,
     raise_if_regional_settings_not_supported,
 )
 from factory.config import SOURCE_PROCESS_NAME
@@ -183,6 +189,9 @@ class SourcePairingFlow:
                 raise_if_regional_settings_not_supported(
                     self.app_session, self.regional_settings_not_supported_dialog, self.log
                 )
+                if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
+                    deadline += time.monotonic() - iteration_start
+                    continue
                 if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                     deadline += time.monotonic() - iteration_start
                     continue
@@ -235,6 +244,9 @@ class SourcePairingFlow:
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
+            if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
+                deadline += time.monotonic() - iteration_start
+                continue
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue

@@ -84,6 +84,10 @@ RuntimeError even though the dialog handling itself was working correctly. Both 
 now extend their own deadline by however long each interrupting check actually took,
 so only genuine "nothing is happening" time counts against
 migrating_timeout/summary_timeout.
+
+Confirmed directly by the user (2026-10-14): "Welcome to Dell Migrate." can also
+reappear at any point during this flow -- raced in both loops too, via
+check_welcome_screen() (also flows/source/common_dialogs.py).
 """
 
 import time
@@ -93,11 +97,13 @@ from components.source.confirm_cancel_dialog import ConfirmCancelDialog
 from components.source.other_pc_network_disconnected_dialog import OtherPcNetworkDisconnectedDialog
 from components.source.regional_settings_not_supported_dialog import RegionalSettingsNotSupportedDialog
 from components.source.transfer_progress_screen import TransferProgressScreen
+from components.source.welcome_screen import WelcomeScreen
 from assertions.source import transfer_progress_screen as transfer_progress_assertions
 from factory.logger_factory import LoggerFactory
 from flows.source.common_dialogs import (
     check_battery_critically_low,
     check_other_pc_disconnected,
+    check_welcome_screen,
     raise_if_regional_settings_not_supported,
 )
 
@@ -110,6 +116,7 @@ class SourceTransferFlow:
         self.confirm_cancel_dialog = ConfirmCancelDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
+        self.welcome_screen = WelcomeScreen(app_session)
         self.log = LoggerFactory.get_logger("source")
 
     def _poll_until_showing(self, check, timeout: float) -> bool:
@@ -119,6 +126,9 @@ class SourceTransferFlow:
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
+            if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
+                deadline += time.monotonic() - iteration_start
+                continue
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue
@@ -230,6 +240,9 @@ class SourceTransferFlow:
             raise_if_regional_settings_not_supported(
                 self.app_session, self.regional_settings_not_supported_dialog, self.log
             )
+            if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
+                deadline += time.monotonic() - iteration_start
+                continue
             if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue
