@@ -44,6 +44,21 @@ _BOILERPLATE_LINE_RE = re.compile(
     r"^(Table of contents|Migration report\b.*\d{1,2}:\d{2}\s*(AM|PM)\s*)+$"
 )
 
+# Bug fixed here, confirmed live (2026-10-14) on a 264-file "Files copied" report
+# (multi-page): each page's own footer echoes the BARE section title (e.g. a plain
+# line reading just "Files copied", distinct from the real end-of-section marker
+# "Files copied: 264") -- this is separate chrome from the "Table of
+# contents"/"Migration report ..." footer above and wasn't being stripped. Left in,
+# the merge pass in _parse_file_entries() treated it as a continuation of
+# whichever path happened to be last before the page break, silently corrupting
+# that one path (e.g. "...e2d91e33b" + "Files copied" glued together with no
+# separator) and making a file that genuinely exists on disk get reported MISSING.
+# All four section titles are covered since any of them could in principle span
+# multiple pages the same way.
+_BARE_SECTION_TITLE_LINES = {
+    "Files copied", "Files not migrated", "Settings copied", "Settings not migrated",
+}
+
 
 @dataclass
 class FailedFileEntry:
@@ -95,7 +110,7 @@ def _clean_lines(region_text: str) -> List[str]:
     lines = []
     for raw_line in region_text.split("\n"):
         line = raw_line.strip()
-        if not line or _BOILERPLATE_LINE_RE.match(line):
+        if not line or _BOILERPLATE_LINE_RE.match(line) or line in _BARE_SECTION_TITLE_LINES:
             continue
         lines.append(line)
     return lines

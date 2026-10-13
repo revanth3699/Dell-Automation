@@ -126,7 +126,8 @@ def print_console_report(result: ValidationRunResult) -> None:
             for r in mismatches:
                 exp = r.expectation
                 state = "missing live" if not r.found else f"live={r.live_data!r}"
-                print(f"      {exp.key_path}\\{exp.value_name or '(default)'}: expected={exp.expected_data!r}, {state}")
+                unstable_note = " [UNSTABLE -- value changed between re-checks, read it again later]" if r.unstable else ""
+                print(f"      {exp.key_path}\\{exp.value_name or '(default)'}: expected={exp.expected_data!r}, {state}{unstable_note}")
         else:
             print(f"  {cat.name}: OK ({len(cat.results)}/{len(cat.results)} values match{skipped_note})")
 

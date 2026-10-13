@@ -185,6 +185,8 @@ def _category_html(cat, index: int) -> str:
     for r in mismatches:
         exp = r.expectation
         live = "missing" if not r.found else html.escape(repr(r.live_data))
+        if r.unstable:
+            live += ' <span class="badge fail" title="Value changed between re-checks a moment apart -- read it again later">UNSTABLE</span>'
         rows.append(f"""<tr>
             <td class="mono">{html.escape(exp.key_path)}</td>
             <td class="mono">{html.escape(exp.value_name or '(default)')}</td>
