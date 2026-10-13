@@ -18,6 +18,10 @@ __pycache__/
 reports/output/*
 !reports/output/.gitkeep
 
+# Same reasoning, for validation/validate_migration.py's own generated HTML reports.
+validation/output/*
+!validation/output/.gitkeep
+
 # Coordination Service's own runtime state (published pairing codes etc.) -- generated
 # at runtime, never meant to be committed, same reasoning as reports/output/ above.
 coordination_service/state.json
