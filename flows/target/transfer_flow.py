@@ -58,6 +58,7 @@ presence.
 
 import time
 
+from components.target.app_window import AppWindow
 from components.target.common_dialogs import (
     CloseAppsDialog,
     DesktopShortcutDialog,
@@ -110,6 +111,7 @@ class TargetTransferFlow:
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.desktop_shortcut_dialog = DesktopShortcutDialog(app_session)
+        self.app_window = AppWindow(app_session)
         self.log = LoggerFactory.get_logger("target")
 
     def _raise_if_migration_error(self) -> None:
@@ -293,9 +295,14 @@ class TargetTransferFlow:
 
         Every step here is now a required gate (raises TransferFlowError if a screen
         doesn't appear in time), not optional. Once is_home_confirmed() returns True,
-        this method returns normally; the caller's own Session.close() (already wired
-        in orchestration/role_runner.py's TargetRunner.run(), via its finally block) is
-        what actually closes the app.
+        the migration is genuinely done -- per explicit user direction (2026-10-14),
+        this now also clicks the app's own native window close button (top-right
+        "X", AutomationId="CloseButton" -- see components/target/app_window.py)
+        rather than leaving the window open for the caller's own Session.close()
+        (orchestration/role_runner.py's TargetRunner.run(), via its finally block) to
+        tear down via a plain process kill. Session.close() still runs regardless
+        (idempotent either way), so this isn't a substitute for that cleanup, just an
+        explicit, graceful close through the app's own UI first.
         """
         self.log.info('Waiting for the transfer to finish ("We\'re moving your files and settings" to clear)...')
         # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
@@ -371,3 +378,6 @@ class TargetTransferFlow:
                 "after clicking Back to Home"
             )
         self.log.success("Confirmed back on the home screen -- migration flow complete")
+
+        self.log.info("Closing the app window")
+        self.app_window.click_close()
