@@ -1,17 +1,19 @@
 """
 Target-side pairing-code screens, shown once Source PC is found (i.e. once the
 pairing-discovery screen's "We're looking for your other PC" heading clears -- see
-assertions/target/pairing_discovery_screen.py). Confirmed from a user-supplied flow
-diagram (dell screens flow.pdf, 2026-10-05), not yet independently confirmed live.
+assertions/target/pairing_discovery_screen.py). Originally confirmed only from a
+user-supplied flow diagram (dell screens flow.pdf, 2026-10-05); confirmed live
+(2026-10-15) via a real run's log: enter_code() successfully typed a fetched pairing
+code into the positional Edit-control boxes (twice in the same run -- the first code
+expired/rotated mid-entry, the retry with a freshly-fetched code succeeded), the screen
+cleared on acceptance, and ConfirmAccountsDialog appeared and was dismissed correctly
+(see assertions/target/confirm_accounts_dialog.py's own updated docstring).
 
 PairingCodeEntryScreen's heading text and ConfirmAccountsDialog's heading/button text are
 taken directly from that diagram's screenshots and are solid. The 6 individual code-entry
-boxes' exact accessible names are NOT confirmed -- no live DOM access yet, and unlike the
-browser-side OTP boxes (components/target/browser_sign_in_page.py's "Verify Passcode
-One".."Six", a web-page-specific accessibility hint), this is a different, app-side
-WPF/WinUI control tree with no confirmed equivalent naming. enter_code() below finds boxes
-positionally (first N Edit controls under the heading) rather than guessing specific
-names. Confirm/adjust once hit for real.
+boxes' exact accessible names are still NOT confirmed even after the above -- the
+positional (first N Edit controls) lookup worked, but that doesn't require knowing each
+box's real accessible name, so this remains an open gap, not yet a problem in practice.
 
 The reference diagram also shows no visible submit button under the 6 boxes, consistent
 with an auto-submit-once-all-digits-entered pattern (the same product convention the

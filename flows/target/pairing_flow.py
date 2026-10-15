@@ -173,15 +173,35 @@ class TargetPairingFlow:
         self.log.success("Pairing code accepted")
 
         # Not every pairing shows this -- only when the two PCs' account names differ
-        # (confirmed from the reference diagram).
-        if confirm_accounts_assertions.is_showing(self.app_session, timeout=5.0):
+        # (confirmed from the reference diagram). Bug fixed here, confirmed live
+        # (2026-10-15): this used a 5.0s timeout, but a live run showed the dialog can
+        # take roughly 10s to actually render after the code-entry screen clears --
+        # that run's check here returned False (previously logged as "account names
+        # matched") even though the two PCs' account names genuinely differed and the
+        # dialog appeared ~10s later, caught only because
+        # TargetTransferFlow.start_transfer() separately races this same dialog for its
+        # entire preparing-files wait (see that file's own module docstring, fixed
+        # 2026-10-06, for exactly this scenario). Widened here too, per explicit user
+        # direction: missing this dialog anywhere is not safe to shrug off, since the
+        # app will not progress past it and every later screen depends on it having
+        # been dismissed -- "we don't know what pop up appears when."
+        if confirm_accounts_assertions.is_showing(self.app_session, timeout=20.0):
             self.confirm_accounts_dialog.click_continue()
             self.log.success(
                 "Account-mismatch confirm dialog appeared (Let's make sure we're "
                 "connecting the right user accounts) -- clicked Continue"
             )
         else:
-            self.log.info("Account-mismatch confirm dialog did not appear -- account names matched")
+            # Confirmed live (2026-10-15): a False result here does NOT reliably mean
+            # the account names matched -- it can also mean the dialog simply hadn't
+            # rendered yet. Don't assert a conclusion this check can't actually back
+            # up; TargetTransferFlow's own continuous race (its entire preparing-files
+            # wait) is what actually confirms either outcome.
+            self.log.info(
+                "Account-mismatch confirm dialog did not appear within this wait -- "
+                "either account names matched, or it hasn't rendered yet (raced "
+                "continuously by TargetTransferFlow.start_transfer() as a backstop)"
+            )
 
     def enter_pairing_code(self, code: str, screen_timeout: float = 30.0, advance_timeout: float = 30.0) -> None:
         """Call after SignInFlow.wait_for_source_pc() returns True, with a code you

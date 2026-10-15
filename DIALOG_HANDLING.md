@@ -193,3 +193,126 @@ outcomes (this project was bitten twice by assuming only one of the two was ever
   [README.md](README.md#pdf-migration-report-validation)) is a separate, standalone tool
   and shares none of this dialog-handling machinery -- it runs after a migration
   completes, reading files/registry, not driving the UI at all.
+
+---
+
+## Who triggers each condition -- tester setup vs. automation capture
+
+Several dialogs in this catalog can't be triggered by the automation itself -- they
+depend on a real environmental condition that only a human tester can set up on the
+physical hardware (disconnect a network cable, let a battery actually drain, set two
+PCs to different Windows regions, etc.). This is a deliberate split of responsibility,
+not a gap:
+
+**The tester's job** is to create the precondition on the real machine(s) before or
+during a run. **Automation's job** is to already be polling for every known dialog on
+every cycle (per the "race it continuously" pattern above) -- so whichever condition the
+tester set up gets detected and handled/captured (screenshot + log via `ActionReporter`,
+then clicked through or raised per the tables below) the moment it actually appears,
+without automation needing to know in advance which one that will be or exactly when.
+This is also why confirming a tester-induced dialog is handled correctly is a *regression
+test in its own right* -- it validates the detection/response code path even though the
+precondition itself is manual.
+
+| Trigger type | Dialogs | Who/what causes it |
+|---|---|---|
+| **Tester-induced (physical/environmental)** | `NetworkDisconnectedDialog` (Target + Source) | Tester must physically disconnect this PC's network (unplug Ethernet / disable Wi-Fi) |
+| | `PlugIntoAcPowerDialog` (Target) / `BatteryCriticallyLowDialog` (Source) | Tester must let the laptop's battery actually drop to a low level (or run unplugged) -- not simulatable in software |
+| | `OtherPcNetworkDisconnectedDialog` (Target + Source) | Tester must disconnect the *other* machine's network mid-transfer |
+| | `RegionalSettingsNotSupportedDialog` (Target + Source) | Tester must set Target and Source to different, incompatible Windows region/locale settings before pairing |
+| | `CloseAppsDialog` (Target) | Tester must deliberately leave a blocking application open (e.g. Control Panel, a browser) on the Target PC |
+| | `ConfirmAccountsDialog` (Target) | Tester must set up two PCs with different Windows account names ahead of time |
+| | `InstallBrowsersToMigrateBookmarksDialog` (Target) | Tester must install a browser (e.g. Firefox) on Source but not on Target |
+| **Naturally occurring (needs no tester setup)** | `TrustNetworkDialog` (Target + Source), `DesktopShortcutDialog` (Target), `RestorePagesDialog` (Target, browser), `WelcomeScreen` reappearance (Source), `ConfirmCancelDialog` (Source, automatic follow-up to the battery dialog) | Part of the app/browser's own normal behavior on a typical run -- shows up without any special setup |
+| **Deliberately code-induced (by this automation itself)** | `SignInFailedDialog` (Target) | `SignInFlow`'s own OTP step submits a wrong code and cancels on every run's first attempt, by design (see `flows/target/authentication/sign_in_flow.py`'s module docstring) -- not a tester action, not a real failure |
+| **Not reliably inducible either way** | `MigrationErrorDialog` ("Something went wrong", Target) / "We ran into a problem during your migration." (Source) | A real engine-side failure (e.g. error 2969) -- can't be deliberately triggered on demand by a tester or by automation; these are "capture it if it happens," confirmed historically from real screenshots/logs rather than reproduced on request |
+
+**Practical implication for regression testing:** for every tester-induced row above, a
+valid regression pass looks like: tester sets up the condition on the hardware, then
+starts `orchestration/role_runner.py` as normal (no special flag or mode needed) -- the
+existing polling loops in `SignInFlow`/`TargetPairingFlow`/`TargetTransferFlow`/
+`SourcePairingFlow`/`SourceTransferFlow` already watch for all of these on every cycle,
+so correct detection and handling is captured in that run's own `ActionReporter` HTML
+report without any code change. This is the methodology to use for the dialog-specific
+rows called out as such in
+`REGRESSION_AUTOMATION_COVERAGE.md` (local-only, not pushed -- see `.gitignore`) if that document
+is extended to cover error-condition cases beyond the current 40-case Glassfloor export.
+
+---
+
+## Quick-reference: consolidated dialog table
+
+Same information as the per-flow sections above, flattened into one lookup table per
+role -- dialog name, exact text asserted, button clicked, and the condition under which
+it's clicked. Compiled directly from `assertions/`/`components/`/`locators/` source, not
+from the prose sections above -- if the two ever disagree, re-derive both from source.
+
+### Target PC
+
+#### Sign-in sequence (`flows/target/authentication/sign_in_flow.py`)
+
+| Dialog | Text asserted | Button clicked | When clicked (condition) |
+|---|---|---|---|
+| TrustNetworkDialog | Heading `"Connect to a trusted network"` (`assertions/target/trust_network_dialog.py`) | `"Trust Network"` (`locators/target/trust_network_dialog.py`) | Raced in the already-signed-in check, the sign-in-with-retry wait, and the wait toward pairing-discovery -- clicked once per appearance, immediately on detection |
+| SignInFailedDialog ("We couldn't sign you in") | `contains(@Name,"sign you in")` OR `contains(@Name,"problem signing in")` -- races both phrasings deliberately (`assertions/target/sign_in_failed_dialog.py`) | `"Retry"` | After OTP submit/cancel, when auth outcome resolves to "failed" (including the deliberate wrong-OTP-then-cancel every run's first attempt) -- also raced for the *entire* remaining wait toward pairing-discovery in case it appears late (`_LateSignInFailure`). Restarts the whole browser sequence, up to `MAX_AUTH_RETRIES=3` |
+| RestorePagesDialog (Chrome "didn't shut down correctly") | N/A -- pure button-presence check via `button_exists()` on the close icon itself | `ImageButton[@Name="Close"]` (scoped to `ImageButton` to avoid matching the browser's own window-close caption button) | One-off check, not a loop: right after attaching the sign-in browser, and again at the password -> OTP page transition |
+| Email/Password/OTP error banner | `contains(@Name,"We are unable to match the details you entered with our records")` (`assertions/target/error_banner.py`) | *(no button of its own)* | Confirmed only after deliberately submitting a wrong value via `submit_and_expect_error()` -- OTP's wrong-code-then-cancel happens every run by design; email/password's equivalent moved to `tools/adhoc/` only, not the default path (lockout risk) |
+| DesktopShortcutDialog ("Add a desktop shortcut before you go") | Exact heading | `"Create shortcut"` | Raced in essentially every loop in `SignInFlow` (confirmed to appear anywhere between launch and pairing-discovery) and in `TargetTransferFlow.wait_for_completion()`'s final home-confirmation wait |
+| NetworkDisconnectedDialog ("This PC isn't connected to a network.") | Exact heading | `"Check again"` | Raced in `wait_for_source_pc()` and the pairing-discovery wait (SignInFlow), and `TargetPairingFlow`'s shared poll. Waits 30s before clicking |
+| PlugIntoAcPowerDialog ("Plug into AC power") | Exact heading | `"Cancel transfer"` *(not `"Cancel"` -- a confirmed-live locator fix, 2026-10-14)* | Raced in `wait_for_source_pc()`, the pairing-discovery wait, `TargetPairingFlow`'s shared poll, and all 3 waits in `TargetTransferFlow`. Waits 15s, then re-checks existence before clicking. On Target, clicking it resets all the way to the Welcome-back screen -- a follow-up `"Get started"` click re-enters |
+
+#### Pairing & transfer (`flows/target/pairing_flow.py`, `flows/target/transfer_flow.py`)
+
+| Dialog | Text asserted | Button clicked | When clicked (condition) |
+|---|---|---|---|
+| OtherPcNetworkDisconnectedDialog ("The other PC isn't connected to a network.") | Exact heading | `"Cancel transfer"` | **Fatal.** Raced in `TargetPairingFlow`'s shared poll and all 3 `TargetTransferFlow` loops -- clicks, then raises immediately (Source PC lost connectivity, nothing local to retry) |
+| RegionalSettingsNotSupportedDialog ("Set both of your PCs to the same supported region") | Exact heading *(confirmed live over an earlier, wrong assumed heading)* | `Button[@Name="Close" and not(@AutomationId="CloseButton")]` (excludes the native window-close button) | **Fatal.** Raced in the pairing-discovery wait, `TargetPairingFlow`'s shared poll, and all 3 `TargetTransferFlow` loops -- clicks Close, then raises |
+| CloseAppsDialog ("We need to close all other applications") | Exact heading | `Button[@Name="Close Application"]` | Raced in every `TargetTransferFlow` wait loop, plus one extra direct re-check right before clicking "Migrate now" |
+| ConfirmAccountsDialog ("Let's make sure we're connecting the right user accounts") | Exact heading | `Button[@Name="Continue"]` | Checked once right after the pairing code is accepted (`TargetPairingFlow`); also re-checked once during `start_transfer()`'s outer wait (one-shot, via a `confirmed_accounts` flag) -- only shown when the two PCs' account names differ |
+| InstallBrowsersToMigrateBookmarksDialog | Exact heading | `"Rescan"`, then `"Skip"` if still showing after | Raced only in `start_transfer()`'s inner wait (right after clicking Migrate now). Waits 10s -> clicks Rescan once -> re-checks `is_showing()` -> clicks Skip only if it's still there |
+| MigrationErrorDialog ("Something went wrong") | Exact heading; body `contains(@Name,"Please close and try again")` read for diagnostics | *(no button -- terminal)* | **Fatal.** Raced in all 3 `TargetTransferFlow` loops -- no click at all; `read_error_text()` surfaces the body, flow raises immediately |
+
+### Source PC
+
+#### Pairing & transfer (`flows/source/pairing_flow.py`, `flows/source/transfer_flow.py`, `flows/source/common_dialogs.py`)
+
+| Dialog | Text asserted | Button clicked | When clicked (condition) |
+|---|---|---|---|
+| WelcomeScreen ("Welcome to Dell Migrate.") | `button_exists()` on its own button | `"Let's get started"` | One-off at the very start of `run()`; also raced (re-appearance) in both `SourcePairingFlow` loops and both `SourceTransferFlow` loops via shared `check_welcome_screen()` -- **deadline-extending** |
+| TrustNetworkDialog ("Do you trust the... network?") | `contains(@Name,"Do you trust the")` | `"Yes, continue"` | One-off right after Get Started; also raced every cycle in both `SourcePairingFlow` loops (plain `continue`, not deadline-extending) |
+| NetworkDisconnectedDialog ("This PC isn't connected to a network.") | Exact heading | `"Check again"` | Raced every cycle in both `SourcePairingFlow` loops. Waits **10s** before clicking (Source's delay differs from Target's 30s) |
+| BatteryCriticallyLowDialog ("Your battery is critically low.") | Exact heading | `Button[@Name="Cancel"]` | Raced in both `SourcePairingFlow` loops and both `SourceTransferFlow` loops via shared `check_battery_critically_low()` -- **deadline-extending**. Waits 10s before clicking |
+| ConfirmCancelDialog ("Are you sure you want to cancel?") | Exact heading | `Button[contains(@Name,"No, don")]` -> `"No, don't cancel"` | Follow-up only -- checked immediately after every `BatteryCriticallyLowDialog.click_cancel()`, not raced independently. Dismisses the cancel-confirmation so the whole migration doesn't actually get cancelled |
+| OtherPcNetworkDisconnectedDialog ("The other PC isn't connected to a network.") | Exact heading | `"Cancel transfer"` | **Non-fatal on Source** (unlike Target's mirror dialog). Raced in both `SourcePairingFlow` loops and both `SourceTransferFlow` loops via `check_other_pc_disconnected()` -- **deadline-extending**, loop just continues after the click |
+| RegionalSettingsNotSupportedDialog ("Your regional settings aren't supported.") | `contains(@Name,"Your regional settings")` *(apostrophe-free substring fix, 2026-10-14)* | `Button[@Name="Close"]` | **Fatal.** Raced in both `SourcePairingFlow` loops and both `SourceTransferFlow` loops via `raise_if_regional_settings_not_supported()` -- clicks Close (the app closes itself), then raises |
+| "We ran into a problem during your migration." (recoverable, not final) | Heading + body `all_exist()` check (`assertions/source/transfer_progress_screen.py`) | `Button[@Name="Try Again"]` | Raced only in `SourceTransferFlow`'s final-screen loop -- not a final outcome; clicks, migration restarts, loop keeps polling |
+
+#### Source transfer -- terminal outcomes (not racing dialogs, but worth having alongside)
+
+| Screen | Text asserted | Button/dismissal | Outcome |
+|---|---|---|---|
+| "We've completed your migration." | Heading + body `contains "Check to make sure everything is there"` | `Button[@Name="Close"]`, clicked immediately | Full success |
+| "Your migration is now complete." | Heading + body `contains "Click Try Again if you"` | `ImageButton[@Name="Close"]` (close **icon** -- no Close button exists on this variant) | Partial (some data skipped) |
+| "Your migration summary is ready." | Heading + body `contains "select Show skipped files"` | `Button[@Name="Close"]`, but only after a **20s delay** (`click_close_after_delay()`) | Partial (some data skipped) -- delay gives the user time to read/use "Show skipped files" first |
+
+## Text/log-polled conditions (no element locator)
+
+Two conditions in this codebase are not checked via a UIA `find_element` lookup at all --
+each is polled a fundamentally different way:
+
+| Condition | How it's polled | Text matched | Button | Used where |
+|---|---|---|---|---|
+| Migration-preparation transition screens | `session.page_source` (raw UI-tree XML dump) read every cycle and searched as **plain-text containment**, lower-cased -- not an XPath element lookup (`assertions/target/migration_preparation_transition.py`) | Any of: `"we're getting things ready"`, `"checking your pc"`, `"starting the migration assistant"` | None -- it's a pure signal, not clicked | `SignInFlow`: the "did sign-in/UAC actually progress" success signal, both right after clicking Sign In and right after UAC resolves |
+| UAC elevation prompt | Polls the **Windows process list** via PowerShell (`Get-Process -Name consent`), not page source and not a UI element at all -- UAC runs on the secure desktop, invisible to UI Automation (`factory/session.py`'s `is_uac_prompt_showing()`) | N/A (process existence, not text) | None -- automation can only detect it, a human must approve it manually | `SignInFlow._wait_for_uac_prompt_resolution()`: detects the prompt appearing, then waits for `consent.exe` to exit as the "resolved" signal |
+
+Two callouts worth flagging:
+- **SignInWaitingModal** ("Sign in to MyDell to continue") has an assertion + a
+  `click_cancel()` action in the codebase, but it is **not wired into any automatic flow
+  loop** -- it's used only by the manual dev script `tools/_test_cancel_and_retry_live.py`
+  to deliberately force a cancellation for testing. Its Cancel button's accessible name
+  is also explicitly flagged as unconfirmed live.
+- Several "fatal" entries above (Target's regional-settings/other-PC-disconnected checks
+  inside `TargetPairingFlow`, for instance) are marked in their own source comments as
+  **defensively added, not yet confirmed to actually occur at that exact stage** -- cheap
+  checks added because the dialog was confirmed at an adjacent stage, not because it was
+  observed there directly.

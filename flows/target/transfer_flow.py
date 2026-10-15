@@ -71,6 +71,21 @@ fatal -- raced in the inner wait loop (waiting for "We're moving your files and
 settings" after the click) alongside the close-apps dialog, since that's confirmed to
 be where it actually shows up. Per explicit user direction: clicks Rescan once (after a
 delay), then Skip to continue without those bookmarks.
+
+Bug fixed here, confirmed directly by the user via a live run (2026-10-15):
+NetworkDisconnectedDialog ("This PC isn't connected to a network.") was never wired
+into this file at all -- only SignInFlow/TargetPairingFlow handled it. The user
+deliberately disconnected the network right after "Transfer finished," during the
+previously-flat single-check wait for "Here's a summary of your migration results,"
+and it went completely undetected -- the run hung until summary_timeout expired and
+raised a generic TransferFlowError instead of reporting the real cause. Two fixes: (1)
+NetworkDisconnectedDialog is now raced in every wait loop in this file, same as every
+other recoverable dialog; (2) the summary-screen and migration-complete-screen waits,
+which used to be a single flat is_showing(timeout=X) call with no dialog racing
+whatsoever, are now proper loops racing the full set of known dialogs, same shape as
+every other wait here -- per explicit user direction, this needs to be "long polled
+from start to end" since the network can drop at any point in the sequence, not just
+during the parts that already happened to race it.
 """
 
 import time
@@ -81,6 +96,7 @@ from components.target.common_dialogs import (
     DesktopShortcutDialog,
     InstallBrowsersToMigrateBookmarksDialog,
     MigrationErrorDialog,
+    NetworkDisconnectedDialog,
     OtherPcNetworkDisconnectedDialog,
     PlugIntoAcPowerDialog,
     RegionalSettingsNotSupportedDialog,
@@ -98,6 +114,7 @@ from assertions.target import (
     migration_complete_screen as migration_complete_assertions,
     migration_error_dialog as migration_error_assertions,
     migration_summary_screen as migration_summary_assertions,
+    network_disconnected_dialog as network_disconnected_assertions,
     other_pc_network_disconnected_dialog as other_pc_network_disconnected_assertions,
     plug_into_ac_power_dialog as plug_into_ac_power_assertions,
     regional_settings_not_supported_dialog as regional_settings_not_supported_assertions,
@@ -130,6 +147,7 @@ class TargetTransferFlow:
         self.confirm_accounts_dialog = ConfirmAccountsDialog(app_session)
         self.close_apps_dialog = CloseAppsDialog(app_session)
         self.migration_error_dialog = MigrationErrorDialog(app_session)
+        self.network_disconnected_dialog = NetworkDisconnectedDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
         self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
@@ -186,6 +204,29 @@ class TargetTransferFlow:
                 "Migration failed: Your regional settings aren't supported. appeared -- "
                 "Target and Source PCs are set to different regions; clicked Close"
             )
+
+    def _check_network_disconnected(self) -> bool:
+        """Shared by every wait loop in this class, same reasoning as
+        _raise_if_migration_error(). Bug fixed here, confirmed directly by the user via
+        a live run (2026-10-15): "This PC isn't connected to a network." was never
+        wired into this file at all -- it was only handled in SignInFlow/
+        TargetPairingFlow (sign-in and pairing), so a network drop happening during or
+        after the transfer itself (confirmed live: the user deliberately disconnected
+        the network right after "Transfer finished", during the wait for "Here's a
+        summary of your migration results") went completely undetected, and the run
+        hung until summary_timeout expired and raised a generic, misleading
+        TransferFlowError instead of reporting the real cause. Not fatal --
+        NetworkDisconnectedDialog.click_check_again() already waits 30s before
+        clicking and lets the caller's loop continue, same pattern as every other
+        recoverable dialog here."""
+        if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            self.network_disconnected_dialog.click_check_again()
+            self.log.warning(
+                "This PC isn't connected to a network appeared -- waited and "
+                "clicked Check again"
+            )
+            return True
+        return False
 
     def _accept_plug_into_ac_power_if_showing(self) -> bool:
         """Shared by every wait loop in this class, same reasoning as
@@ -260,6 +301,8 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
+            if self._check_network_disconnected():
+                continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if transfer_receive_assertions.wait_until_showing(self.app_session, timeout=0.5):
@@ -283,6 +326,8 @@ class TargetTransferFlow:
                     self._raise_if_migration_error()
                     self._raise_if_other_pc_disconnected()
                     self._raise_if_regional_settings_not_supported()
+                    if self._check_network_disconnected():
+                        continue
                     if self._accept_plug_into_ac_power_if_showing():
                         continue
                     if self._accept_install_browsers_dialog_if_showing():
@@ -392,6 +437,8 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
+            if self._check_network_disconnected():
+                continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
             if not transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
@@ -403,8 +450,35 @@ class TargetTransferFlow:
             raise TransferFlowError(f"Transfer did not finish within {transfer_timeout:.0f}s")
         self.log.success("Transfer finished")
 
+        # Bug fixed here, confirmed directly by the user via a live run (2026-10-15):
+        # the waits for "Here's a summary of your migration results" and "Your
+        # migration is now complete" used to be a single flat is_showing(timeout=X)
+        # call each -- no dialog racing at all, unlike every other wait in this file.
+        # The user deliberately disconnected the network right after "Transfer
+        # finished" and NetworkDisconnectedDialog went completely undetected here,
+        # since nothing was polling for it (or any other recoverable/fatal dialog)
+        # during this specific window -- the run just hung until summary_timeout
+        # expired and raised a generic, misleading TransferFlowError. Both waits are
+        # now proper racing loops, same shape and same dialog set as every other wait
+        # in this file, so a dropped network (or any other known dialog) gets caught
+        # and handled here too, not just before/after this point.
         self.log.info("Waiting for Here's a summary of your migration results...")
-        if not migration_summary_assertions.is_showing(self.app_session, timeout=summary_timeout):
+        deadline = time.monotonic() + summary_timeout
+        summary_confirmed = False
+        while True:
+            self._raise_if_migration_error()
+            self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
+            if self._check_network_disconnected():
+                continue
+            if self._accept_plug_into_ac_power_if_showing():
+                continue
+            if migration_summary_assertions.is_showing(self.app_session, timeout=0.5):
+                summary_confirmed = True
+                break
+            if time.monotonic() >= deadline:
+                break
+        if not summary_confirmed:
             raise TransferFlowError(
                 f"Here's a summary of your migration results never appeared within "
                 f"{summary_timeout:.0f}s after the transfer finished"
@@ -413,7 +487,22 @@ class TargetTransferFlow:
         self.migration_summary_screen.click_finish()
 
         self.log.info("Waiting for Your migration is now complete...")
-        if not migration_complete_assertions.is_showing(self.app_session, timeout=complete_timeout):
+        deadline = time.monotonic() + complete_timeout
+        complete_confirmed = False
+        while True:
+            self._raise_if_migration_error()
+            self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
+            if self._check_network_disconnected():
+                continue
+            if self._accept_plug_into_ac_power_if_showing():
+                continue
+            if migration_complete_assertions.is_showing(self.app_session, timeout=0.5):
+                complete_confirmed = True
+                break
+            if time.monotonic() >= deadline:
+                break
+        if not complete_confirmed:
             raise TransferFlowError(
                 f"Your migration is now complete never appeared within {complete_timeout:.0f}s "
                 "after clicking Finish"
@@ -437,6 +526,13 @@ class TargetTransferFlow:
         deadline = time.monotonic() + home_timeout
         home_confirmed = False
         while True:
+            self._raise_if_migration_error()
+            self._raise_if_other_pc_disconnected()
+            self._raise_if_regional_settings_not_supported()
+            if self._check_network_disconnected():
+                continue
+            if self._accept_plug_into_ac_power_if_showing():
+                continue
             if self._accept_desktop_shortcut_if_showing():
                 continue
             if welcome_back_assertions.is_home_confirmed(self.app_session, timeout=0.5):

@@ -9,7 +9,10 @@ dialogs within them. The diagrams below are simplified for readability -- see
 [FULL_TRANSFER_FLOW.md](FULL_TRANSFER_FLOW.md) for a precise, one-diagram-per-method
 breakdown that maps 1:1 to the actual code (every branch, every loop, every retry),
 intended for reviewing/improving the automation itself rather than just understanding
-what it covers.
+what it covers. See `REGRESSION_AUTOMATION_COVERAGE.md` (local-only, not pushed -- see
+`.gitignore`) for how this scenario's coverage lines up against the real Zephyr Scale
+regression suite (40 cases exported from `/Migrate/Glassfloor Migrate`) -- it's the
+source for most of the "What's not covered today" detail below.
 
 A note on confidence: some paths below are **confirmed live** (the user has watched a
 real run exercise them and confirmed the result); others are **built and import-
@@ -181,8 +184,39 @@ re-reading up to 3 times before being reported).
 
 ## What's not covered today
 
-- **Data/category selection** (which files/settings get migrated) -- not automated for
-  either role; both transfer flows assume this is already decided before they start.
+Cross-checked against the real Zephyr Scale regression suite (40 cases, see
+`REGRESSION_AUTOMATION_COVERAGE.md`, local-only, not pushed, for the full case-by-case
+breakdown) -- 38 of those 40 have a concrete, describable path to
+automation; the gaps below are what's actually blocking them, not a fundamental limit of
+the approach.
+
+- **Data/category selection is actually THREE undriven screens, not one.** Reading the
+  regression suite's real test steps (not just titles) shows the app has a
+  **Compatibility check page -> Migration Info page (drive mapping, duplicate
+  detection, "Recalculate space") -> Advance migration page (custom file/setting
+  selection)** sequence between pairing and "Your files are ready to move" -- none of
+  which exist in `locators/`/`assertions/`/`components/`/`flows/` today. Both transfer
+  flows assume this is already decided before they start. This single gap is what
+  blocks 14 of the 40 regression cases (all of Migration Info & Rescan, all of Files &
+  Folders Migration, 6 of them High priority) -- capturing these three screens live is
+  the highest-leverage next step for closing regression coverage.
+- **Settings-migration verification may already be solved, just not wired to a setup
+  step.** `validation/validate_migration.py` + `validation/settings_backup.py` already
+  check *any* settings category Dell's PDF report claims to have migrated, by name,
+  against the live registry -- generic, not a hardcoded list (README names "High
+  Contrast" as a real validated example). ~11 of the regression suite's 23 "Settings
+  Migration" cases likely only need a setup script (a registry write or a scripted
+  OS-Settings change on the Source PC before a run), not new validation code.
+- **Browser-bookmark correctness is a file check, not a UI flow.** ~10 regression cases
+  (Firefox/Chrome/Internet Explorer bookmark presence/absence permutations) are better
+  verified by reading each browser's own bookmark store (`places.sqlite`, Chrome's
+  `Bookmarks` JSON, the IE Favorites folder) directly than by UI-automating three
+  browsers -- `InstallBrowsersToMigrateBookmarksDialog` only covers the "missing
+  browser" interrupt prompt, not bookmark-content correctness.
+- **Multi-PC pairing** (more than one Source PC discoverable on the same network,
+  verifying each pairs to the correct partner) -- architecturally possible with the
+  existing per-run-id Coordination Service, but needs a 3rd machine and new scenario
+  logic; today's flows assume exactly one Target + one Source.
 - **A second scenario.** The dispatch architecture supports adding one (e.g. a
   pairing-only smoke test, or a scenario with an extra pre-transfer step) without
   touching the sign-in/pairing prefix logic, but nothing has used that yet --
@@ -193,7 +227,14 @@ re-reading up to 3 times before being reported).
   automation is actually run end to end right now.
 - **Negative pairing-code path.** What the app shows for a *wrong* pairing code has no
   confirmed error text yet -- a rejected code currently just looks like "the entry
-  screen never cleared" (a generic timeout), not a distinguishable error.
+  screen never cleared" (a generic timeout), not a distinguishable error. Matches three
+  regression cases directly (expired code, invalid code, invalid code over the allowed
+  attempt count).
 - **Scroll-into-view.** `BaseComponent` has no scroll-into-view logic at all -- not yet
   a problem because no scrollable screen (e.g. a data/category list) is driven today,
-  but would need addressing the moment one is.
+  but would need addressing the moment one is (the new Advance Migration page, with a
+  file/setting picker, is very likely the first one).
+- **Genuinely manual, not just unbuilt:** one regression case (real modem hardware
+  required) has no practical automation path today; one more (an OS user-account switch
+  mid-test, outside any app's UI) is only partially automatable. See
+  `REGRESSION_AUTOMATION_COVERAGE.md` (local-only, not pushed) for both.
