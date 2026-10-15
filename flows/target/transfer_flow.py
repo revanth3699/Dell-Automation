@@ -80,12 +80,22 @@ previously-flat single-check wait for "Here's a summary of your migration result
 and it went completely undetected -- the run hung until summary_timeout expired and
 raised a generic TransferFlowError instead of reporting the real cause. Two fixes: (1)
 NetworkDisconnectedDialog is now raced in every wait loop in this file, same as every
-other recoverable dialog; (2) the summary-screen and migration-complete-screen waits,
-which used to be a single flat is_showing(timeout=X) call with no dialog racing
-whatsoever, are now proper loops racing the full set of known dialogs, same shape as
-every other wait here -- per explicit user direction, this needs to be "long polled
-from start to end" since the network can drop at any point in the sequence, not just
-during the parts that already happened to race it.
+other dialog; (2) the summary-screen and migration-complete-screen waits, which used to
+be a single flat is_showing(timeout=X) call with no dialog racing whatsoever, are now
+proper loops racing the full set of known dialogs, same shape as every other wait here
+-- per explicit user direction, this needs to be "long polled from start to end" since
+the network can drop at any point in the sequence, not just during the parts that
+already happened to race it.
+
+Bug fixed here, confirmed live via a user-supplied screenshot (2026-10-15):
+NetworkDisconnectedDialog was originally assumed recoverable via a "Check again"
+button (2026-10-09 screenshots) -- live evidence now shows the dialog's only button is
+"Cancel transfer", with no retry option, so that assumption was wrong and every click
+attempt had been silently no-oping. Confirmed directly by the user: clicking it bounces
+all the way back to the Welcome-back home screen (same reset mechanic already handled
+for PlugIntoAcPowerDialog in flows/target/authentication/sign_in_flow.py) -- still
+non-fatal, just a bigger reset than previously assumed. See
+_recover_from_network_disconnected_reset().
 """
 
 import time
@@ -205,7 +215,32 @@ class TargetTransferFlow:
                 "Target and Source PCs are set to different regions; clicked Close"
             )
 
-    def _check_network_disconnected(self) -> bool:
+    def _recover_from_network_disconnected_reset(self) -> None:
+        """"This PC isn't connected to a network." was assumed recoverable via a
+        "Check again" button (2026-10-09 screenshots) -- confirmed live (2026-10-15)
+        that button doesn't exist; the dialog's only button is "Cancel transfer", and
+        clicking it bounces all the way back to the "Welcome back" home screen (same
+        reset mechanic confirmed for PlugIntoAcPowerDialog in
+        flows/target/authentication/sign_in_flow.py). Confirmed directly by the user:
+        this can happen at ANY phase, including here (mid-transfer), and the
+        Cancel-transfer -> Get-started -> re-check cycle is expected to just repeat
+        until the network actually reconnects -- per explicit user direction, this
+        automation only clicks through the UI it's given (Target side only); it does
+        not attempt to keep Source PC in sync or re-run pairing from scratch.
+        """
+        if welcome_back_assertions.is_showing(self.app_session, timeout=2.0):
+            self.welcome_back_screen.click_get_started()
+            self.log.warning(
+                "Cancel transfer reset to the Welcome back home screen -- clicked Get "
+                "started to re-enter"
+            )
+        else:
+            self.log.warning(
+                "Cancel transfer clicked but Welcome back screen not confirmed -- "
+                "continuing to poll as normal"
+            )
+
+    def _accept_network_disconnected_if_showing(self) -> bool:
         """Shared by every wait loop in this class, same reasoning as
         _raise_if_migration_error(). Bug fixed here, confirmed directly by the user via
         a live run (2026-10-15): "This PC isn't connected to a network." was never
@@ -215,16 +250,19 @@ class TargetTransferFlow:
         the network right after "Transfer finished", during the wait for "Here's a
         summary of your migration results") went completely undetected, and the run
         hung until summary_timeout expired and raised a generic, misleading
-        TransferFlowError instead of reporting the real cause. Not fatal --
-        NetworkDisconnectedDialog.click_check_again() already waits 30s before
-        clicking and lets the caller's loop continue, same pattern as every other
-        recoverable dialog here."""
+        TransferFlowError instead of reporting the real cause.
+
+        Not fatal -- see _recover_from_network_disconnected_reset(). Clicks Cancel
+        transfer, then clicks back through Welcome-back's Get started, and lets the
+        caller's loop continue; if the network is still down, this just fires again
+        next cycle, same as every other recoverable dialog here."""
         if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-            self.network_disconnected_dialog.click_check_again()
+            self.network_disconnected_dialog.cancel_transfer()
             self.log.warning(
-                "This PC isn't connected to a network appeared -- waited and "
-                "clicked Check again"
+                "This PC isn't connected to a network. appeared -- clicked Cancel "
+                "transfer"
             )
+            self._recover_from_network_disconnected_reset()
             return True
         return False
 
@@ -301,7 +339,7 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
-            if self._check_network_disconnected():
+            if self._accept_network_disconnected_if_showing():
                 continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
@@ -326,7 +364,7 @@ class TargetTransferFlow:
                     self._raise_if_migration_error()
                     self._raise_if_other_pc_disconnected()
                     self._raise_if_regional_settings_not_supported()
-                    if self._check_network_disconnected():
+                    if self._accept_network_disconnected_if_showing():
                         continue
                     if self._accept_plug_into_ac_power_if_showing():
                         continue
@@ -437,7 +475,7 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
-            if self._check_network_disconnected():
+            if self._accept_network_disconnected_if_showing():
                 continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
@@ -469,7 +507,7 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
-            if self._check_network_disconnected():
+            if self._accept_network_disconnected_if_showing():
                 continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
@@ -493,7 +531,7 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
-            if self._check_network_disconnected():
+            if self._accept_network_disconnected_if_showing():
                 continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue
@@ -529,7 +567,7 @@ class TargetTransferFlow:
             self._raise_if_migration_error()
             self._raise_if_other_pc_disconnected()
             self._raise_if_regional_settings_not_supported()
-            if self._check_network_disconnected():
+            if self._accept_network_disconnected_if_showing():
                 continue
             if self._accept_plug_into_ac_power_if_showing():
                 continue

@@ -32,6 +32,7 @@ from components.target.common_dialogs import (
     RegionalSettingsNotSupportedDialog,
 )
 from components.target.pairing_code_entry_screen import ConfirmAccountsDialog, PairingCodeEntryScreen
+from components.target.sign_in_screen import WelcomeBackScreen
 from assertions.target import (
     confirm_accounts_dialog as confirm_accounts_assertions,
     network_disconnected_dialog as network_disconnected_assertions,
@@ -39,6 +40,7 @@ from assertions.target import (
     pairing_code_entry_screen as pairing_code_entry_assertions,
     plug_into_ac_power_dialog as plug_into_ac_power_assertions,
     regional_settings_not_supported_dialog as regional_settings_not_supported_assertions,
+    welcome_back_screen as welcome_back_assertions,
 )
 from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from factory.logger_factory import LoggerFactory
@@ -76,17 +78,37 @@ class TargetPairingFlow:
         self.plug_into_ac_power_dialog = PlugIntoAcPowerDialog(app_session)
         self.regional_settings_not_supported_dialog = RegionalSettingsNotSupportedDialog(app_session)
         self.other_pc_network_disconnected_dialog = OtherPcNetworkDisconnectedDialog(app_session)
+        self.welcome_back_screen = WelcomeBackScreen(app_session)
+
+    def _recover_from_network_disconnected_reset(self) -> None:
+        """"This PC isn't connected to a network." was assumed recoverable via a
+        "Check again" button (2026-10-09 screenshots) -- confirmed live (2026-10-15)
+        that button doesn't exist; the dialog's only button is "Cancel transfer", and
+        clicking it bounces all the way back to the "Welcome back" home screen (same
+        reset mechanic confirmed for PlugIntoAcPowerDialog in
+        flows/target/authentication/sign_in_flow.py). Confirmed directly by the user:
+        this can happen at ANY phase, including here (post-pairing), and the
+        Cancel-transfer -> Get-started -> re-check cycle is expected to just repeat
+        until the network actually reconnects -- per explicit user direction, this
+        automation only clicks through the UI it's given (Target side only); it does
+        not attempt to keep Source PC in sync or re-run pairing from scratch.
+        """
+        if welcome_back_assertions.is_showing(self.app_session, timeout=2.0):
+            self.welcome_back_screen.click_get_started()
+            self.log.warning(
+                "Cancel transfer reset to the Welcome back home screen -- clicked Get "
+                "started to re-enter"
+            )
+        else:
+            self.log.warning(
+                "Cancel transfer clicked but Welcome back screen not confirmed -- "
+                "continuing to poll as normal"
+            )
 
     def _poll_with_network_recovery(self, condition_fn, timeout: float, poll_interval: float = 1.0) -> bool:
         """Polls condition_fn() every poll_interval seconds up to timeout, transparently
-        recovering from the "This PC isn't connected to a network." dialog if it appears
-        in the meantime. Confirmed directly by the user via a live screenshot
-        (2026-10-09): this dialog can appear at ANY point during pairing (not tied to one
-        specific step) and is not a terminal error --
-        NetworkDisconnectedDialog.click_check_again() already waits 30s before clicking,
-        so this just checks is_showing() then calls that and keeps waiting on the
-        original condition. Both `_wait_for_screen()` and `_submit_code_and_confirm()`
-        below go through this, since the dialog isn't specific to either one.
+        recovering from the "This PC isn't connected to a network." dialog if it
+        appears in the meantime -- see _recover_from_network_disconnected_reset().
 
         Also races the "Plug into AC power" low-battery warning the same way (confirmed
         directly by the user via a live screenshot, 2026-10-12: can also appear at any
@@ -133,11 +155,12 @@ class TargetPairingFlow:
                     "Target and Source PCs are set to different regions; clicked Close"
                 )
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-                self.network_disconnected_dialog.click_check_again()
-                self.log.info(
-                    "This PC isn't connected to a network appeared -- waited and "
-                    "clicked Check again"
+                self.network_disconnected_dialog.cancel_transfer()
+                self.log.warning(
+                    "This PC isn't connected to a network. appeared -- clicked Cancel "
+                    "transfer"
                 )
+                self._recover_from_network_disconnected_reset()
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
                 self.plug_into_ac_power_dialog.click_cancel()

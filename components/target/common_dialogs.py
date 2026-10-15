@@ -25,7 +25,7 @@ from locators.target.install_browsers_to_migrate_bookmarks_dialog import (
     SKIP_BUTTON_LOCATOR,
 )
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR
-from locators.target.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR
+from locators.target.network_disconnected_dialog import NETWORK_DISCONNECTED_CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.other_pc_network_disconnected_dialog import CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.plug_into_ac_power_dialog import PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR
 from locators.target.regional_settings_not_supported_dialog import CLOSE_BUTTON_LOCATOR as REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR
@@ -114,34 +114,40 @@ class CloseAppsDialog:
 
 class NetworkDisconnectedDialog:
     """"This PC isn't connected to a network." -- a generic connectivity-check dialog
-    confirmed from two user-supplied screenshots (2026-10-09), each showing it layered
-    over a different underlying screen -- can appear at any point during a
-    pairing-dependent wait, not tied to one specific screen. Has a "Check again" button.
-    See assertions/target/network_disconnected_dialog.py's is_showing().
+    that can appear at any point during a pairing-dependent wait, not tied to one
+    specific screen (confirmed directly by the user, 2026-10-15: can appear in ANY
+    phase -- sign-in, pairing, or mid-transfer).
 
-    Per explicit user direction: waits CHECK_AGAIN_DELAY_SECONDS before clicking Check
-    again (rather than immediately), since the underlying network condition is likely
-    transient -- an instant re-check would probably just hit the same failure again.
+    Bug fixed here, confirmed live via a user-supplied screenshot (2026-10-15): this
+    class was originally built from two 2026-10-09 screenshots assumed to show a
+    "Check again" button -- live evidence now shows the dialog has exactly one button,
+    "Cancel transfer", and no retry option at all. That earlier locator never matched
+    anything, so every click attempt here silently no-op'd (waited, found no button,
+    returned) while callers logged a false "clicked Check again" message regardless.
 
-    Bug fixed here, confirmed live (2026-10-14): a long delay between "is the dialog
-    showing" and "click its button" creates a real race -- if whatever triggered it
-    (no network) resolves on its own during the wait, the dialog can clear itself
-    before the click fires, and the plain click() then fails outright instead of just
-    finding nothing to dismiss. click_check_again() now re-checks the button's own
-    existence (not the heading -- no assertions/ import needed here, same element this
-    class already owns) right after the delay and no-ops if it's already gone.
+    Confirmed directly by the user (2026-10-15): clicking "Cancel transfer" does NOT
+    abort the run -- same reset behavior as PlugIntoAcPowerDialog -- it bounces all the
+    way back to the "Welcome back" home screen, which needs its own blue "Get started"
+    button clicked again to re-enter. If the network is still down, the dialog just
+    reappears after re-entry -- per explicit user direction, this cycle (Cancel
+    transfer -> Get started -> re-check) is expected to repeat until the network
+    actually comes back; re-establishing it is the user's own responsibility, not
+    something this automation resolves on its own. Each flow that races this dialog
+    (SignInFlow, TargetPairingFlow, TargetTransferFlow) owns its own
+    click-Get-started-and-continue handling, same split as PlugIntoAcPowerDialog. See
+    assertions/target/network_disconnected_dialog.py's is_showing().
     """
 
-    CHECK_AGAIN_DELAY_SECONDS = 30.0
-
     def __init__(self, app_session):
-        self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
+        self._cancel_transfer_button = BaseComponent(
+            app_session, *NETWORK_DISCONNECTED_CANCEL_TRANSFER_BUTTON_LOCATOR, "NetworkDisconnectedCancelTransferButton"
+        )
 
-    def click_check_again(self) -> None:
-        time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
-        if not self._check_again_button.exists(timeout=1.0):
-            return
-        self._check_again_button.click(timeout=2.0)
+    def cancel_transfer(self, timeout: float = 2.0) -> None:
+        """Clicks "Cancel transfer". Callers check is_showing() first and only call
+        this once they already know the dialog is present -- this never re-checks
+        presence itself."""
+        self._cancel_transfer_button.click(timeout=timeout)
 
 
 class PlugIntoAcPowerDialog:

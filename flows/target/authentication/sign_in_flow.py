@@ -279,10 +279,18 @@ class SignInFlow:
         while time.monotonic() < deadline:
             self._assert_app_alive()
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-                self.network_disconnected_dialog.click_check_again()
+                self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network appeared while waiting for "
-                    "Source PC -- waited and clicked Check again"
+                    "This PC isn't connected to a network. appeared while waiting for "
+                    "Source PC -- clicked Cancel transfer"
+                )
+                self._recover_from_cancel_transfer_reset()
+                # Same bug avoided here as the Plug-into-AC-power case right below:
+                # re-runs the re-entry wait before resuming the search, rather than a
+                # plain `continue` that would falsely declare "Source found" the
+                # instant pairing-discovery resets to not-showing.
+                self._wait_for_trust_network_then_pairing_discovery(
+                    remaining=deadline - time.monotonic()
                 )
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
@@ -291,7 +299,7 @@ class SignInFlow:
                     "Plug into AC power appeared while waiting for Source PC -- "
                     "waited and clicked Cancel transfer"
                 )
-                self._recover_from_plug_into_ac_power_reset()
+                self._recover_from_cancel_transfer_reset()
                 # Bug avoided here: a plain `continue` would immediately hit the
                 # "pairing-discovery not showing -> found=True" check below and
                 # falsely declare success -- we just got bounced all the way back to
@@ -342,23 +350,28 @@ class SignInFlow:
                 "transition."
             )
 
-    def _recover_from_plug_into_ac_power_reset(self) -> None:
-        """Confirmed directly by the user via three live screenshots (2026-10-14):
-        clicking "Cancel transfer" on the "Plug into AC power" dialog does NOT cancel
-        anything -- it bounces all the way back to the "Welcome back" home screen
-        (WelcomeBackScreen), the exact same screen the already-signed-in shortcut
-        lands on. Its own blue "Get started" button must be clicked again to
-        re-enter -- which replays the same checking-your-PC/trust-network sequence
-        from scratch, re-showing the identical dialog if the battery is still low.
-        Confirmed scope (explicit user direction): this reset only happens BEFORE
-        pairing (Source isn't found/involved yet at this point), so there's no
-        cross-machine state to recover here -- plain re-entry is enough.
+    def _recover_from_cancel_transfer_reset(self) -> None:
+        """Shared reset-and-reenter helper for any dialog whose only button is "Cancel
+        transfer" and whose click bounces back to the "Welcome back" home screen
+        rather than actually aborting anything -- confirmed for PlugIntoAcPowerDialog
+        via three live screenshots (2026-10-14), and confirmed directly by the user for
+        NetworkDisconnectedDialog too (2026-10-15, can appear in ANY phase, not just
+        pre-pairing). WelcomeBackScreen's own blue "Get started" button must be clicked
+        again to re-enter -- which replays the same checking-your-PC/trust-network
+        sequence from scratch, re-showing the identical dialog if the underlying
+        condition (low battery / no network) hasn't cleared. Confirmed scope (explicit
+        user direction) for PlugIntoAcPowerDialog: that reset only happens BEFORE
+        pairing. NetworkDisconnectedDialog's version of this cycle is confirmed to
+        repeat indefinitely until the network actually reconnects -- per explicit user
+        direction, that's the user's own responsibility to fix, not something this
+        automation resolves; it only clicks through the UI it's given.
 
-        Called right after click_cancel() at every call site in this class that
-        races PlugIntoAcPowerDialog; callers still do their own `continue` afterward
-        (or, for wait_for_source_pc(), re-run the pairing-discovery wait -- see
-        there) since clicking Get started alone doesn't re-establish whichever exact
-        screen the caller was originally waiting for.
+        Called right after the dialog's own cancel/click action at every call site in
+        this class that races PlugIntoAcPowerDialog or NetworkDisconnectedDialog;
+        callers still do their own `continue` afterward (or, for wait_for_source_pc(),
+        re-run the pairing-discovery wait -- see there) since clicking Get started
+        alone doesn't re-establish whichever exact screen the caller was originally
+        waiting for.
         """
         if welcome_back_assertions.is_showing(self.app_session, timeout=2.0):
             self.welcome_back_screen.click_get_started()
@@ -909,11 +922,12 @@ class SignInFlow:
                     "clicked Close"
                 )
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
-                self.network_disconnected_dialog.click_check_again()
+                self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network appeared while waiting for "
-                    "pairing-discovery -- waited and clicked Check again"
+                    "This PC isn't connected to a network. appeared while waiting for "
+                    "pairing-discovery -- clicked Cancel transfer"
                 )
+                self._recover_from_cancel_transfer_reset()
                 continue
             if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
                 self.plug_into_ac_power_dialog.click_cancel()
@@ -921,7 +935,7 @@ class SignInFlow:
                     "Plug into AC power appeared while waiting for pairing-discovery "
                     "-- waited and clicked Cancel transfer"
                 )
-                self._recover_from_plug_into_ac_power_reset()
+                self._recover_from_cancel_transfer_reset()
                 continue
             if self._accept_desktop_shortcut_if_showing():
                 continue

@@ -64,7 +64,7 @@ can have a valid cached session even when the plain "Welcome to Dell" screen sho
 | Dialog / condition | Heading / text | Where checked | Scope | Outcome |
 |---|---|---|---|---|
 | "Add a desktop shortcut before you go" | same | Raced in essentially every wait loop in this file (confirmed: can appear at ANY point between launch and pairing-discovery, no single confirmed phase) | Whichever loop's own timeout | Non-fatal -- clicks "Create shortcut" |
-| "This PC isn't connected to a network." | same | `wait_for_source_pc()`, `_wait_for_trust_network_then_pairing_discovery()` | Plain `continue`, no deadline extension here | Non-fatal -- `NetworkDisconnectedDialog.click_check_again()` (waits 30s first) |
+| "This PC isn't connected to a network." | same | `wait_for_source_pc()`, `_wait_for_trust_network_then_pairing_discovery()` | Plain `continue` (re-runs the re-entry wait in `wait_for_source_pc()`'s case) | Non-fatal -- clicks "Cancel transfer", same Welcome-back reset as "Plug into AC power" below (corrected 2026-10-15, see below) |
 | "Plug into AC power" | same | Same two loops above | Same two loops; **see below -- this one needed more than click-and-continue** | Non-fatal, but see "Plug into AC power" special case below |
 | "Set both of your PCs to the same supported region" | same (button: "Close") | Same two loops above | Plain `continue` until the raise | **Fatal** -- clicks Close, raises `SignInError` |
 | "We couldn't sign you in" | same | Raced for the entire remaining wait after an earlier transition screen looked like success (`_LateSignInFailure`) -- not just a short fixed window, see `_wait_for_auth_outcome`/`_run_fresh_auth_with_retry` | Remaining step budget | Downgrades to a retry of the whole browser sign-in sequence, up to `MAX_AUTH_RETRIES` |
@@ -77,7 +77,7 @@ checking-your-PC/trust-network sequence from scratch, re-showing the identical d
 if the battery is still low -- a real cycle that continues until the charger is
 actually plugged in.
 - `_wait_for_trust_network_then_pairing_discovery()`: click Cancel transfer -> click
-  Get started (`_recover_from_plug_into_ac_power_reset()`) -> `continue` -- safe here
+  Get started (`_recover_from_cancel_transfer_reset()`) -> `continue` -- safe here
   because this loop's own success conditions naturally pick up once the app cycles back
   around.
 - `wait_for_source_pc()`: click Cancel transfer -> click Get started -> **re-runs**
@@ -87,6 +87,29 @@ actually plugged in.
 - Confirmed scope: this reset only happens **before pairing** (Source isn't found/
   involved yet) -- not applied to `pairing_flow.py`/`transfer_flow.py`.
 
+**"This PC isn't connected to a network." -- corrected 2026-10-15 (Target only):**
+originally built from two 2026-10-09 screenshots assumed to show a "Check again"
+button, treated as non-fatal (wait 30s, click Check again, continue). A live
+screenshot now confirms the dialog's only button is "Cancel transfer" -- there is no
+retry option -- so that locator never matched anything and every click attempt had
+been silently no-oping since it was added. Confirmed directly by the user: clicking
+"Cancel transfer" doesn't abort anything either -- same Welcome-back-reset behavior as
+"Plug into AC power" above -- EXCEPT this dialog is confirmed to appear at ANY phase,
+including post-pairing/mid-transfer, unlike "Plug into AC power"'s pre-pairing-only
+reset. `SignInFlow`'s two loops reuse the renamed, now-shared
+`_recover_from_cancel_transfer_reset()`; `TargetPairingFlow` and `TargetTransferFlow`
+each got their own equivalent `_recover_from_network_disconnected_reset()` (no
+existing Welcome-back-reset plumbing to share, since those flows run post-pairing).
+Per explicit user direction: this cycle (Cancel transfer -> Get started -> re-check) is
+expected to repeat indefinitely until the network actually reconnects -- the user's own
+responsibility to fix, not something automation resolves; it does NOT attempt to keep
+Source PC in sync or re-run pairing with Source from scratch (deliberately out of
+scope -- see `orchestration/role_runner.py`'s own note on this exact class of
+mid-scenario-restart problem being unsolved generically). Source's mirror-image dialog
+(`components/source/network_disconnected_dialog.py`, 10s wait then "Check again") is
+unconfirmed either way and was deliberately left untouched -- no live evidence yet that
+its button assumption is wrong too.
+
 ### `TargetPairingFlow` (`flows/target/pairing_flow.py`)
 
 Covers: pairing-code entry screen appearing, code accepted, and the account-mismatch
@@ -95,7 +118,7 @@ only shown when the two PCs' account names differ).
 
 | Dialog / condition | Heading / text | Where checked | Scope | Outcome |
 |---|---|---|---|---|
-| "This PC isn't connected to a network." | same | `_poll_with_network_recovery()` (shared by both of this flow's waits) | Bounded by the caller's `screen_timeout`/`advance_timeout` | Non-fatal -- `click_check_again()` (30s wait first) |
+| "This PC isn't connected to a network." | same | `_poll_with_network_recovery()` (shared by both of this flow's waits) | Bounded by the caller's `screen_timeout`/`advance_timeout` | Non-fatal -- clicks "Cancel transfer" then `_recover_from_network_disconnected_reset()` (Welcome-back/Get-started cycle, corrected 2026-10-15 -- see Target section above) |
 | "Plug into AC power" | same | Same shared poll | Same bound | Non-fatal -- `click_cancel()` (15s wait first). **Not yet given the Get-started re-entry fix** (that fix is pre-pairing-flow-scoped only, per explicit user direction) |
 | "Set both of your PCs to the same supported region" | same | Same shared poll | Bounded, then raise | **Fatal** -- clicks Close, raises `PairingError`. Not yet confirmed to actually occur at this stage (added defensively) |
 | "The other PC isn't connected to a network." | same | Same shared poll (added 2026-10-14) | Bounded, then raise | **Fatal** -- clicks "Cancel transfer", raises `PairingError`. Not yet confirmed to occur at this stage either (added defensively, cheap check) |
@@ -258,7 +281,7 @@ from the prose sections above -- if the two ever disagree, re-derive both from s
 | RestorePagesDialog (Chrome "didn't shut down correctly") | N/A -- pure button-presence check via `button_exists()` on the close icon itself | `ImageButton[@Name="Close"]` (scoped to `ImageButton` to avoid matching the browser's own window-close caption button) | One-off check, not a loop: right after attaching the sign-in browser, and again at the password -> OTP page transition |
 | Email/Password/OTP error banner | `contains(@Name,"We are unable to match the details you entered with our records")` (`assertions/target/error_banner.py`) | *(no button of its own)* | Confirmed only after deliberately submitting a wrong value via `submit_and_expect_error()` -- OTP's wrong-code-then-cancel happens every run by design; email/password's equivalent moved to `tools/adhoc/` only, not the default path (lockout risk) |
 | DesktopShortcutDialog ("Add a desktop shortcut before you go") | Exact heading | `"Create shortcut"` | Raced in essentially every loop in `SignInFlow` (confirmed to appear anywhere between launch and pairing-discovery) and in `TargetTransferFlow.wait_for_completion()`'s final home-confirmation wait |
-| NetworkDisconnectedDialog ("This PC isn't connected to a network.") | Exact heading | `"Check again"` | Raced in `wait_for_source_pc()` and the pairing-discovery wait (SignInFlow), and `TargetPairingFlow`'s shared poll. Waits 30s before clicking |
+| NetworkDisconnectedDialog ("This PC isn't connected to a network.") | Exact heading | `"Cancel transfer"` *(corrected 2026-10-15 -- no "Check again" button exists)* | Raced in `wait_for_source_pc()`, the pairing-discovery wait (SignInFlow), `TargetPairingFlow`'s shared poll, and all 6 `TargetTransferFlow` loops -- confirmed to appear at ANY phase. Clicks, resets all the way to Welcome-back same as PlugIntoAcPowerDialog below -- `"Get started"` re-enters, cycle repeats if the network is still down |
 | PlugIntoAcPowerDialog ("Plug into AC power") | Exact heading | `"Cancel transfer"` *(not `"Cancel"` -- a confirmed-live locator fix, 2026-10-14)* | Raced in `wait_for_source_pc()`, the pairing-discovery wait, `TargetPairingFlow`'s shared poll, and all 3 waits in `TargetTransferFlow`. Waits 15s, then re-checks existence before clicking. On Target, clicking it resets all the way to the Welcome-back screen -- a follow-up `"Get started"` click re-enters |
 
 #### Pairing & transfer (`flows/target/pairing_flow.py`, `flows/target/transfer_flow.py`)
@@ -266,6 +289,7 @@ from the prose sections above -- if the two ever disagree, re-derive both from s
 | Dialog | Text asserted | Button clicked | When clicked (condition) |
 |---|---|---|---|
 | OtherPcNetworkDisconnectedDialog ("The other PC isn't connected to a network.") | Exact heading | `"Cancel transfer"` | **Fatal.** Raced in `TargetPairingFlow`'s shared poll and all 3 `TargetTransferFlow` loops -- clicks, then raises immediately (Source PC lost connectivity, nothing local to retry) |
+| NetworkDisconnectedDialog ("This PC isn't connected to a network.") | Exact heading | `"Cancel transfer"` *(corrected 2026-10-15 -- no "Check again" button exists)* | Non-fatal. Raced in `TargetPairingFlow`'s shared poll and all 6 `TargetTransferFlow` loops (`start_transfer()`'s 2, `wait_for_completion()`'s 4) -- clicks, resets to Welcome-back, clicks `"Get started"` to re-enter, loop continues; cycle repeats if the network is still down |
 | RegionalSettingsNotSupportedDialog ("Set both of your PCs to the same supported region") | Exact heading *(confirmed live over an earlier, wrong assumed heading)* | `Button[@Name="Close" and not(@AutomationId="CloseButton")]` (excludes the native window-close button) | **Fatal.** Raced in the pairing-discovery wait, `TargetPairingFlow`'s shared poll, and all 3 `TargetTransferFlow` loops -- clicks Close, then raises |
 | CloseAppsDialog ("We need to close all other applications") | Exact heading | `Button[@Name="Close Application"]` | Raced in every `TargetTransferFlow` wait loop, plus one extra direct re-check right before clicking "Migrate now" |
 | ConfirmAccountsDialog ("Let's make sure we're connecting the right user accounts") | Exact heading | `Button[@Name="Continue"]` | Checked once right after the pairing code is accepted (`TargetPairingFlow`); also re-checked once during `start_transfer()`'s outer wait (one-shot, via a `confirmed_accounts` flag) -- only shown when the two PCs' account names differ |
