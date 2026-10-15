@@ -129,7 +129,9 @@ class SourceTransferFlow:
             if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue
-            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+            if check_other_pc_disconnected(
+                self.app_session, self.other_pc_network_disconnected_dialog, self.confirm_cancel_dialog, self.log
+            ):
                 deadline += time.monotonic() - iteration_start
                 continue
             if check_battery_critically_low(
@@ -243,7 +245,9 @@ class SourceTransferFlow:
             if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue
-            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+            if check_other_pc_disconnected(
+                self.app_session, self.other_pc_network_disconnected_dialog, self.confirm_cancel_dialog, self.log
+            ):
                 deadline += time.monotonic() - iteration_start
                 continue
             if check_battery_critically_low(

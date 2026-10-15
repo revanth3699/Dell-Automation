@@ -192,7 +192,9 @@ class SourcePairingFlow:
                 if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
                     deadline += time.monotonic() - iteration_start
                     continue
-                if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+                if check_other_pc_disconnected(
+                    self.app_session, self.other_pc_network_disconnected_dialog, self.confirm_cancel_dialog, self.log
+                ):
                     deadline += time.monotonic() - iteration_start
                     continue
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
@@ -247,7 +249,9 @@ class SourcePairingFlow:
             if check_welcome_screen(self.app_session, self.welcome_screen, self.log):
                 deadline += time.monotonic() - iteration_start
                 continue
-            if check_other_pc_disconnected(self.app_session, self.other_pc_network_disconnected_dialog, self.log):
+            if check_other_pc_disconnected(
+                self.app_session, self.other_pc_network_disconnected_dialog, self.confirm_cancel_dialog, self.log
+            ):
                 deadline += time.monotonic() - iteration_start
                 continue
             if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):

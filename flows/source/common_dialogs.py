@@ -24,15 +24,30 @@ from assertions.source import regional_settings_not_supported_dialog as regional
 from assertions.source import welcome_screen as welcome_screen_assertions
 
 
-def check_other_pc_disconnected(app_session, dialog, log) -> bool:
-    """"The other PC isn't connected to a network." -- means the Target PC lost its
-    network connection. Confirmed directly by the user (2026-10-14): NOT fatal on
-    Source (unlike Target's own mirror-image dialog, which IS confirmed terminal
-    there) -- just click "Cancel transfer" and let the caller's loop continue."""
+def check_other_pc_disconnected(app_session, dialog, confirm_cancel_dialog, log) -> bool:
+    """"We lost connection to your other PC." -- means the Target PC lost its network
+    connection. Confirmed directly by the user (2026-10-14): NOT fatal on Source
+    (unlike Target's own mirror-image dialog, which IS confirmed terminal there) --
+    just click "Cancel" and let the caller's loop continue. The network can drop again
+    at any point, so this is long-polled (raced continuously) across the ENTIRE Source
+    flow, not confined to one phase.
+
+    Bug fixed here, confirmed via user-supplied screenshots (2026-10-14): clicking
+    Cancel triggers ConfirmCancelDialog ("Are you sure you want to cancel?"), same as
+    BatteryCriticallyLowDialog -- dismissed immediately too (via "No, don't cancel")
+    so a follow-up confirmation never sits there until its own timeout. (The heading
+    and button text here were also corrected -- see
+    assertions/source/other_pc_network_disconnected_dialog.py's own docstring.)"""
     if not other_pc_network_disconnected_assertions.is_showing(app_session, timeout=0.1):
         return False
-    dialog.click_cancel_transfer()
-    log.warning("The other PC isn't connected to a network. appeared -- clicked Cancel transfer")
+    dialog.click_cancel()
+    log.warning("We lost connection to your other PC. appeared -- clicked Cancel")
+    if confirm_cancel_assertions.is_showing(app_session, timeout=2.0):
+        confirm_cancel_dialog.click_no_dont_cancel()
+        log.warning(
+            "Are you sure you want to cancel? appeared after dismissing the "
+            "other-PC-disconnected dialog -- clicked No, don't cancel"
+        )
     return True
 
 
