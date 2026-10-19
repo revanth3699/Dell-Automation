@@ -28,11 +28,20 @@ start_transfer() now also races the confirm dialog against "Your files are ready
 move" for its entire wait, so a late-appearing dialog gets clicked instead of silently
 blocking everything with nothing to watch for it.
 
-Also races "We need to close all other applications" (confirmed from a user-supplied
-screenshot, 2026-10-06) the same way -- shown when other apps (Control Panel, a
-browser, etc.) are open and blocking migration. Unlike the confirm-accounts dialog this
-isn't gated to "only once": it's checked and accepted every cycle, since there's no
-confirmed guarantee it can't reappear if another conflicting app gets detected later.
+Also races "Close other applications" (heading and button both corrected 2026-10-19 via
+a live run + screenshot -- see assertions/target/close_apps_dialog.py's own docstring;
+was wrongly assumed to be "We need to close all other applications" / "Close
+Application") the same way -- shown when other apps (e.g. a browser) are open and
+blocking migration. Unlike the confirm-accounts dialog this isn't gated to "only once":
+it's checked and accepted every cycle, since there's no confirmed guarantee it can't
+reappear if another conflicting app gets detected later.
+
+Bug fixed here, confirmed via a live run (2026-10-19): because the heading/button text
+were wrong, this dialog went completely undetected for an entire run -- it sat blocking
+"Migrate now" the whole RECLICK_INTERVAL_SECONDS window, the re-click then timed out
+against the now-covered button, and start_transfer() crashed with "Could not find the
+'Bring everything over for me' / 'Migrate now' button" instead of ever clicking through
+the dialog that was actually in the way.
 
 Also, per explicit user direction (2026-10-06): the moment "Your files are ready to
 move" is detected, the close-apps dialog is checked AGAIN, directly, right before
@@ -377,8 +386,8 @@ class TargetTransferFlow:
                 while close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                     self.close_apps_dialog.click_close_application()
                     self.log.success(
-                        "We need to close all other applications appeared right "
-                        "before clicking Migrate now -- clicked Close Application"
+                        "Close other applications appeared right before clicking "
+                        "Migrate now -- clicked Close applications"
                     )
                 self.log.success("Ready to transfer your files -- starting transfer (Bring everything over for me)")
                 self.transfer_receive_screen.start_transfer()
@@ -405,8 +414,8 @@ class TargetTransferFlow:
                     if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                         self.close_apps_dialog.click_close_application()
                         self.log.success(
-                            "We need to close all other applications appeared "
-                            "after clicking Migrate now -- clicked Close Application"
+                            "Close other applications appeared after clicking "
+                            "Migrate now -- clicked Close applications"
                         )
                     elif time.monotonic() - last_click >= RECLICK_INTERVAL_SECONDS:
                         # Confirmed live (2026-10-07): the first click can report
@@ -448,8 +457,7 @@ class TargetTransferFlow:
             if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                 self.close_apps_dialog.click_close_application()
                 self.log.success(
-                    "We need to close all other applications appeared -- clicked "
-                    "Close Application"
+                    "Close other applications appeared -- clicked Close applications"
                 )
         raise TransferFlowError(
             f"We're ready to transfer your files screen never appeared within {screen_timeout:.0f}s"

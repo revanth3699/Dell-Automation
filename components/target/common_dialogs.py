@@ -96,11 +96,14 @@ class SignInWaitingModal:
 
 
 class CloseAppsDialog:
-    """"We need to close all other applications" -- shown when the app detects other
-    running applications (e.g. Control Panel, a browser) blocking migration. Confirmed
-    from a user-supplied screenshot (2026-10-06). Can appear unpredictably during a long
-    wait (same as ConfirmAccountsDialog), not tied to one specific prior step. See
-    assertions/target/close_apps_dialog.py's is_showing().
+    """"Close other applications" (heading and button both corrected 2026-10-19 via a
+    live run + screenshot -- see assertions/target/close_apps_dialog.py's and
+    locators/target/close_apps_dialog.py's own docstrings; was wrongly assumed to be
+    "We need to close all other applications" / "Close Application") -- shown when the
+    app detects other running applications (e.g. a browser) blocking migration. Can
+    appear unpredictably during a long wait (same as ConfirmAccountsDialog), not tied
+    to one specific prior step. See assertions/target/close_apps_dialog.py's
+    is_showing().
     """
 
     def __init__(self, app_session):
