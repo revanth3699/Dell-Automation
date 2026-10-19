@@ -7,7 +7,7 @@ Shape (see scenarios/*.yaml and scenarios/_common.yaml):
     launch: exe                      # optional; Target launch mode (exe|mock|simulator)
     roles:
       target:
-        defaults: {step_timeout: 300, tick: 0.5}
+        defaults: {step_timeout: 300, tick: 0.5, reclick_after: 10, max_action_attempts: 4}
         setup: [open_notepad]        # names from utils/environment.py, run before launch
         teardown: [close_notepad]
         policies:
@@ -122,6 +122,8 @@ class RoleScript:
     teardown: list[str] = field(default_factory=list)
     step_timeout: float = 300.0
     tick: float = 0.5
+    reclick_after: float = 10.0        # seconds the app may stay put after an action before it is performed again
+    max_action_attempts: int = 4       # total performances of one step's action (1 + up to 3 repeats)
 
 
 @dataclass
@@ -196,6 +198,8 @@ def _parse_role(role: str, raw: Any, policy_sets: dict[str, dict[str, Any]]) -> 
         teardown=[str(s) for s in (raw.get("teardown") or [])],
         step_timeout=float(defaults.get("step_timeout", 300.0)),
         tick=float(defaults.get("tick", 0.5)),
+        reclick_after=float(defaults.get("reclick_after", 10.0)),
+        max_action_attempts=int(defaults.get("max_action_attempts", 4)),
     )
 
 

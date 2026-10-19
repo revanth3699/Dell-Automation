@@ -250,7 +250,7 @@ def build(app_session) -> Model:
         return Action(name or method.__name__, lambda ctx, args: method(), expect=expect, description=description)
 
     def announce(state_name: str) -> Action:
-        return Action("announce", lambda ctx, args: _publish(ctx, TARGET_STATE_KEY, state_name),
+        return Action("announce", lambda ctx, args: _publish(ctx, TARGET_STATE_KEY, state_name), idempotent=False,
                       description=f"publish target_state={state_name} for the Source script")
 
     def wait_for_source(ctx, args) -> None:
@@ -404,8 +404,8 @@ def build(app_session) -> Model:
         probe=pairing_code_entry_screen.is_showing,
         next=("enterCodeSuccess", "readyToMove", "enterCodeLocked", "connectOldPc"),
         actions={
-            "type_code": Action("type_code", type_code, expect=("enterCodeSuccess", "readyToMove", "enterCode")),
-            "type_wrong_code": Action("type_wrong_code", type_wrong_code, expect=("enterCode", "enterCodeLocked")),
+            "type_code": Action("type_code", type_code, expect=("enterCodeSuccess", "readyToMove", "enterCode"), idempotent=False),
+            "type_wrong_code": Action("type_wrong_code", type_wrong_code, expect=("enterCode", "enterCodeLocked"), idempotent=False),
             "cancel": click(code_entry.click_cancel, "welcome", name="cancel"),
             "announce": announce("enterCode"),
         },
@@ -536,8 +536,8 @@ def build(app_session) -> Model:
         text=TextMatch(all=(sign_in_waiting_modal.HEADING_TEXT,)),
         probe=sign_in_waiting_modal.is_showing,
         actions={
-            "sign_in": Action("sign_in", browser_sign_in, expect=("signInLaunching", "checkPrerequisites", "signInFailed", "welcome")),
-            "retry": Action("retry", sign_in_retry_link, expect=("signInLaunching", "checkPrerequisites", "signInFailed")),
+            "sign_in": Action("sign_in", browser_sign_in, expect=("signInLaunching", "checkPrerequisites", "signInFailed", "welcome"), idempotent=False),
+            "retry": Action("retry", sign_in_retry_link, expect=("signInLaunching", "checkPrerequisites", "signInFailed"), idempotent=False),
             "cancel": click(sign_in_waiting.click_cancel, "welcomeSignedOut", "welcome", name="cancel"),
         },
         description="waiting view: browser is open for the Dell sign-in",
@@ -553,7 +553,7 @@ def build(app_session) -> Model:
         text=TextMatch(any=("sign you in", "problem signing in")),
         probe=sign_in_failed_dialog.is_showing, priority=6,
         actions={
-            "retry": Action("retry", sign_in_retry, expect=("signInLaunching", "checkPrerequisites", "signInFailed")),
+            "retry": Action("retry", sign_in_retry, expect=("signInLaunching", "checkPrerequisites", "signInFailed"), idempotent=False),
             "cancel": click(sign_in_waiting.click_cancel, "welcomeSignedOut", "welcome", name="cancel"),
         },
     ))
@@ -625,7 +625,7 @@ def build(app_session) -> Model:
         "feedbackModal", "overlay",
         text=TextMatch(all=(feedback_modal.BODY_CONTAINS_TEXT,)),
         probe=feedback_modal.is_showing,
-        actions={"submit": Action("submit", submit_feedback),
+        actions={"submit": Action("submit", submit_feedback, idempotent=False),
                  "cancel": click(feedback.click_cancel, name="cancel")},
     ))
     m.add(State(

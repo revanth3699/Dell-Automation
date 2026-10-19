@@ -440,11 +440,70 @@ def test_probe_observer_sticky_order_checks_last_screen_first():
     calls, observer = Calls(), ScriptedObserver()
     model = make_model(calls, observer)
     order = []
+
+    def probe_for(sid):
+        def probe(session, timeout):
+            order.append(sid)
+            return sid == "C"
+        return probe
+
     for sid in ("A", "B", "C", "D"):
-        model.get(sid).probe = (lambda s: lambda session, timeout: order.append(s) or s == "C")(sid)
+        model.get(sid).probe = probe_for(sid)
     probe = ProbeObserver(model)
     assert probe.observe(object()).screen == "C"
     assert order == ["A", "B", "C"]          # first pass: model order until C matches
     order.clear()
     assert probe.observe(object()).screen == "C"
     assert order == ["C"]                    # second pass: C probed first, rest skipped
+
+
+# ----------------------------------------------------------------- perform-again guard
+
+def test_action_is_performed_again_when_the_app_does_not_move():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+
+    def flaky_go(ctx, args):  # the first two clicks silently do nothing
+        calls.performed.append("A.go")
+        if len(calls.performed) == 3:
+            observer.push(obs("B"))
+
+    model.get("A").actions["go"].perform = flaky_go
+    runner = run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer, step_timeout=120)
+    assert calls.performed == ["A.go", "A.go", "A.go"]
+    assert runner.history[-1].screen == "B"
+
+
+def test_perform_again_stops_at_max_attempts_then_times_out():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    model.get("A").actions["go"].perform = lambda ctx, a: calls.performed.append("A.go")
+    with pytest.raises(StepTimeout):
+        run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer, step_timeout=120)
+    assert calls.performed.count("A.go") == 4
+
+
+def test_non_idempotent_action_is_never_performed_again():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    model.get("A").actions["go"].perform = lambda ctx, a: calls.performed.append("A.go")
+    model.get("A").actions["go"].idempotent = False
+    with pytest.raises(StepTimeout):
+        run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer, step_timeout=60)
+    assert calls.performed == ["A.go"]
+
+
+def test_overlay_step_action_is_performed_again_before_its_policy_applies():
+    # at: Y do: dismiss with policy Y: fail -- a no-op click must be retried, not failed
+    calls, observer = Calls(), ScriptedObserver(obs("A", "Y"))
+    model = make_model(calls, observer)
+
+    def flaky_dismiss(ctx, args):
+        calls.performed.append("Y.dismiss")
+        if len(calls.performed) == 2:
+            observer.push(obs("A"))
+
+    model.get("Y").actions["dismiss"].perform = flaky_dismiss
+    run(model, [Step("Y", "dismiss", index=0), Step("A", done=True, index=1)], observer,
+        policies={"Y": Policy(kind="fail")}, step_timeout=120)
+    assert calls.performed == ["Y.dismiss", "Y.dismiss"]

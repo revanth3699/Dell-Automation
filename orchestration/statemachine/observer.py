@@ -69,7 +69,7 @@ def _first_match(states, predicate: Callable[[State], bool]) -> str | None:
         try:
             if predicate(state):
                 return state.id
-        except Exception as exc:  # a broken detector must not take the whole tick down
+        except Exception as exc:  # noqa: BLE001 -- a broken detector must not take the whole tick down
             logger.warning(f"detector for {state.id!r} raised {exc!r} -- treated as not showing")
     return None
 
@@ -83,7 +83,7 @@ class SnapshotObserver:
     def observe(self, session) -> Observation:
         try:
             raw = self._source_fn(session) or ""
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- any /source failure is reported as an observation error
             return Observation(None, None, None, error=f"{type(exc).__name__}: {exc}")
         snapshot = normalize(raw)
         self.last_snapshot = snapshot
@@ -136,7 +136,7 @@ class ProbeObserver:
                 close_prompt=_first_match(self.model.close_prompts(), showing),
                 via="probe",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- same: reported, never raised from a tick
             return Observation(None, None, None, error=f"{type(exc).__name__}: {exc}", via="probe")
 
 

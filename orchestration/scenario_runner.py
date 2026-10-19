@@ -34,7 +34,11 @@ from factory.session import MachineRole, Session
 from orchestration.statemachine import source_model, target_model
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model
-from orchestration.statemachine.observer import HybridObserver, ProbeObserver, SnapshotObserver
+from orchestration.statemachine.observer import (
+    HybridObserver,
+    ProbeObserver,
+    SnapshotObserver,
+)
 from orchestration.statemachine.runner import Runner, RunnerError
 from orchestration.statemachine.scenario import (
     Scenario,

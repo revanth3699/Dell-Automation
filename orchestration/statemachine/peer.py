@@ -61,6 +61,6 @@ def attach_peer_actions(model: Model, own_key: str, peer_key: str) -> None:
         wait_for_peer_state(ctx, str(args.get("key", peer_key)), str(args["state"]), float(args.get("timeout", 600.0)))
 
     for state in model.states.values():
-        state.actions.setdefault("publish", Action("publish", do_publish, description=f"publish {own_key}=<value>"))
-        state.actions.setdefault("wait_for_peer", Action("wait_for_peer", do_wait,
+        state.actions.setdefault("publish", Action("publish", do_publish, description=f"publish {own_key}=<value>", idempotent=False))
+        state.actions.setdefault("wait_for_peer", Action("wait_for_peer", do_wait, idempotent=False,
                                                          description=f"wait until {peer_key}=<state>"))

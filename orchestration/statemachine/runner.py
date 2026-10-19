@@ -99,6 +99,9 @@ class Runner:
         self._previous_target: str | None = None
         self._previous_action_expect: tuple = ()
         self._last_action_at: float | None = None
+        self._previous_action = None          # the last model Action performed (None after a wait/env step)
+        self._previous_action_args: dict = {}
+        self._action_attempts = 0
 
     # ------------------------------------------------------------------ public
 
@@ -144,6 +147,10 @@ class Runner:
                 self.log.info(f"{step.label()} skipped -- {obs.top()} (a later step's target) is already showing")
                 return
 
+            if self._maybe_perform_again(obs):
+                self._sleep(self.script.tick)
+                continue
+
             interrupter = obs.close_prompt or obs.overlay
             if interrupter is not None:
                 if not self._settling(interrupter):
@@ -168,12 +175,47 @@ class Runner:
                 raise StepTimeout(f"{'/'.join(step.at)} did not appear within {timeout:.0f}s", obs, step)
             self._sleep(self.script.tick)
 
+    def _maybe_perform_again(self, obs: Observation) -> bool:
+        """The WebView2 "click reported success but nothing happened" guard (CLAUDE.md
+        Gotchas): if the state we last acted on is still showing reclick_after seconds
+        later, perform the same action again, up to max_action_attempts in total. Only
+        for idempotent actions (plain clicks); sign-in, code entry, peer publishes and
+        env steps are never repeated this way."""
+        action = self._previous_action
+        if action is None or not action.idempotent or obs.top() != self._previous_target:
+            return False
+        if self._last_action_at is None or (self._clock() - self._last_action_at) < self.script.reclick_after:
+            return False
+        if self._action_attempts >= self.script.max_action_attempts:
+            return False
+        self._action_attempts += 1
+        self.log.warning(
+            f"{self._previous_target} still showing {self.script.reclick_after:.0f}s after {action.name} -- "
+            f"performing it again (attempt {self._action_attempts}/{self.script.max_action_attempts})"
+        )
+        start = self._clock()
+        try:
+            action.perform(self.ctx, self._previous_action_args)
+        except Exception as exc:
+            self._record(self._previous_target, f"{action.name} (retry)", "fail", (self._clock() - start) * 1000,
+                         error=str(exc))
+            raise RunnerError(f"{action.name} on {self._previous_target} failed on retry: {exc}", obs) from exc
+        self._record(self._previous_target, f"{action.name} (retry {self._action_attempts})", "pass",
+                     (self._clock() - start) * 1000)
+        self._last_action_at = self._clock()
+        return True
+
     def _settling(self, state_id: str) -> bool:
         """True while the state we just acted on may still be rendered (see
         DEFAULT_SETTLE_SECONDS) -- it is not an interruption yet."""
         if self._last_action_at is None or state_id != self._previous_target:
             return False
-        return (self._clock() - self._last_action_at) < self.settle_seconds
+        if (self._clock() - self._last_action_at) < self.settle_seconds:
+            return True
+        # still the state we just acted on, and a re-performance is still allowed:
+        # give _maybe_perform_again its turn before any policy judges the overlay
+        action = self._previous_action
+        return action is not None and action.idempotent and self._action_attempts < self.script.max_action_attempts
 
     def _at_target(self, obs: Observation, step: Step) -> str | None:
         """The step target that is showing right now, or None."""
@@ -206,6 +248,8 @@ class Runner:
         if step.wait_before:
             self.log.info(f"{step.label()} reached -- pausing {step.wait_before:.0f}s before acting")
             self._sleep(step.wait_before)
+        self._previous_action = None
+        self._action_attempts = 0
         if step.is_wait:
             self.log.success(f"{step.label()} reached")
             self._previous_action_expect = tuple(step.expect) if step.expect else ()
@@ -218,6 +262,7 @@ class Runner:
             action = self.model.get(matched).action(step.do)
             name, perform, default_expect = action.name, action.perform, action.expect
             perform_args = (self.ctx, step.args)
+            self._previous_action, self._previous_action_args, self._action_attempts = action, step.args, 1
 
         self.log.info(f"{step.label()} -- performing {name}" + (f" {step.args}" if step.args else ""))
         start = self._clock()
@@ -289,7 +334,7 @@ class Runner:
         try:
             text = reader.perform(self.ctx, {})
             return f": {text}" if text else ""
-        except Exception:
+        except Exception:  # noqa: BLE001 -- describing a failure must not replace it
             return ""
 
     # ------------------------------------------------------------------ bookkeeping
@@ -314,10 +359,10 @@ class Runner:
         if screenshot or status == "fail":
             try:
                 shot, shot_err = self.reporter.capture_screenshot(self.ctx.app, component, action)
-            except Exception as exc:  # evidence capture never masks the real result
+            except Exception as exc:  # noqa: BLE001 -- evidence capture never masks the real result
                 shot_err = str(exc)
         try:
             self.reporter.record(component=component, action=action, status=status, duration_ms=duration_ms,
                                  error=error, screenshot=shot, screenshot_error=shot_err)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 -- reporting problems are logged, never fatal
             self.log.warning(f"could not record {component}/{action}: {exc}")

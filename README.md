@@ -351,6 +351,12 @@ fails or recognises nothing for a few ticks -- confirmed necessary live (2026-10
 WinAppDriver answered `/source` with HTTP 400 on the code-entry screen after serving the
 earlier screens fine. `--observer snapshot` / `probe` force one method only.
 
+If the app has not moved 10 s after a step's action, the runner performs the action
+again, up to 4 times in total (`defaults: {reclick_after: 10, max_action_attempts: 4}`
+per role) -- the guard for WebView2 clicks that report success without doing anything.
+Browser sign-in, pairing-code entry, peer publishes and environment steps are exempt;
+they carry their own handling.
+
 Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
 documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,

@@ -62,9 +62,7 @@ class TextMatch:
             return False
         if not all(t in normalized_snapshot for t in self.all):
             return False
-        if self.any and not any(t in normalized_snapshot for t in self.any):
-            return False
-        return True
+        return not self.any or any(t in normalized_snapshot for t in self.any)
 
 
 @dataclass
@@ -77,6 +75,11 @@ class Action:
     perform: Callable[..., Any]
     expect: tuple[str, ...] = ()
     description: str = ""
+    # True (plain clicks): the runner may perform it again if the app has not moved
+    # after a while -- the WebView2 "click reported success but nothing happened" case.
+    # False (browser sign-in, typing a code, publishing to the peer): never repeated
+    # blindly; those carry their own retry logic where it makes sense.
+    idempotent: bool = True
 
 
 @dataclass

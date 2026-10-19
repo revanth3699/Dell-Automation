@@ -108,7 +108,7 @@ def build(app_session) -> Model:
         raise TimeoutError(f"Target did not pair within {timeout:.0f}s of publishing the code")
 
     def announce(state_name: str):
-        return Action("announce", lambda ctx, args: _publish_state(ctx, state_name), expect=(),
+        return Action("announce", lambda ctx, args: _publish_state(ctx, state_name), expect=(), idempotent=False,
                       description=f"publish source_state={state_name} for the Target script")
 
     m = Model(role="source")
@@ -124,7 +124,7 @@ def build(app_session) -> Model:
     m.add(State("pairingCode", "screen", "peer", text=TextMatch(all=(pairing_code_screen.HEADING_TEXT,)),
                 probe=pairing_code_screen.is_showing, next=("linkedSuccess", "gatheringFiles", "readyToMigrate"),
                 actions={
-                    "publish_code": Action("publish_code", publish_code, expect=("linkedSuccess", "readyToMigrate")),
+                    "publish_code": Action("publish_code", publish_code, expect=("linkedSuccess", "readyToMigrate"), idempotent=False),
                     "cancel": Action("cancel", lambda ctx, args: code_screen.cancel(), expect=("welcome",)),
                 }))
     m.add(State("linkedSuccess", "screen", "waiting",
