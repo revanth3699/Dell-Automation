@@ -122,14 +122,23 @@ def build(app_session) -> Model:
                 probe=searching_screen.is_showing, next=("pairingCode",),
                 actions={"announce": announce("searching")}))
     m.add(State("pairingCode", "screen", "peer", text=TextMatch(all=(pairing_code_screen.HEADING_TEXT,)),
-                probe=pairing_code_screen.is_showing, next=("linkedSuccess", "readyToMigrate"),
+                probe=pairing_code_screen.is_showing, next=("linkedSuccess", "gatheringFiles", "readyToMigrate"),
                 actions={
                     "publish_code": Action("publish_code", publish_code, expect=("linkedSuccess", "readyToMigrate")),
                     "cancel": Action("cancel", lambda ctx, args: code_screen.cancel(), expect=("welcome",)),
                 }))
     m.add(State("linkedSuccess", "screen", "waiting",
                 text=TextMatch(all=(transfer_progress_screen.LINKED_SUCCESS_HEADING_TEXT,)),
-                probe=transfer_progress_screen.is_linked_success, next=("readyToMigrate", "migrating")))
+                probe=transfer_progress_screen.is_linked_success,
+                next=("gatheringFiles", "readyToMigrate", "migrating")))
+    # Views/SearchingFileAndSettingPage.xaml, resx Migrate_SearchFilesAndSettings_Header
+    # ("We’re searching this PC for your files and settings.", curly apostrophe). Seen live
+    # 2026-10-19 as a ~30 s gap of unrecognised snapshots between linkedSuccess and
+    # readyToMigrate; no assertions module yet, so snapshot-only.
+    m.add(State("gatheringFiles", "screen", "waiting",
+                text=TextMatch(all=("searching this pc for your files and settings",)),
+                next=("readyToMigrate", "migrating"),
+                description="Source is gathering its files/settings for the Target's choose screen"))
     m.add(State("readyToMigrate", "screen", "peer",
                 text=TextMatch(all=(transfer_progress_screen.READY_TO_MIGRATE_HEADING_TEXT,)),
                 probe=transfer_progress_screen.is_ready_to_migrate,

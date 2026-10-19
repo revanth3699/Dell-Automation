@@ -83,9 +83,10 @@ roles:
       - at: migrating
         do: announce
         timeout: 1800
-      - at: migrationComplete
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: announce
         timeout: 7200
-      - at: migrationComplete
+        note: any ending (confirmed live 2026-10-19 -- a partial migration lands on migrationPartialSummary)
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: close
         done: true
