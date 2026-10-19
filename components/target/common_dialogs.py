@@ -17,21 +17,35 @@ no action to keep here.
 
 import time
 
+from assertions.target import migration_error_dialog as _migration_error_assertions
 from components.base_component import BaseComponent
-from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR
-from locators.target.desktop_shortcut_dialog import CREATE_SHORTCUT_BUTTON_LOCATOR
+from locators.target.close_apps_dialog import (
+    CANCEL_TRANSFER_BUTTON_LOCATOR as CLOSE_APPS_CANCEL_TRANSFER_BUTTON_LOCATOR,
+    CHECK_AGAIN_BUTTON_LOCATOR as CLOSE_APPS_CHECK_AGAIN_BUTTON_LOCATOR,
+    CLOSE_APPLICATION_BUTTON_LOCATOR,
+    RETRY_BUTTON_LOCATOR as CLOSE_APPS_RETRY_BUTTON_LOCATOR,
+)
+from locators.target.desktop_shortcut_dialog import CREATE_SHORTCUT_BUTTON_LOCATOR, NO_THANKS_BUTTON_LOCATOR
 from locators.target.install_browsers_to_migrate_bookmarks_dialog import (
     RESUME_BUTTON_LOCATOR,
     SKIP_BUTTON_LOCATOR,
 )
-from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR
+from locators.target.migration_error_dialog import (
+    CANCEL_TRANSFER_BUTTON_LOCATOR as MIGRATION_ERROR_CANCEL_TRANSFER_BUTTON_LOCATOR,
+    CLOSE_BUTTON_LOCATOR as MIGRATION_ERROR_CLOSE_BUTTON_LOCATOR,
+    MIGRATION_ERROR_BODY_LOCATOR,
+    OK_BUTTON_LOCATOR as MIGRATION_ERROR_OK_BUTTON_LOCATOR,
+)
 from locators.target.network_disconnected_dialog import NETWORK_DISCONNECTED_CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.other_pc_network_disconnected_dialog import CANCEL_TRANSFER_BUTTON_LOCATOR
 from locators.target.plug_into_ac_power_dialog import PLUG_INTO_AC_POWER_CANCEL_BUTTON_LOCATOR
 from locators.target.regional_settings_not_supported_dialog import CLOSE_BUTTON_LOCATOR as REGIONAL_SETTINGS_CLOSE_BUTTON_LOCATOR
 from locators.target.sign_in_failed_dialog import SIGN_IN_FAILED_RETRY_BUTTON_LOCATOR
-from locators.target.sign_in_waiting_modal import SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
-from locators.target.trust_network_dialog import TRUST_NETWORK_BUTTON_LOCATOR
+from locators.target.sign_in_waiting_modal import RETRY_LINK_LOCATOR, SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR
+from locators.target.trust_network_dialog import (
+    CANCEL_BUTTON_LOCATOR as TRUST_NETWORK_CANCEL_BUTTON_LOCATOR,
+    TRUST_NETWORK_BUTTON_LOCATOR,
+)
 
 
 class TrustNetworkDialog:
@@ -41,6 +55,8 @@ class TrustNetworkDialog:
 
     def __init__(self, app_session):
         self._button = BaseComponent(app_session, *TRUST_NETWORK_BUTTON_LOCATOR, "TrustNetworkButton")
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._cancel_button = BaseComponent(app_session, *TRUST_NETWORK_CANCEL_BUTTON_LOCATOR, "TrustNetworkCancelButton")
 
     def click_trust_network(self) -> None:
         # Confirmed live (2026-10-07): click() previously re-found the button with its
@@ -48,6 +64,12 @@ class TrustNetworkDialog:
         # confirmed it's there -- if that fresh lookup is at all flaky, the click alone
         # could take many seconds. Short timeout here since presence was just confirmed.
         self._button.click(timeout=2.0)
+
+    def click_cancel(self) -> None:
+        """Clicks the dialog's secondary Cancel button (TrustNetworkModel.tsx,
+        Channels.trustNetworkCancel). Added 2026-10-19 (verified against rebit source,
+        not live)."""
+        self._cancel_button.click(timeout=2.0)
 
 
 class SignInFailedDialog:
@@ -90,9 +112,17 @@ class SignInWaitingModal:
         self._cancel_button = BaseComponent(
             app_session, *SIGN_IN_WAITING_CANCEL_BUTTON_LOCATOR, "SignInWaitingCancelButton"
         )
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._retry_link = BaseComponent(app_session, *RETRY_LINK_LOCATOR, "SignInWaitingRetryLink")
 
     def click_cancel(self) -> None:
         self._cancel_button.click()
+
+    def click_retry(self) -> None:
+        """Clicks the inline Retry link in the waiting view (SignInModal.tsx,
+        SignIn_RetryLink), which re-opens the browser sign-in. Added 2026-10-19
+        (verified against rebit source, not live)."""
+        self._retry_link.click()
 
 
 class CloseAppsDialog:
@@ -107,9 +137,34 @@ class CloseAppsDialog:
         self._close_application_button = BaseComponent(
             app_session, *CLOSE_APPLICATION_BUTTON_LOCATOR, "CloseApplicationButton"
         )
+        # Added 2026-10-19 (verified against rebit source, not live) -- see
+        # locators/target/close_apps_dialog.py for which state shows which buttons.
+        self._retry_button = BaseComponent(app_session, *CLOSE_APPS_RETRY_BUTTON_LOCATOR, "CloseAppsRetryButton")
+        self._check_again_button = BaseComponent(
+            app_session, *CLOSE_APPS_CHECK_AGAIN_BUTTON_LOCATOR, "CloseAppsCheckAgainButton"
+        )
+        self._cancel_transfer_button = BaseComponent(
+            app_session, *CLOSE_APPS_CANCEL_TRANSFER_BUTTON_LOCATOR, "CloseAppsCancelTransferButton"
+        )
 
     def click_close_application(self) -> None:
         self._close_application_button.click()
+
+    def click_retry(self) -> None:
+        """Failed-attempt state only (Close all other applications): the secondary Retry
+        button, which re-runs the close. Callers check is_failed_attempt_showing() first.
+        Added 2026-10-19 (verified against rebit source, not live)."""
+        self._retry_button.click()
+
+    def click_check_again(self) -> None:
+        """Failed-attempt state only: the primary Check again button, which re-scans for
+        running applications. Added 2026-10-19 (verified against rebit source, not live)."""
+        self._check_again_button.click()
+
+    def click_cancel_transfer(self) -> None:
+        """First-attempt state only (Close other applications): the secondary Cancel
+        transfer button. Added 2026-10-19 (verified against rebit source, not live)."""
+        self._cancel_transfer_button.click()
 
 
 class NetworkDisconnectedDialog:
@@ -227,9 +282,17 @@ class DesktopShortcutDialog:
         self._create_shortcut_button = BaseComponent(
             app_session, *CREATE_SHORTCUT_BUTTON_LOCATOR, "CreateShortcutButton"
         )
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._no_thanks_button = BaseComponent(app_session, *NO_THANKS_BUTTON_LOCATOR, "NoThanksButton")
 
     def click_create_shortcut(self) -> None:
         self._create_shortcut_button.click()
+
+    def click_no_thanks(self) -> None:
+        """Clicks the secondary No, thanks button (DesktopShortcutModal.tsx). The default
+        flow still clicks Create shortcut per user direction; this exists for scenarios
+        that need to decline. Added 2026-10-19 (verified against rebit source, not live)."""
+        self._no_thanks_button.click()
 
 
 class RegionalSettingsNotSupportedDialog:
@@ -301,6 +364,28 @@ class MigrationErrorDialog:
 
     def __init__(self, app_session):
         self._body = BaseComponent(app_session, *MIGRATION_ERROR_BODY_LOCATOR, "MigrationErrorBody")
+        # Added 2026-10-19 (verified against rebit source, not live): FailureModal.tsx has
+        # one footer button whose label depends on the variant (see
+        # locators/target/migration_error_dialog.py), plus per-variant heading readers.
+        self._close_button = BaseComponent(app_session, *MIGRATION_ERROR_CLOSE_BUTTON_LOCATOR, "MigrationErrorCloseButton")
+        self._ok_button = BaseComponent(app_session, *MIGRATION_ERROR_OK_BUTTON_LOCATOR, "MigrationErrorOkButton")
+        self._cancel_transfer_button = BaseComponent(
+            app_session, *MIGRATION_ERROR_CANCEL_TRANSFER_BUTTON_LOCATOR, "MigrationErrorCancelTransferButton"
+        )
+        self._headings = [
+            BaseComponent(
+                app_session, *_migration_error_assertions.MIGRATION_ERROR_HEADING_LOCATOR, "MigrationErrorHeading"
+            ),
+            BaseComponent(
+                app_session,
+                *_migration_error_assertions.ERASE_STARTED_ON_OLD_PC_HEADING_LOCATOR,
+                "EraseStartedOnOldPcHeading",
+            ),
+            BaseComponent(app_session, *_migration_error_assertions.UPDATE_DDA_HEADING_LOCATOR, "UpdateDdaHeading"),
+            BaseComponent(
+                app_session, *_migration_error_assertions.UPDATE_SUPPORTASSIST_HEADING_LOCATOR, "UpdateSupportAssistHeading"
+            ),
+        ]
 
     def read_error_text(self, timeout: float = 2.0) -> str:
         """Best-effort: returns the body text for a clearer failure message. Never
@@ -310,3 +395,33 @@ class MigrationErrorDialog:
             return self._body.get_text(timeout=timeout)
         except Exception:
             return "(error text unavailable)"
+
+    def read_title(self, timeout: float = 0.5) -> str:
+        """Returns the heading text of whichever failure variant is showing (generic
+        Something went wrong, Erase is running on your old PC, or either Update ... to
+        continue), trying each heading locator with a short timeout; returns an empty
+        string if none is found. Never raises -- diagnostics only. Added 2026-10-19
+        (verified against rebit source, not live)."""
+        for heading in self._headings:
+            try:
+                if heading.exists(timeout=timeout):
+                    return heading.get_text(timeout=timeout)
+            except Exception:
+                continue
+        return ""
+
+    def click_close(self, timeout: float = 2.0) -> None:
+        """Generic dead-end variant's Close button (ends the app via AppShutdown).
+        Added 2026-10-19 (verified against rebit source, not live)."""
+        self._close_button.click(timeout=timeout)
+
+    def click_ok(self, timeout: float = 2.0) -> None:
+        """Dismissible variant's Ok button (Erase is running on your old PC) -- just
+        hides the overlay. Added 2026-10-19 (verified against rebit source, not live)."""
+        self._ok_button.click(timeout=timeout)
+
+    def click_cancel_transfer(self, timeout: float = 2.0) -> None:
+        """Key-driven variant's Cancel transfer button (Update Dell Data Assistant /
+        SupportAssist to continue). Added 2026-10-19 (verified against rebit source, not
+        live)."""
+        self._cancel_transfer_button.click(timeout=timeout)

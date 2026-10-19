@@ -14,3 +14,17 @@ Migration.Stop, then return to WelcomePage), so it is the way back to the home s
 
 DOWNLOAD_PDF_LINK_LOCATOR = ("xpath", '//*[@Name="download a PDF"]')
 TRANSFER_MORE_DATA_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Transfer more data"]')
+
+# Added 2026-10-19 (verified against rebit source, not live). MigrationDoneView.tsx renders
+# four tiles as <button className=tile> (IconBadge + label span): Buttons_ViewSummary ("View
+# transfer summary"), MigrationDone_TellUsHowWeDid ("Tell us how we did"),
+# MigrationDone_MigrateMoreData (TRANSFER_MORE_DATA_BUTTON_LOCATOR above) and
+# MigrationDone_LearnAboutErase ("Erase your old PC"). contains() rather than an exact match
+# because the tile's accessible name is computed from its whole content and the icon badge
+# may contribute text -- unverified live. The top-right StageCard cancel link is relabelled
+# Buttons_Close ("Close", Channels.migrationDoneClose, no x icon); it excludes the native
+# title-bar CloseButton, same as locators/target/regional_settings_not_supported_dialog.py.
+VIEW_SUMMARY_BUTTON_LOCATOR = ("xpath", '//Button[contains(@Name, "View transfer summary")]')
+TELL_US_HOW_WE_DID_BUTTON_LOCATOR = ("xpath", '//Button[contains(@Name, "Tell us how we did")]')
+ERASE_OLD_PC_BUTTON_LOCATOR = ("xpath", '//Button[contains(@Name, "Erase your old PC")]')
+CLOSE_LINK_LOCATOR = ("xpath", '//*[@Name="Close" and not(@AutomationId="CloseButton")]')

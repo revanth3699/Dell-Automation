@@ -4,3 +4,13 @@ assertions/target/close_apps_dialog.py instead.
 """
 
 CLOSE_APPLICATION_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Close applications"]')
+
+# Added 2026-10-19 (verified against rebit source, not live). CloseApplicationsModel.tsx:
+# first-attempt footer is Cancel transfer (Buttons_CancelTransfer, secondary) + Close
+# applications (primary); after a failed close (hasFailedAttempt) the footer becomes
+# Check again (Buttons_CheckAgain, primary) + Retry (secondary -- the C# constant
+# CloseApplicationsPageViewModel.RetryPrompt = "Retry", sent as state.primaryButtonText).
+# All three render through PopUpModelFooter's DDSButton, hence //Button.
+RETRY_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Retry"]')
+CHECK_AGAIN_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Check again"]')
+CANCEL_TRANSFER_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Cancel transfer"]')

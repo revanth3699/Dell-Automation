@@ -38,6 +38,7 @@ coordination_service/state.json
 !/DIALOG_HANDLING.md
 !/TEST_SCENARIOS.md
 !/FULL_TRANSFER_FLOW.md
+!/TARGET_STATE_MACHINE.md
 
 # Dev/debug scripts used only for building this framework locally (manual, piecemeal
 # testing of one flow/component at a time) -- never meant to be pushed. Kept on disk,

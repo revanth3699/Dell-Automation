@@ -15,12 +15,19 @@ class now holds only the click_finish() action.
 """
 
 from components.base_component import BaseComponent
-from locators.target.migration_summary_screen import FINISH_LINK_LOCATOR
+from locators.target.migration_summary_screen import FINISH_LINK_LOCATOR, VIEW_DETAILS_LINK_LOCATOR
 
 
 class MigrationSummaryScreen:
     def __init__(self, app_session):
         self._finish_link = BaseComponent(app_session, *FINISH_LINK_LOCATOR, "FinishLink")
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._view_details_link = BaseComponent(app_session, *VIEW_DETAILS_LINK_LOCATOR, "ViewDetailsLink")
 
     def click_finish(self) -> None:
         self._finish_link.click()
+
+    def click_view_the_details(self) -> None:
+        """Clicks the subtitle's View the details link (ResultsSummaryView.tsx,
+        ResultsSummary_Here). Added 2026-10-19 (verified against rebit source, not live)."""
+        self._view_details_link.click()
