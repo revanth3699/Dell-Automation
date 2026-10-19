@@ -7,7 +7,7 @@ Shape (see scenarios/*.yaml and scenarios/_common.yaml):
     launch: exe                      # optional; Target launch mode (exe|mock|simulator)
     roles:
       target:
-        defaults: {step_timeout: 300, tick: 0.5, reclick_after: 10, max_action_attempts: 4}
+        defaults: {step_timeout: 300, tick: 0.5, reclick_after: 10, max_action_attempts: 4, max_rewinds: 2}
         setup: [open_notepad]        # names from utils/environment.py, run before launch
         teardown: [close_notepad]
         policies:
@@ -124,6 +124,7 @@ class RoleScript:
     tick: float = 0.5
     reclick_after: float = 10.0        # seconds the app may stay put after an action before it is performed again
     max_action_attempts: int = 4       # total performances of one step's action (1 + up to 3 repeats)
+    max_rewinds: int = 2               # times the script may resume from an earlier step after the app went back
 
 
 @dataclass
@@ -200,6 +201,7 @@ def _parse_role(role: str, raw: Any, policy_sets: dict[str, dict[str, Any]]) -> 
         tick=float(defaults.get("tick", 0.5)),
         reclick_after=float(defaults.get("reclick_after", 10.0)),
         max_action_attempts=int(defaults.get("max_action_attempts", 4)),
+        max_rewinds=int(defaults.get("max_rewinds", 2)),
     )
 
 

@@ -550,3 +550,52 @@ def test_two_failed_policy_clicks_in_a_row_fail_the_run():
         run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer,
             policies={"Y": Policy(kind="click", action="dismiss")}, step_timeout=60)
     assert "failed 2 times" in str(exc.value) and calls.performed.count("Y.dismiss") == 2
+
+
+# ----------------------------------------------------------------- rewind: resume from an earlier step
+
+def _bouncing_model(calls, observer, bounce_times):
+    """A -go-> B -> C -finish-> D normally; the first `bounce_times` finishes throw the app
+    all the way back to A (two steps back -- further than the re-click guard reaches)."""
+    model = make_model(calls, observer)
+    model.get("A").actions["go"].perform = lambda ctx, a: (calls.performed.append("A.go"), observer.push(obs("B"), obs("C")))
+    left = {"n": bounce_times}
+
+    def finish(ctx, args):
+        calls.performed.append("C.finish")
+        if left["n"] > 0:
+            left["n"] -= 1
+            observer.push(obs("A"))
+        else:
+            observer.push(obs("D"))
+
+    model.get("C").actions["finish"].perform = finish
+    model.get("C").actions["finish"].expect = ("D",)
+    return model
+
+
+def test_app_going_back_to_an_earlier_screen_resumes_from_that_step():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = _bouncing_model(calls, observer, bounce_times=1)
+    runner = run(model, [Step("A", "go", index=0), Step("C", "finish", index=1), Step("D", done=True, index=2)], observer)
+    assert calls.performed == ["A.go", "C.finish", "A.go", "C.finish"]
+    assert [o.screen for o in runner.history] == ["A", "B", "C", "A", "B", "C", "D"]
+
+
+def test_rewind_is_capped_and_then_the_original_error_surfaces():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = _bouncing_model(calls, observer, bounce_times=99)
+    script = RoleScript(role="test", steps=[Step("A", "go", index=0), Step("C", "finish", index=1),
+                                            Step("D", done=True, index=2)], step_timeout=30, tick=1.0, max_rewinds=2)
+    clock = FakeClock()
+    with pytest.raises(UnexpectedState):
+        Runner(model, script, make_ctx(), observer, sleep=clock.sleep, clock=clock).run()
+    assert calls.performed.count("C.finish") == 3        # 1 + 2 rewinds
+
+
+def test_no_rewind_to_a_screen_no_earlier_step_knows():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    observer.push(obs("D"))                               # D is nobody's target
+    with pytest.raises(UnexpectedState):
+        run(model, [Step("A", "go", index=0), Step("C", done=True, index=1)], observer)

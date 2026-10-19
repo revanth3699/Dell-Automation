@@ -112,12 +112,43 @@ class Runner:
     def run(self) -> None:
         steps = self.script.steps
         self.log.info(f"Runner starting: {len(steps)} steps, role={self.ctx.role}")
-        for i, step in enumerate(steps):
-            self._run_step(step, steps[i + 1:])
+        i, rewinds = 0, 0
+        while i < len(steps):
+            step = steps[i]
+            try:
+                self._run_step(step, steps[i + 1:])
+            except UnexpectedState as exc:
+                # Per explicit user direction (2026-10-20): when a policy click or an app
+                # reset sends the app BACK to a screen an earlier step was written for,
+                # resume from that step instead of failing -- "take off from where you left".
+                back_to = self._rewind_index(exc.observation, i)
+                if back_to is None or rewinds >= self.script.max_rewinds:
+                    raise
+                rewinds += 1
+                self.log.warning(
+                    f"app went back to {exc.observation.top()} -- resuming from {steps[back_to].label()} "
+                    f"(rewind {rewinds}/{self.script.max_rewinds})"
+                )
+                self._record("StateMachine", f"rewind to {steps[back_to].label()}", "pass", 0.0, screenshot=True)
+                self._previous_target, self._previous_action, self._previous_action_expect = None, None, ()
+                self._tracking.clear()
+                i = back_to
+                continue
             if step.done:
                 self.log.success(f"Scenario script complete at {'/'.join(step.at)}")
                 return
+            i += 1
         self.log.success("Scenario script complete")
+
+    def _rewind_index(self, observation: Observation | None, current: int) -> int | None:
+        """The latest earlier step whose target is the screen the app is on now."""
+        if observation is None:
+            return None
+        where = observation.top()
+        for j in range(current - 1, -1, -1):
+            if where in self.script.steps[j].at:
+                return j
+        return None
 
     # ------------------------------------------------------------------ one step
 

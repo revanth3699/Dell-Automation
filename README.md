@@ -360,6 +360,15 @@ per role) -- the guard for WebView2 clicks that report success without doing any
 Browser sign-in, pairing-code entry, peer publishes and environment steps are exempt;
 they carry their own handling.
 
+If something sends the app **back** to a screen an earlier step was written for (a
+"Cancel transfer" policy landing on Welcome, a session reset after a network blip), the
+runner resumes from that earlier step instead of failing, re-running the steps in
+between -- up to `max_rewinds` (default 2) per role; `0` disables it. A screen that no
+earlier step knows is still a failure. Caveat for two-machine scenarios: the Source does
+not know the Target rewound, so a Target rewind past pairing only works where the Source
+script is written to pair again (the cancel scenarios); in `full_transfer` it covers
+resets after pairing.
+
 Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
 documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,
