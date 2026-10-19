@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import subprocess
 import time
-from typing import Callable, Dict
+from collections.abc import Callable
 
 PS_TIMEOUT_SECONDS = 60
 
@@ -113,7 +113,7 @@ def restore_region(ctx) -> None:
 
 # --------------------------------------------------------------------- registry
 
-STEPS: Dict[str, Callable] = {
+STEPS: dict[str, Callable] = {
     "open_notepad": open_notepad,
     "close_notepad": close_notepad,
     "disable_network": disable_network,
