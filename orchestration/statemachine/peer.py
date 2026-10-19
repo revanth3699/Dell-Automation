@@ -7,6 +7,11 @@ generic actions so any scenario step can sync from anywhere:
 
     - do: publish        args: {value: migrating}            # "I am here"
     - do: wait_for_peer  args: {state: migrating, timeout: 600, key: target_state}
+    - do: wait_for_peer  args: {state: [finished, failed]}   # either value
+
+The runner itself publishes <role>_state=finished or failed when a role's script ends
+(orchestration/scenario_runner.py), so one side can hold its app open until the other
+is done -- e.g. the Source waits for the Target before closing.
 
 Values are free-form strings agreed between the two role scripts of one scenario.
 """
@@ -32,10 +37,11 @@ def publish(ctx, key: str, value: str) -> None:
         ctx.log.warning(f"could not publish {key}={value}: {exc}")
 
 
-def wait_for_peer_state(ctx, key: str, wanted: str, timeout: float) -> None:
-    """Polls until key == wanted. CoordinationClient.wait_for() returns the first value
+def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
+    """Polls until key == wanted (or is one of `wanted`, when a list is given). CoordinationClient.wait_for() returns the first value
     present (not necessarily the wanted one), so it is called repeatedly with short
     timeouts until the value matches."""
+    wanted_set = {str(w) for w in (wanted if isinstance(wanted, (list, tuple, set)) else [wanted])}
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
@@ -43,11 +49,11 @@ def wait_for_peer_state(ctx, key: str, wanted: str, timeout: float) -> None:
             value = ctx.coordination.wait_for(ctx.run_id, key, timeout=min(10.0, max(1.0, remaining)))
         except (TimeoutError, requests.exceptions.RequestException):
             value = None
-        if value == wanted:
-            ctx.log.success(f"peer reported {key}={wanted}")
+        if value in wanted_set:
+            ctx.log.success(f"peer reported {key}={value}")
             return
         time.sleep(2.0)
-    raise TimeoutError(f"peer never reported {key}={wanted} within {timeout:.0f}s")
+    raise TimeoutError(f"peer never reported {key} in {sorted(wanted_set)} within {timeout:.0f}s")
 
 
 def attach_peer_actions(model: Model, own_key: str, peer_key: str) -> None:
@@ -58,7 +64,7 @@ def attach_peer_actions(model: Model, own_key: str, peer_key: str) -> None:
         publish(ctx, own_key, str(args.get("value", "")))
 
     def do_wait(ctx, args) -> None:
-        wait_for_peer_state(ctx, str(args.get("key", peer_key)), str(args["state"]), float(args.get("timeout", 600.0)))
+        wait_for_peer_state(ctx, str(args.get("key", peer_key)), args["state"], float(args.get("timeout", 600.0)))
 
     for state in model.states.values():
         state.actions.setdefault("publish", Action("publish", do_publish, description=f"publish {own_key}=<value>", idempotent=False))

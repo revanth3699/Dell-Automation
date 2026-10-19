@@ -105,6 +105,11 @@ roles:
         timeout: 600
         note: the Target's Retry restarts the run on this side
       - at: [migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
         do: close
         timeout: 7200
         done: true

@@ -93,5 +93,10 @@ roles:
         timeout: 7200
         note: any ending (confirmed live 2026-10-19 -- a partial migration lands on migrationPartialSummary)
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: close
         done: true

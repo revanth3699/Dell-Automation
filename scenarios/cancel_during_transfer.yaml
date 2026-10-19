@@ -71,5 +71,10 @@ roles:
         timeout: 1800
         note: which screen the Source shows after a Target-side cancel is unconfirmed live
       - at: [cancelledByOtherPc, migrationError, migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [cancelledByOtherPc, migrationError, migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
         do: close
         done: true

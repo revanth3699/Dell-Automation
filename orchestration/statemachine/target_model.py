@@ -572,7 +572,10 @@ def build(app_session) -> Model:
     ))
     m.add(State(
         "trustNetwork", "overlay",
-        text=TextMatch(all=(trust_network_dialog.HEADING_TEXT,)),
+        # Confirmed live (2026-10-20): the other-PC-offline body ("Reconnect to a trusted
+        # network to continue") CONTAINS this heading, so the heading alone misfired; the
+        # trust dialog is the only one whose body says "recognize and trust".
+        text=TextMatch(all=(trust_network_dialog.HEADING_TEXT, "recognize and trust")),
         probe=trust_network_dialog.is_showing,
         actions={"trust_network": click(trust.click_trust_network, name="trust_network"),
                  "cancel": click(trust.click_cancel, "welcome", name="cancel")},
@@ -644,14 +647,14 @@ def build(app_session) -> Model:
     m.add(State(
         "noNetwork", "overlay",
         text=TextMatch(all=(network_disconnected_dialog.HEADING_TEXT,)),
-        probe=network_disconnected_dialog.is_showing, auto_recovers=True,
+        probe=network_disconnected_dialog.is_showing, auto_recovers=True, priority=5,
         actions={"cancel_transfer": click(no_network.cancel_transfer, "welcome", name="cancel_transfer")},
         description="this PC offline; clears on reconnect (Network.Status 2507 / 3 s OS poll)",
     ))
     m.add(State(
         "otherPcNoNetwork", "overlay",
         text=TextMatch(all=(other_pc_network_disconnected_dialog.HEADING_TEXT,)),
-        probe=other_pc_network_disconnected_dialog.is_showing, auto_recovers=True,
+        probe=other_pc_network_disconnected_dialog.is_showing, auto_recovers=True, priority=5,
         actions={"cancel_transfer": click(other_pc_no_network.cancel_transfer, "welcome", name="cancel_transfer")},
         description="other PC offline; clears on reconnect",
     ))

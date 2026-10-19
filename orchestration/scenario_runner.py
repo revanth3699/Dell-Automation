@@ -31,7 +31,7 @@ from pathlib import Path
 
 from factory.logger_factory import LoggerFactory
 from factory.session import MachineRole, Session
-from orchestration.statemachine import source_model, target_model
+from orchestration.statemachine import peer, source_model, target_model
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model
 from orchestration.statemachine.observer import (
@@ -127,11 +127,16 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
     model = MODEL_BUILDERS[role_name](session.app)
     observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}
     observer = observers[observer_kind](model)
+    outcome = "failed"
     try:
         _run_environment_steps(script.setup, ctx, "setup")
         Runner(model, script, ctx, observer, reporter=reporter).run()
+        outcome = "finished"
         log.success(f"Scenario {scenario.name!r} ({role_name}) PASSED")
     finally:
+        # tell the other machine how this side ended (per explicit user direction,
+        # 2026-10-20: the Source must not close until the Target is done)
+        peer.publish(ctx, f"{role_name}_state", outcome)
         try:
             _run_environment_steps(script.teardown, ctx, "teardown")
         finally:

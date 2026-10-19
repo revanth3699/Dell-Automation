@@ -68,6 +68,11 @@ roles:
         wait_before: 30
         note: the Source may or may not surface its own no-network page
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain]
         do: close
         timeout: 7200
         done: true

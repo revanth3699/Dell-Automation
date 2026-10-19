@@ -63,6 +63,11 @@ roles:
         do: announce
         timeout: 1800
       - at: [cancelledByOtherPc, migrationError, migrationPartialTryAgain, migrationPartialSummary, migrationComplete]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [cancelledByOtherPc, migrationError, migrationPartialTryAgain, migrationPartialSummary, migrationComplete]
         do: close
         timeout: 1800
         done: true
