@@ -10,6 +10,9 @@ automation actually drives and verifies end to end, and what's confirmed live vs
 See [FULL_TRANSFER_FLOW.md](FULL_TRANSFER_FLOW.md) for a precise, code-accurate
 flowchart of the full transfer scenario, one diagram per method, for reviewing or
 improving the automation itself.
+See [TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md) for the Target app's full
+screen/dialog transition table (from the backend code) that the YAML scenario runner
+is built on -- see **State-machine scenario runner** below for how to run it.
 
 Status: sign-in, pairing (via the Coordination Service), and transfer are implemented
 and have run live for both Target and Source PCs; per-run HTML reporting is wired into
@@ -35,10 +38,15 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    needs.
 4. Run anything through uv, e.g.:
    ```
+   uv run python utils/run_coordination_service.py
    uv run python -m orchestration.role_runner --role target --run-id <id>
    uv run python -m orchestration.role_runner --role source --run-id <id>
-   uv run python utils/run_coordination_service.py
+   uv run python -m orchestration.scenario_runner --role target --run-id <id> --scenario full_transfer
+   uv run python -m orchestration.scenario_runner --role source --run-id <id> --scenario full_transfer
    ```
+   `role_runner` is the original hand-written flow; `scenario_runner` drives a YAML
+   scenario from `scenarios/` (see **State-machine scenario runner** for the full
+   checklist).
    Target also takes `--launch {exe,mock,simulator}` (default `exe`): `simulator`
    launches the Target PC UI app indirectly via the CDM Simulator WPF app (mimics Dell
    SupportAssist, which isn't really integrated yet) instead of launching it directly --
@@ -283,11 +291,46 @@ from a transition table (`orchestration/statemachine/target_model.py` and
 and a YAML scenario (`scenarios/*.yaml`) that lists the steps and the policy for every
 dialog that may interrupt them.
 
-```
-uv run python -m orchestration.scenario_runner --scenario full_transfer --validate-only
-uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
-uv run python -m orchestration.scenario_runner --role source --run-id r1 --scenario full_transfer
-```
+### Running a scenario end to end
+
+1. **Pick a scenario** from `scenarios/` (the table in [TEST_SCENARIOS.md](TEST_SCENARIOS.md)
+   says which need a Source PC, admin rights, or manual setup). Check it before launching
+   anything -- this needs no hardware:
+   ```
+   uv run python -m orchestration.scenario_runner --scenario full_transfer --validate-only
+   ```
+2. **Start the Coordination Service** once, on either machine or a third one, and put its
+   address in both machines' `.env` as `DDA_COORDINATION_SERVICE_URL`:
+   ```
+   uv run python utils/run_coordination_service.py
+   ```
+3. **Target PC** -- `.env` needs `DDA_TARGET_BUILD_PATH` (and `DDA_CDM_SIMULATOR_PATH` for
+   `--launch simulator`); the sign-in credentials must be set as environment variables.
+   Choose any run id and use the same one on both machines:
+   ```
+   uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
+   ```
+4. **Source PC** -- `.env` needs `DDA_SOURCE_BUILD_PATH` (the already-installed exe):
+   ```
+   uv run python -m orchestration.scenario_runner --role source --run-id r1 --scenario full_transfer
+   ```
+   Start order does not matter: each side waits for the other through the coordination
+   service (the Target waits for the pairing code; `wait_for_peer` steps wait for the
+   other side's published state).
+5. **Watch for a UAC prompt** on the Target after the browser sign-in -- automation
+   cannot see or click it; approve it by hand.
+6. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` or
+   `SCENARIO FAILED: <reason> during step N [screen=... overlay=...]` (exit code 1; 2 for
+   an invalid scenario file). The HTML report, with a screenshot at every state change, is
+   written to `reports/output/<run_id>_<role>_<timestamp>.html` on each machine.
+
+Useful flags: `--launch {exe,mock,simulator}` (Target only; the scenario's own `launch:`
+is the default), `--observer {snapshot,probe}`, `--skip-prerequisites` to bypass the
+WinAppDriver/Developer-Mode checks on a machine already set up.
+
+Scenarios that need the machine prepared (`setup:` steps such as `set_network_public`,
+`disable_network`, `set_region_unsupported`) must run from an **elevated** terminal;
+`teardown:` restores the setting even when the run fails.
 
 How a run works: each tick the observer reads one `page_source` snapshot and names the
 current (screen, overlay, close prompt). The runner performs the step's action when its
