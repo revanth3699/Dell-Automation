@@ -56,6 +56,9 @@ roles:
       - at: migrationDone
         do: download_pdf
       - at: migrationDone
+        env: validate_migration_report
+        note: validation/validate_migration.py against the newest MigrationReport PDF -- fails the run on a mismatch
+      - at: migrationDone
         do: tell_us_how_we_did
       - at: feedbackModal
         do: submit

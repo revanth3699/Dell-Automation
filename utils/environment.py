@@ -111,6 +111,24 @@ def restore_region(ctx) -> None:
     ctx.log.info(f"environment: Windows home location restored to GeoId {geo}")
 
 
+# --------------------------------------------------------------------- validation
+
+def validate_migration_report(ctx) -> None:
+    """Runs validation/validate_migration.py against the newest MigrationReport PDF on
+    this (Target) PC: every file the report claims was copied must exist, and every
+    registry-backed setting must match. Writes the usual validation/output HTML and
+    fails the scenario if anything checkable did not match. Added as a scenario step
+    per explicit user direction (2026-10-20); the standalone CLI still works unchanged."""
+    from validation.validate_migration import run as validate
+
+    report = ctx.env.get("DDA_MIGRATION_REPORT_PATH")
+    ctx.log.info("validation: checking the migration report against this PC" + (f" ({report})" if report else ""))
+    ok = validate(report_path=report, write_html=True)
+    if not ok:
+        raise EnvironmentStepError("migration-report validation FAILED -- see validation/output/ for the HTML report")
+    ctx.log.success("validation: migration report matches this PC")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -122,6 +140,7 @@ STEPS: dict[str, Callable] = {
     "set_network_private": set_network_private,
     "set_region_unsupported": set_region_unsupported,
     "restore_region": restore_region,
+    "validate_migration_report": validate_migration_report,
 }
 
 

@@ -319,7 +319,12 @@ dialog that may interrupt them.
    other side's published state).
 5. **Watch for a UAC prompt** on the Target after the browser sign-in -- automation
    cannot see or click it; approve it by hand.
-6. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` or
+6. **Validation**: `full_transfer` runs the PDF migration-report validator (see the
+   next section) as a step on the Target once Migration Done is showing; a missing file
+   or a registry mismatch fails the run, and the HTML comparison lands in
+   `validation/output/`. Any scenario can do the same with
+   `env: validate_migration_report`.
+7. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` or
    `SCENARIO FAILED: <reason> during step N [screen=... overlay=...]` (exit code 1; 2 for
    an invalid scenario file). The HTML report, with a screenshot at every state change, is
    written to `reports/output/<run_id>_<role>_<timestamp>.html` on each machine.
