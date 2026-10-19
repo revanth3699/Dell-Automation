@@ -74,6 +74,21 @@ def _first_match(states, predicate: Callable[[State], bool]) -> str | None:
     return None
 
 
+def _best_text_match(states, snapshot: str) -> str | None:
+    """Among the states whose TextMatch holds for this snapshot, the one with the highest
+    (priority, specificity). Systemic fix for substring collisions (2026-10-20: the
+    other-PC-offline body contained the trust-network heading, and definition order chose
+    the wrong one) -- the state anchored on more text wins; priority still trumps."""
+    best_id, best_key = None, None
+    for state in states:
+        if state.text is None or not state.text.matches(snapshot):
+            continue
+        key = (state.priority, state.text.specificity(snapshot))
+        if best_key is None or key > best_key:
+            best_id, best_key = state.id, key
+    return best_id
+
+
 class SnapshotObserver:
     def __init__(self, model: Model, source_fn: Callable[[object], str] | None = None):
         self.model = model
@@ -88,15 +103,10 @@ class SnapshotObserver:
         snapshot = normalize(raw)
         self.last_snapshot = snapshot
 
-        def showing(state: State) -> bool:
-            if state.text is not None:
-                return state.text.matches(snapshot)
-            return False  # probe-only states are invisible to the snapshot observer
-
         return Observation(
-            screen=_first_match(self.model.screens(), showing),
-            overlay=_first_match(self.model.overlays(), showing),
-            close_prompt=_first_match(self.model.close_prompts(), showing),
+            screen=_best_text_match(self.model.screens(), snapshot),
+            overlay=_best_text_match(self.model.overlays(), snapshot),
+            close_prompt=_best_text_match(self.model.close_prompts(), snapshot),
             snapshot_len=len(snapshot),
         )
 

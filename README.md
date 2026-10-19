@@ -299,6 +299,9 @@ dialog that may interrupt them.
    ```
    uv run python -m orchestration.scenario_runner --scenario full_transfer --validate-only
    ```
+   This refuses unknown states/actions and also prints a `WARNING:` for any ending the
+   app can reach that no later step handles (e.g. skipped files after a transfer) --
+   fix those before running; the test suite requires every shipped scenario to be clean.
 2. **Start the Coordination Service** once, on either machine or a third one, and put its
    address in both machines' `.env` as `DDA_COORDINATION_SERVICE_URL`:
    ```

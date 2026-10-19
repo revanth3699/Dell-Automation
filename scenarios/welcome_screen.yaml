@@ -34,11 +34,12 @@ roles:
         timeout: 240
       - at: signIn
         do: cancel
-      - at: welcomeSignedOut
+      - at: [welcomeSignedOut, welcome]
         do: continue
       - at: signIn
         do: sign_in
         args: {negative_check: true}
+        expect: [signInFailed, signInLaunching, checkPrerequisites]
         timeout: 300
         note: wrong OTP then Cancel in the browser -> We couldn't sign you in
       - at: signInFailed

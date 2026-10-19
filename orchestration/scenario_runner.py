@@ -43,13 +43,14 @@ from orchestration.statemachine.runner import Runner, RunnerError
 from orchestration.statemachine.scenario import (
     Scenario,
     ScenarioError,
+    lint_scenario,
     load_scenario,
     validate_scenario,
 )
 from reports.action_reporter import ActionReporter
 from reports.html_report_builder import build_report
 from utils import environment
-from utils.coordination_client import CoordinationClient
+from utils.coordination_client import PAIRING_CODE_KEY, CoordinationClient
 from utils.prerequisites import ensure_prerequisites
 
 SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
@@ -124,6 +125,12 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
     session = _launch_session(role, env, launch_mode)
     ctx = RunContext(role=role_name, run_id=run_id, session=session, app=session.app,
                      coordination=CoordinationClient(), log=log, env=env, scenario_name=scenario.name)
+    peer_role = "source" if role_name == "target" else "target"
+    for key in (f"{peer_role}_state", PAIRING_CODE_KEY):
+        peer.snapshot_stale_value(ctx, key)          # values left over from an earlier run with this id
+    if role_name == "target":
+        target_model.snapshot_stale_pairing_code(ctx)
+    peer.publish(ctx, f"{role_name}_state", "started")  # overwrites our own leftover value at once
     model = MODEL_BUILDERS[role_name](session.app)
     observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}
     observer = observers[observer_kind](model)
@@ -164,6 +171,8 @@ def main(argv=None) -> int:
         print(f"INVALID SCENARIO: {exc}", file=sys.stderr)
         return 2
     print(f"Scenario {scenario.name!r} valid for roles {sorted(scenario.roles)}")
+    for warning in lint_scenario(scenario, build_models(None, list(scenario.roles))):
+        print(f"WARNING: {warning}")
     if args.validate_only:
         return 0
     if not args.role or not args.run_id:

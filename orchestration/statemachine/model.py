@@ -64,6 +64,12 @@ class TextMatch:
             return False
         return not self.any or any(t in normalized_snapshot for t in self.any)
 
+    def specificity(self, normalized_snapshot: str) -> int:
+        """Characters of match text actually found -- the longer, the more specific. Used
+        to pick between states whose terms both occur in one snapshot (RCA 2026-10-20:
+        a short heading contained in another dialog's body)."""
+        return sum(len(t) for t in self.all) + max((len(t) for t in self.any if t in normalized_snapshot), default=0)
+
 
 @dataclass
 class Action:

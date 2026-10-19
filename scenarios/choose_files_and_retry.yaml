@@ -98,18 +98,18 @@ roles:
       - at: migrating
         do: announce
         timeout: 1800
-      - at: [migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: announce
         timeout: 7200
       - at: migrating
         timeout: 600
         note: the Target's Retry restarts the run on this side
-      - at: [migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
         args: {state: [finished, failed], timeout: 7200}
         timeout: 7260
         note: keep the Source app open until the Target script has ended
-      - at: [migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: close
         timeout: 7200
         done: true

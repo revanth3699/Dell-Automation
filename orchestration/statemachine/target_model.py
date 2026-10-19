@@ -383,9 +383,10 @@ def build(app_session) -> Model:
     m.add(State(
         "checkPrerequisites", "screen", "waiting",
         text=TextMatch(any=("getting things ready", "checking your pc")),
-        next=("connectOldPc", "readyToMove"),
+        next=("connectOldPc",),
         actions={"cancel": Action("cancel", lambda ctx, args: ready_to_move.click_cancel(), expect=("welcome",))},
-        description="engine launch + PreCheck.Migration; no timeout in the app",
+        description="engine launch + PreCheck.Migration; no timeout in the app (already-paired -> readyToMove "
+                    "exists in the backend but needs a retained session, which every Cancel/Stop resets)",
     ))
     m.add(State(
         "connectOldPc", "screen", "peer",
@@ -429,7 +430,7 @@ def build(app_session) -> Model:
         "readyToMove", "screen", "waiting",
         text=TextMatch(all=(ready_to_move_screen.HEADING_CONTAINS_TEXT,)),
         probe=ready_to_move_screen.is_showing,
-        next=("chooseWhatToMove", "chooseFiles"),
+        next=("chooseWhatToMove",),   # 'everything' is the default on every fresh visit (ChooseWhatToMovePageViewModel.cs:685)
         actions={"cancel": click(ready_to_move.click_cancel, "welcome", name="cancel"),
                  "announce": announce("readyToMove")},
         description="Compatibility.Migration then MigrationInfo.Init/Details",
@@ -486,6 +487,7 @@ def build(app_session) -> Model:
         actions={
             "finish": click(summary.click_finish, "migrationDone", "welcome", name="finish"),
             "view_details": click(summary.click_view_the_details, "complete", "skippedFiles", name="view_details"),
+            "close_window": click(app_window.click_close, name="close_window"),
             "announce": announce("resultsSummary"),
         },
     ))

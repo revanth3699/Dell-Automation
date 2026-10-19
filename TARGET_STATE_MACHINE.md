@@ -370,6 +370,28 @@ overlays:
 - The `closeApplications` failed state: whether it is reachable only in the precheck case.
 - Whether `readyToMove` Cancel really lands on `welcome` (code) rather than exiting (comments).
 
+## 11. Live-run findings (2026-10-19/20): root cause and systemic fix
+
+Each failure seen on the hardware, the cause behind it (not the instance), and the one
+change that removes the whole class. Every row has a unit test guarding the cause.
+
+| Seen live | Root cause | Systemic fix | Guard |
+|---|---|---|---|
+| `/source` returned HTTP 400 on the code-entry screen and 500 on the skipped-files screen; the runner went blind | WinAppDriver cannot serialise some WebView2 trees; one detection method is a single point of failure | `HybridObserver` (default): snapshot per tick, per-locator probing whenever the snapshot errors or recognises nothing for 3 ticks; sticky probe order so the fallback costs one `find_element`, not 44 | `test_runner.py::test_hybrid_observer_*`, `test_probe_observer_sticky_order_*` |
+| "It looks like your network has been disconnected" was handled as the trust-network dialog; the policy clicked a button that did not exist | Substring matching over a flattened snapshot: a short heading can occur inside another dialog's body ("**Reconnect** to a trusted network"), and definition order chose the loser | The most *specific* match wins within a layer (`TextMatch.specificity`), priority still trumps; plus every overlay's real resx text is fed through the observer at test time | `test_systemic_fixes.py` (RCA 1), `test_overlay_disambiguation.py` |
+| A step waited 900 s for `connectOldPc`, which had flashed past in 6 s | Steps on engine-driven screens assume the screen will linger; the runner treated the later screen as "in transit" and waited | Steps whose targets are all `waiting`-kind are skippable the moment a later step's target shows, with or without `optional: true`; `optional` itself now skips on *any* later target, not just the next | `test_systemic_fixes.py` (RCA 2), `test_optional_step_is_skipped_when_any_later_target_shows` |
+| Target typed the previous run's pairing code within 80 ms; Source waits could have been satisfied by last run's `finished` | The coordination service keeps values per run id forever; a reused id serves stale state | Each role snapshots the peer's keys at start and ignores those values until they change, publishes `<role>_state=started` at once to overwrite its own leftover, and `type_code` never types a code it has seen before; new run id per run documented | `test_systemic_fixes.py` (RCA 3), `test_type_code.py` |
+| `full_transfer` waited out its timeout on `skippedFiles` (Target) and `migrationPartialSummary` (Source) because it named only the happy ending | Scenarios written from the happy path; nothing checked that every ending the app can reach is handled | `lint_role_script`: for each step, every user/terminal screen reachable from the previous step's outcome must be the target of some later step; printed by `--validate-only`, asserted empty for every shipped scenario | `test_scenarios.py`, `test_systemic_fixes.py` (RCA 4) |
+| Source closed as soon as its own script ended; the Target saw the other PC disappear mid-flow | Each role's script ended independently; nothing expressed "the other side is still working" | The runner publishes `<role>_state=finished\|failed` on exit; every two-role scenario's Source waits for it before Close; `wait_for_peer` accepts a list so a failed Target still releases the Source | `test_policies.py`, scenario files |
+| A WebView2 click reported success and nothing happened (CLAUDE.md gotcha) | Invoke-pattern clicks can complete without the control reacting | The runner performs a step's action again when the state has not changed after 10 s, up to 4 times; `Action.idempotent=False` exempts sign-in, code entry, peer publishes, env steps | `test_runner.py::test_action_is_performed_again_*` |
+| `signIn` overlay had no policy, so an expired cached login mid-scenario would have failed the run by default | No rule that every non-recovering overlay needs a deliberate policy | `test_policies.py` asserts every non-recovering overlay has a `happy_path` policy and exercises each policy on the real model | `test_policies.py` |
+| A validation mismatch on `Languages` (`'en-IN\0en-US'` vs `['en-IN', 'en-US']`) | REG_MULTI_SZ reaches the comparison in two shapes (escaped string from the .reg export, list from winreg) | Compare multi-strings by their parts on both sides | `tests/report_validation/test_registry_compare.py` |
+| A 2-minute exit on failure | Teardown asks for UAC approval twice (`Start-Process -Verb RunAs`) and times out at 60 s each if nobody clicks | Not changed (pre-existing `factory/session.py`); run from an elevated terminal or approve the prompt | — |
+
+Process note: a shell pipeline (`cmd \| tail`) hides the exit code of `cmd`; one push went
+out with a broken test because of it. Commits are now gated on the raw pytest/ruff exit
+codes.
+
 ## 10. Code-vs-comment mismatches to raise with the rebit team
 
 - `readyToMove` Cancel: code → Welcome; comments say app exit.

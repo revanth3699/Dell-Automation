@@ -37,11 +37,28 @@ def publish(ctx, key: str, value: str) -> None:
         ctx.log.warning(f"could not publish {key}={value}: {exc}")
 
 
+def snapshot_stale_value(ctx, key: str) -> None:
+    """Records the value `key` already holds when this run starts, so wait_for_peer_state()
+    will not accept it until it has changed. Systemic fix for reused run ids (2026-10-20:
+    the previous run's pairing code was read within 80 ms and typed): the coordination
+    service keeps values per run id forever, so anything present before we start is
+    suspect until the peer writes something new."""
+    try:
+        value = ctx.coordination.wait_for(ctx.run_id, key, timeout=1.0)
+    except (TimeoutError, requests.exceptions.RequestException):
+        return
+    ctx.scratch.setdefault("stale_values", {})[key] = str(value)
+    ctx.log.warning(f"{key}={value} was already on the coordination service for run {ctx.run_id} -- "
+                    "ignoring it until the peer publishes something new")
+
+
 def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
     """Polls until key == wanted (or is one of `wanted`, when a list is given). CoordinationClient.wait_for() returns the first value
     present (not necessarily the wanted one), so it is called repeatedly with short
     timeouts until the value matches."""
     wanted_set = {str(w) for w in (wanted if isinstance(wanted, (list, tuple, set)) else [wanted])}
+    stale = ctx.scratch.get("stale_values", {}).get(key)
+    changed = False
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
@@ -49,7 +66,9 @@ def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
             value = ctx.coordination.wait_for(ctx.run_id, key, timeout=min(10.0, max(1.0, remaining)))
         except (TimeoutError, requests.exceptions.RequestException):
             value = None
-        if value in wanted_set:
+        if value is not None and str(value) != stale:
+            changed = True
+        if value in wanted_set and (changed or stale is None):
             ctx.log.success(f"peer reported {key}={value}")
             return
         time.sleep(2.0)

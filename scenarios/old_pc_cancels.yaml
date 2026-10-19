@@ -99,6 +99,6 @@ roles:
         wait_before: 30
       - at: confirmCancel
         do: yes_cancel_now
-      - at: [welcome, cancelledByOtherPc, migrationError, migrationPartialTryAgain]
+      - at: [welcome, cancelledByOtherPc, migrationError, migrationPartialTryAgain, migrationPartialSummary, migrationComplete]
         timeout: 600
         done: true

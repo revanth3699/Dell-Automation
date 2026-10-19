@@ -10,7 +10,11 @@ import pytest
 
 from orchestration import scenario_runner
 from orchestration.statemachine import source_model, target_model
-from orchestration.statemachine.scenario import load_scenario, validate_scenario
+from orchestration.statemachine.scenario import (
+    lint_scenario,
+    load_scenario,
+    validate_scenario,
+)
 
 SCENARIO_DIR = Path(__file__).resolve().parents[2] / "scenarios"
 SCENARIO_FILES = sorted(p for p in SCENARIO_DIR.glob("*.yaml") if not p.name.startswith("_"))
@@ -30,6 +34,7 @@ def test_scenario_validates_against_models(path, models):
     scenario = load_scenario(path)
     assert scenario.name == path.stem, "scenario name should match its file name"
     validate_scenario(scenario, models)
+    assert lint_scenario(scenario, models) == [], "every ending the app can reach must be handled by a later step"
 
 
 def test_cli_validate_only_accepts_every_scenario(capsys):

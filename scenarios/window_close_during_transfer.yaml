@@ -27,20 +27,24 @@ roles:
       - at: chooseWhatToMove
         do: migrate_now
         timeout: 600
-      - at: migrating
+      - at: [migrating, resultsSummary]
         do: publish
         args: {value: migrating}
         timeout: 180
-      - at: migrating
+      - at: [migrating, resultsSummary]
         do: close_window
         wait_before: 30
+        note: resultsSummary covers a transfer that finished before the X was pressed -- then no cancel prompt appears
       - at: cancelMigrationConfirm
         do: no_continue
-      - at: migrating
+        optional: true
+      - at: [migrating, resultsSummary]
         do: close_window
         wait_before: 10
+        optional: true
       - at: cancelMigrationConfirm
         do: yes_cancel
+        optional: true
       - at: desktopShortcut
         do: create_shortcut
         timeout: 120

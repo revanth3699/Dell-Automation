@@ -280,6 +280,68 @@ def validate_role_script(script: RoleScript, model: Model) -> list[str]:
     return problems
 
 
+def lint_role_script(script: RoleScript, model: Model) -> list[str]:
+    """Warnings (not errors): a step that waits for one of several outcomes the app can
+    produce, while some other outcome is handled by no later step. Systemic check for the
+    2026-10-19/20 findings (complete vs skippedFiles; migrationComplete vs the partial
+    endings): the scenario named the happy ending only and waited out its timeout on the
+    other. Only 'user'/'terminal' screens count as endings; waiting screens pass by."""
+    warnings: list[str] = []
+    prev_targets: list[str] = []
+    prev_expect: tuple = ()
+    prev_explicit = False
+
+    def endings_from(seeds: set) -> set:
+        """Screens where the app stops (user/peer/terminal) that the engine can reach from
+        `seeds` passing only through engine-driven ('waiting') screens."""
+        frontier, seen, endings = set(seeds), set(), set()
+        while frontier:
+            sid = frontier.pop()
+            if sid in seen or not model.has(sid):
+                continue
+            seen.add(sid)
+            state = model.get(sid)
+            if state.layer != "screen":
+                continue
+            if state.kind == "waiting":
+                frontier.update(state.next)
+            elif state.kind != "peer":    # peer screens need the other machine: the walk stops there
+                endings.add(sid)
+        return endings
+
+    for i, step in enumerate(script.steps):
+        if prev_targets:
+            if prev_explicit or prev_expect:
+                seeds = set(prev_expect)   # the author, or the action performed, said what may follow
+            else:                          # a pure wait: the engine moves on from that screen by itself
+                seeds = {n for t in prev_targets if model.has(t) for n in model.get(t).next}
+            seeds -= set(prev_targets)
+            alternatives = endings_from(seeds) | {s for s in seeds if model.has(s) and model.get(s).kind == "waiting"}
+            endings = {a for a in alternatives if model.get(a).kind != "waiting"}
+            later = {t for s in script.steps[i:] for t in s.at}
+            uncovered = sorted(endings - later)
+            if uncovered and (set(step.at) & (alternatives | seeds)):
+                warnings.append(
+                    f"{step.label()}: after {'/'.join(prev_targets)} the app may instead show {uncovered}, "
+                    f"which no later step handles (add it to an at: list or an optional step)"
+                )
+        prev_targets = list(step.at)
+        prev_explicit = bool(step.expect)
+        if step.expect:
+            prev_expect = tuple(step.expect)
+        elif step.do and not step.is_wait:
+            prev_expect = tuple(e for t in step.at if model.has(t) and step.do in model.get(t).actions
+                                for e in model.get(t).actions[step.do].expect)
+        else:
+            prev_expect = ()
+    return warnings
+
+
+def lint_scenario(scenario: Scenario, models: dict[str, Model]) -> list[str]:
+    return [f"[{role}] {w}" for role, script in scenario.roles.items() if role in models
+            for w in lint_role_script(script, models[role])]
+
+
 def validate_scenario(scenario: Scenario, models: dict[str, Model]) -> None:
     problems: list[str] = []
     for role, script in scenario.roles.items():
