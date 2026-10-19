@@ -70,6 +70,10 @@ class _OverlayTracking:
     clicks: int = 0
     last_click: float | None = None
     logged_wait: bool = False
+    failed_clicks: int = 0
+
+
+MAX_FAILED_POLICY_CLICKS = 2   # a click that fails because the dialog has just gone is not a finding; two in a row are
 
 
 class Runner:
@@ -142,6 +146,9 @@ class Runner:
                 continue
 
             matched = self._at_target(obs, step)
+            if matched is not None and not step.is_wait and self.model.get(matched).layer != "screen" \
+                    and not self._confirmed_showing(self.model.get(matched)):
+                matched = None  # a dialog's text lingering in the snapshot after it closed -- keep looking
             if matched is not None:
                 self._perform(step, obs, matched)
                 self._previous_target = matched
@@ -317,19 +324,44 @@ class Runner:
                 raise PolicyExhausted(
                     f"{state_id}: policy action {policy.action} already applied {track.clicks} times", obs, step
                 )
+            if not self._confirmed_showing(state):
+                return  # the snapshot still carries the text, but the dialog is not really there
             action = state.action(policy.action)
             self.log.warning(f"{state_id} appeared -- policy: {action.name}")
             start = self._clock()
             try:
                 action.perform(self.ctx, {})
             except Exception as exc:
+                # Confirmed live (2026-10-20): Continue on the account-mismatch dialog
+                # 'failed' because the dialog had just closed while its text still showed.
+                # A policy click is opportunistic: one failure is re-observed, not fatal.
+                track.failed_clicks += 1
+                track.last_click = self._clock()
                 self._record(state_id, action.name, "fail", (self._clock() - start) * 1000, error=str(exc))
-                raise RunnerError(f"policy action {action.name} on {state_id} failed: {exc}", obs, step) from exc
+                if track.failed_clicks >= MAX_FAILED_POLICY_CLICKS:
+                    raise RunnerError(
+                        f"policy action {action.name} on {state_id} failed {track.failed_clicks} times: {exc}", obs, step
+                    ) from exc
+                self.log.warning(f"policy action {action.name} on {state_id} failed ({exc}) -- re-observing first")
+                return
             track.clicks += 1
             track.last_click = self._clock()
             self._record(state_id, action.name, "pass", (self._clock() - start) * 1000)
             return
         raise RunnerError(f"unknown policy kind {policy.kind!r} for {state_id}", obs, step)
+
+    def _confirmed_showing(self, state: State) -> bool:
+        """Before acting on a dialog, check its own locator once (the snapshot can carry a
+        closed dialog's text for a while). No probe -> trust the observation."""
+        if state.probe is None:
+            return True
+        try:
+            present = bool(state.probe(self.ctx.app, timeout=1.0))
+        except Exception:  # noqa: BLE001 -- a probe error must not change the decision
+            return True
+        if not present:
+            self.log.info(f"{state.id} is in the snapshot but its locator is not found -- treating it as gone")
+        return present
 
     def _describe(self, state: State) -> str:
         reader = state.actions.get("read_text")

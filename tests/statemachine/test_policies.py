@@ -65,6 +65,7 @@ def test_happy_path_policy_drives_the_runner(role, overlay_id, policy):
     model = MODELS[role].build(None)
     state = model.get(overlay_id)
     assert state.layer in ("overlay", "close_prompt"), f"{overlay_id} is a {state.layer}; policies apply to overlays"
+    state.probe = lambda session, timeout=0.1: True   # the runner verifies a dialog's locator before acting: it is there
     screen = BASE_SCREEN[role]
     stacked = obs(screen, overlay_id) if state.layer == "overlay" else obs(screen, None, overlay_id)
     observer = ScriptedObserver(stacked)

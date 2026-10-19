@@ -22,6 +22,7 @@ from orchestration.statemachine.observer import Observation, SnapshotObserver
 from orchestration.statemachine.runner import (
     PolicyExhausted,
     Runner,
+    RunnerError,
     StepTimeout,
     TerminalState,
     UnexpectedState,
@@ -507,3 +508,45 @@ def test_overlay_step_action_is_performed_again_before_its_policy_applies():
     run(model, [Step("Y", "dismiss", index=0), Step("A", done=True, index=1)], observer,
         policies={"Y": Policy(kind="fail")}, step_timeout=120)
     assert calls.performed == ["Y.dismiss", "Y.dismiss"]
+
+
+# ----------------------------------------------------------------- acting on dialogs: verify first, forgive one miss
+
+def test_policy_click_is_skipped_when_the_dialogs_own_locator_is_not_found():
+    calls, observer = Calls(), ScriptedObserver(obs("A", "Y"))
+    model = make_model(calls, observer)
+    observer.push(obs("A", "Y"), obs("A"))          # text lingers one more tick, then it is gone
+    model.get("Y").probe = lambda session, timeout: False
+    run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer,
+        policies={"Y": Policy(kind="click", action="dismiss")})
+    assert "Y.dismiss" not in calls.performed
+
+
+def test_one_failed_policy_click_is_forgiven_if_the_dialog_then_goes_away():
+    calls, observer = Calls(), ScriptedObserver(obs("A", "Y"))
+    model = make_model(calls, observer)
+
+    def flaky(ctx, args):
+        calls.performed.append("Y.dismiss")
+        observer.push(obs("A"))
+        raise RuntimeError("Condition not met within 10.0s")
+
+    model.get("Y").actions["dismiss"].perform = flaky
+    run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer,
+        policies={"Y": Policy(kind="click", action="dismiss")})
+    assert calls.performed == ["Y.dismiss", "A.go"]
+
+
+def test_two_failed_policy_clicks_in_a_row_fail_the_run():
+    calls, observer = Calls(), ScriptedObserver(obs("A", "Y"))
+    model = make_model(calls, observer)
+
+    def broken(ctx, args):
+        calls.performed.append("Y.dismiss")
+        raise RuntimeError("no button")
+
+    model.get("Y").actions["dismiss"].perform = broken
+    with pytest.raises(RunnerError) as exc:
+        run(model, [Step("A", "go", index=0), Step("B", done=True, index=1)], observer,
+            policies={"Y": Policy(kind="click", action="dismiss")}, step_timeout=60)
+    assert "failed 2 times" in str(exc.value) and calls.performed.count("Y.dismiss") == 2
