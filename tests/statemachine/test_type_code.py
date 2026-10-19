@@ -3,6 +3,8 @@ and coordination client faked -- no WinAppDriver, no service."""
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 from loguru import logger
 
@@ -27,7 +29,7 @@ class FakeCoordination:
 
 
 class FakeCodeEntry:
-    typed = []
+    typed: ClassVar[list] = []
 
     def __init__(self, session):
         pass

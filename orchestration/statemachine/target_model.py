@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import time
 
+import requests
+
 from assertions.target import (
     cancel_migration_confirm_modal,
     choose_what_to_move_screen,
@@ -126,8 +128,8 @@ def snapshot_stale_pairing_code(ctx) -> None:
     tried = ctx.scratch.setdefault("tried_pairing_codes", set())
     try:
         stale = ctx.coordination.wait_for(ctx.run_id, PAIRING_CODE_KEY, timeout=1.0)
-    except Exception:
-        return
+    except (TimeoutError, requests.exceptions.RequestException):
+        return  # nothing published yet, or the service is not reachable -- nothing to exclude
     if stale:
         tried.add(str(stale))
         ctx.log.warning(f"pairing code {stale} was already on the coordination service for run {ctx.run_id} "
