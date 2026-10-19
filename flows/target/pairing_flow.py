@@ -4,9 +4,11 @@ reached the pairing-discovery screen and SignInFlow.wait_for_source_pc() has con
 Source PC was found. Confirmed sequence from a user-supplied flow diagram (dell screens
 flow.pdf, 2026-10-05): "We're looking for your other PC" clears -> "Let's connect your
 two PCs" (enter the verification code shown on Source PC) -> if accepted AND the two PCs'
-account names differ, a "Let's make sure we're connecting the right user accounts"
-confirm dialog -> file-selection screen ("Your files are ready to move" -- out of scope
-here, a later phase of the migration, not part of pairing).
+account names differ, a "Your user account names don't match" confirm dialog (heading
+corrected 2026-10-19 via a live screenshot -- see
+assertions/target/confirm_accounts_dialog.py's own docstring for the correction
+history) -> file-selection screen ("Your files are ready to move" -- out of scope here,
+a later phase of the migration, not part of pairing).
 
 Target-PC-only, same as SignInFlow -- Source PC's side of this exchange (showing its own
 code) lives under flows/source/pairing_flow.py (SourcePairingFlow), which publishes the
@@ -211,8 +213,8 @@ class TargetPairingFlow:
         if confirm_accounts_assertions.is_showing(self.app_session, timeout=20.0):
             self.confirm_accounts_dialog.click_continue()
             self.log.success(
-                "Account-mismatch confirm dialog appeared (Let's make sure we're "
-                "connecting the right user accounts) -- clicked Continue"
+                "Account-mismatch confirm dialog appeared (Your user account names "
+                "don't match) -- clicked Continue"
             )
         else:
             # Confirmed live (2026-10-15): a False result here does NOT reliably mean

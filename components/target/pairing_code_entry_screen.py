@@ -60,9 +60,10 @@ class PairingCodeEntryScreen:
 
 
 class ConfirmAccountsDialog:
-    """"Let's make sure we're connecting the right user accounts" -- shown only when the
-    two PCs' user account names differ (confirmed from the reference diagram) after a
-    successful pairing code. Not every pairing shows this; callers should check
+    """"Your user account names don't match" (heading corrected 2026-10-19 via a live
+    screenshot -- see assertions/target/confirm_accounts_dialog.py's own docstring for
+    the correction history) -- shown only when the two PCs' user account names differ
+    after a successful pairing code. Not every pairing shows this; callers should check
     assertions.target.confirm_accounts_dialog.is_showing() first rather than assume it
     always appears.
     """

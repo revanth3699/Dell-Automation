@@ -7,8 +7,10 @@ start_transfer() waits for that second screen and clicks the default "Bring ever
 over for me" option.
 
 Bug fixed here, confirmed live (2026-10-06): the account-mismatch confirm dialog
-("Let's make sure we're connecting the right user accounts") does NOT reliably appear
-within the brief 5s window flows/target/pairing_flow.py's TargetPairingFlow checks for
+("Your user account names don't match" -- heading corrected 2026-10-19 via a live
+screenshot, see assertions/target/confirm_accounts_dialog.py's own docstring for the
+correction history) does NOT reliably appear within the brief 5s window
+flows/target/pairing_flow.py's TargetPairingFlow checks for
 right after the pairing code is accepted -- confirmed via a live screenshot showing it
 appearing layered OVER the "preparing your files" screen instead, well into this
 method's wait. That 5s check isn't removed (harmless if it already caught it), but
