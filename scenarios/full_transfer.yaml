@@ -25,7 +25,7 @@ roles:
         note: skipped when the Source is already searching and the app jumps straight to enterCode (seen live 2026-10-20)
       - at: enterCode
         do: type_code
-        args: {timeout: 600}
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
         timeout: 900
         note: waits for the Source script to publish the code
       - at: chooseWhatToMove

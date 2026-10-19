@@ -33,7 +33,7 @@ roles:
         note: countdown from the engine's RetryDelayInSeconds
       - at: enterCode
         do: type_code
-        args: {timeout: 600}
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
         timeout: 900
       - at: [readyToMove, chooseWhatToMove]
         timeout: 600

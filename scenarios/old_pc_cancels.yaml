@@ -21,7 +21,7 @@ roles:
         timeout: 300
       - at: enterCode
         do: type_code
-        args: {timeout: 600}
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
         timeout: 900
       - at: chooseWhatToMove
         do: publish
@@ -37,7 +37,7 @@ roles:
         timeout: 120
       - at: enterCode
         do: type_code
-        args: {timeout: 600}
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
         timeout: 900
       - at: chooseWhatToMove
         do: migrate_now
