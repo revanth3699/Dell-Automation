@@ -243,7 +243,7 @@ class Runner:
                          error=str(exc))
             raise RunnerError(f"{action.name} on {self._previous_target} failed on retry: {exc}", obs) from exc
         self._record(self._previous_target, f"{action.name} (retry {self._action_attempts})", "pass",
-                     (self._clock() - start) * 1000)
+                     (self._clock() - start) * 1000, screenshot=True)
         self._last_action_at = self._clock()
         return True
 
@@ -313,7 +313,7 @@ class Runner:
         except Exception as exc:
             self._record(matched, name, "fail", (self._clock() - start) * 1000, error=str(exc))
             raise RunnerError(f"{name} on {matched} failed: {exc}", obs, step) from exc
-        self._record(matched, name, "pass", (self._clock() - start) * 1000)
+        self._record(matched, name, "pass", (self._clock() - start) * 1000, screenshot=True)
         self._last_action_at = self._clock()
         self._previous_action_expect = tuple(step.expect) if step.expect else tuple(default_expect)
 
@@ -377,7 +377,7 @@ class Runner:
                 return
             track.clicks += 1
             track.last_click = self._clock()
-            self._record(state_id, action.name, "pass", (self._clock() - start) * 1000)
+            self._record(state_id, action.name, "pass", (self._clock() - start) * 1000, screenshot=True)
             return
         raise RunnerError(f"unknown policy kind {policy.kind!r} for {state_id}", obs, step)
 
@@ -420,6 +420,15 @@ class Runner:
 
     def _record(self, component: str, action: str, status: str, duration_ms: float,
                 error: str | None = None, screenshot: bool = False) -> None:
+        """Bug fixed here, confirmed via a live run (2026-10-20): every PASS call site
+        below used to omit screenshot=True, so the "<screen> <action>" report row for
+        every successful scenario-step action (the Runner's own log of what it did,
+        distinct from the underlying BaseComponent click's own before/after shots)
+        rendered as a bare "no screenshot". For an action with no underlying UI click at
+        all (an env/peer step like "migrating publish", or enter_code()'s raw
+        send_keys(), which bypasses BaseComponent entirely) that left literally zero
+        visual evidence for the step anywhere in the report. Every PASS call site now
+        passes screenshot=True, same as observe() and the rewind event already did."""
         if self.reporter is None:
             return
         shot = shot_err = None

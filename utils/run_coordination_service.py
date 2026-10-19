@@ -27,11 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import uvicorn
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--port", type=int, default=8000)
-args = parser.parse_args()
-
-
 def _get_lan_ip() -> str:
     """Returns this machine's actual outbound-facing LAN IP. Uses the standard
     UDP-connect trick: connecting a UDP socket never actually sends a packet (UDP is
@@ -48,28 +43,42 @@ def _get_lan_ip() -> str:
         sock.close()
 
 
-hostname = socket.gethostname()
-lan_ip = _get_lan_ip()
-url = f"http://{hostname}:{args.port}"
-ip_url = f"http://{lan_ip}:{args.port}"
+if __name__ == "__main__":
+    # Bug fixed here, confirmed via this project's own static-verification command
+    # (CLAUDE.md "Verification without live hardware"): everything below used to run at
+    # module scope, ending in uvicorn.run() -- so a plain `import
+    # utils.run_coordination_service` (e.g. the walk_packages import check) started a
+    # real, unbounded HTTP server bound to 0.0.0.0:8000 and hung forever instead of
+    # completing the import. utils/ is meant to hold standalone, side-effect-free
+    # helpers (see CLAUDE.md's layer table); this script's own usage docstring already
+    # says it's invoked directly (`python utils/run_coordination_service.py [--port
+    # 8000]`), so gating it behind __main__ changes nothing about how it's actually run.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
 
-# Confirmed live (2026-10-07): plain print() output sits in Python's stdout buffer and
-# never reaches the terminal once uvicorn.run() below takes over and blocks forever --
-# the buffer only flushes on a full process exit, which never happens here (same
-# stdout-buffering issue seen elsewhere in this project). flush=True on every line (and
-# an explicit sys.stdout.flush() as a belt-and-suspenders final call) forces it out
-# immediately, before uvicorn's own banner prints.
-print("=" * 70, flush=True)
-print(f"Starting Coordination Service on this machine ({hostname}), port {args.port}.", flush=True)
-print(flush=True)
-print("On the OTHER machine (Source or Target, whichever this isn't), set:", flush=True)
-print(f"    DDA_COORDINATION_SERVICE_URL={ip_url}      <-- IP, use this one first", flush=True)
-print(f"    DDA_COORDINATION_SERVICE_URL={url}      <-- hostname, fallback if IP changes", flush=True)
-print(flush=True)
-print("Confirm reachability from there first with:", flush=True)
-print(f'    Invoke-RestMethod -Uri "{ip_url}/health"', flush=True)
-print("(should return status: ok -- if it doesn't, check firewall/network, not the code)", flush=True)
-print("=" * 70, flush=True)
-sys.stdout.flush()
+    hostname = socket.gethostname()
+    lan_ip = _get_lan_ip()
+    url = f"http://{hostname}:{args.port}"
+    ip_url = f"http://{lan_ip}:{args.port}"
 
-uvicorn.run("coordination_service.app:app", host="0.0.0.0", port=args.port)
+    # Confirmed live (2026-10-07): plain print() output sits in Python's stdout buffer
+    # and never reaches the terminal once uvicorn.run() below takes over and blocks
+    # forever -- the buffer only flushes on a full process exit, which never happens
+    # here (same stdout-buffering issue seen elsewhere in this project). flush=True on
+    # every line (and an explicit sys.stdout.flush() as a belt-and-suspenders final
+    # call) forces it out immediately, before uvicorn's own banner prints.
+    print("=" * 70, flush=True)
+    print(f"Starting Coordination Service on this machine ({hostname}), port {args.port}.", flush=True)
+    print(flush=True)
+    print("On the OTHER machine (Source or Target, whichever this isn't), set:", flush=True)
+    print(f"    DDA_COORDINATION_SERVICE_URL={ip_url}      <-- IP, use this one first", flush=True)
+    print(f"    DDA_COORDINATION_SERVICE_URL={url}      <-- hostname, fallback if IP changes", flush=True)
+    print(flush=True)
+    print("Confirm reachability from there first with:", flush=True)
+    print(f'    Invoke-RestMethod -Uri "{ip_url}/health"', flush=True)
+    print("(should return status: ok -- if it doesn't, check firewall/network, not the code)", flush=True)
+    print("=" * 70, flush=True)
+    sys.stdout.flush()
+
+    uvicorn.run("coordination_service.app:app", host="0.0.0.0", port=args.port)
