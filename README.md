@@ -306,7 +306,10 @@ dialog that may interrupt them.
    ```
 3. **Target PC** -- `.env` needs `DDA_TARGET_BUILD_PATH` (and `DDA_CDM_SIMULATOR_PATH` for
    `--launch simulator`); the sign-in credentials must be set as environment variables.
-   Choose any run id and use the same one on both machines:
+   Choose a **new** run id for every run and use the same one on both machines -- the
+   coordination service keeps its values per run id, so a reused id hands the Target the
+   previous run's pairing code (the Target now ignores a code that was already there when
+   it started, but a fresh id is the clean way):
    ```
    uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
    ```

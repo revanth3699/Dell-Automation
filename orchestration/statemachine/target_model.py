@@ -111,7 +111,55 @@ from orchestration.statemachine.peer import (
 from orchestration.statemachine.peer import (
     publish as _publish,
 )
+from assertions.common import gone
 from utils.coordination_client import PAIRING_CODE_KEY
+
+PAIRING_ATTEMPTS_DEFAULT = 5
+PAIRING_CONFIRM_SECONDS = 30.0   # how long a typed code may sit in "Verifying..." before it counts as rejected
+PAIRING_LOCK_POLL_SECONDS = 5.0
+
+
+def snapshot_stale_pairing_code(ctx) -> None:
+    """Remembers any pairing code already on the coordination service when this run
+    starts so type_code() never types it. Confirmed live (2026-10-20): a reused
+    --run-id handed the Target the PREVIOUS run's code within 80 ms; the app rejected
+    it and the step sat on the code screen until it timed out."""
+    tried = ctx.scratch.setdefault("tried_pairing_codes", set())
+    try:
+        stale = ctx.coordination.wait_for(ctx.run_id, PAIRING_CODE_KEY, timeout=1.0)
+    except Exception:
+        return
+    if stale:
+        tried.add(str(stale))
+        ctx.log.warning(f"pairing code {stale} was already on the coordination service for run {ctx.run_id} "
+                        "-- treating it as stale; waiting for the Source to publish a new one")
+
+
+def _fresh_pairing_code(ctx, exclude: set, deadline: float) -> str:
+    """The next published code that is not in `exclude` (stale or already rejected)."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"no new pairing code appeared (excluding {sorted(exclude)})")
+        try:
+            value = str(ctx.coordination.wait_for(ctx.run_id, PAIRING_CODE_KEY, timeout=min(10.0, max(1.0, remaining))))
+        except TimeoutError:
+            continue
+        if value not in exclude:
+            return value
+        time.sleep(2.0)
+
+
+def _wait_while_locked(ctx, deadline: float) -> None:
+    from assertions.target import pairing_code_entry_screen as code_assertions
+    logged = False
+    while code_assertions.is_locked_showing(ctx.app, timeout=0.5):
+        if not logged:
+            ctx.log.warning("code entry is locked (too many wrong attempts) -- waiting for the countdown")
+            logged = True
+        if time.monotonic() >= deadline:
+            raise TimeoutError("code entry stayed locked until the step timed out")
+        time.sleep(PAIRING_LOCK_POLL_SECONDS)
 
 BROWSER_OPEN_TIMEOUT_SECONDS = 45.0
 PDF_OPEN_WAIT_SECONDS = 5.0
@@ -196,6 +244,8 @@ def build(app_session) -> Model:
 
     # -- composite actions -------------------------------------------------------
     def welcome_continue(ctx, args) -> None:
+        if "tried_pairing_codes" not in ctx.scratch:
+            snapshot_stale_pairing_code(ctx)  # once per run, before any pairing happens
         # the browser-window snapshot MUST precede the click (factory/session.py)
         ctx.scratch["known_hwnds"] = ctx.session.snapshot_browser_windows()
         welcome.click_sign_in()
@@ -219,10 +269,31 @@ def build(app_session) -> Model:
         browser_sign_in(ctx, args)
 
     def type_code(ctx, args) -> None:
-        code = args.get("code")
-        if not code:
-            code = ctx.coordination.wait_for(ctx.run_id, PAIRING_CODE_KEY, timeout=float(args.get("timeout", 300.0)))
-        code_entry.enter_code(str(code))
+        """Types the Source's pairing code and retries on rejection.
+
+        args: code (explicit, no retries), timeout (overall, default 600 s), attempts
+        (default 5), confirm_timeout (default 30 s). A code counts as accepted when the
+        code-entry heading goes away within confirm_timeout; otherwise the next
+        published code (never one already tried, nor one that predates this run -- see
+        snapshot_stale_pairing_code) is typed, after any lockout countdown has run."""
+        explicit = args.get("code")
+        attempts = 1 if explicit else int(args.get("attempts", PAIRING_ATTEMPTS_DEFAULT))
+        confirm = float(args.get("confirm_timeout", PAIRING_CONFIRM_SECONDS))
+        deadline = time.monotonic() + float(args.get("timeout", 600.0))
+        tried = ctx.scratch.setdefault("tried_pairing_codes", set())
+
+        for attempt in range(1, attempts + 1):
+            code = str(explicit) if explicit else _fresh_pairing_code(ctx, tried, deadline)
+            _wait_while_locked(ctx, deadline)
+            ctx.log.info(f"typing pairing code {code} (attempt {attempt}/{attempts})")
+            code_entry.enter_code(code)
+            tried.add(code)
+            if gone(ctx.app, pairing_code_entry_screen.CONNECT_TWO_PCS_HEADING_LOCATOR, "ConnectTwoPcsHeading",
+                    timeout=confirm):
+                ctx.log.success(f"pairing code {code} accepted")
+                return
+            ctx.log.warning(f"pairing code {code} was not accepted within {confirm:.0f}s")
+        raise RuntimeError(f"pairing code rejected {attempts} time(s); tried {sorted(tried)}")
 
     def type_wrong_code(ctx, args) -> None:
         code_entry.enter_code(str(args.get("code", WRONG_PAIRING_CODE)))
