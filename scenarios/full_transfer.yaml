@@ -1,0 +1,81 @@
+name: full_transfer
+description: >
+  Sign in, pair, transfer everything, then walk the whole results family: summary ->
+  details -> back -> Finish -> Migration Done (PDF, feedback, Erase your old PC) -> Back
+  to Home. Covers TARGET_STATE_MACHINE.md screens 1.2, 1.4, 1.6-1.13, 1.15, 1.16.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+        note: skipped when a cached login takes the app straight to checkPrerequisites; UAC must be approved by hand
+      - at: connectOldPc
+        do: publish
+        args: {value: connectOldPc}
+        timeout: 900
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+        note: waits for the Source script to publish the code
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: view_details
+      - at: complete
+        do: open_pdf
+      - at: complete
+        do: back_to_summary
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: download_pdf
+      - at: migrationDone
+        do: tell_us_how_we_did
+      - at: feedbackModal
+        do: submit
+        args: {rating: 5, comment: Automated full_transfer run}
+      - at: migrationDone
+        do: erase_old_pc
+      - at: learnAboutErase
+        do: back_to_home
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: migrationComplete
+        do: announce
+        timeout: 7200
+      - at: migrationComplete
+        do: close
+        done: true

@@ -3,14 +3,15 @@ up" lives. Replaces the per-flow polling loops in flows/target/*.py.
 
 Per tick:
   1. observe()                                    -> (screen, overlay, close_prompt)
-  2. a close prompt or an overlay that is NOT the step's own target -> apply the role's
+  2. one of the step's targets is showing          -> perform its action / env step, done
+  3. the step is optional and the NEXT step's target is showing -> skip this step
+  4. a close prompt or an overlay (not the step's own target) -> apply the role's
      policy for it (click / wait_until_gone / fail / ignore; a missing policy falls back
-     to the model: auto-recovering overlays are waited out, terminal ones fail)
-  3. the step's target state is showing            -> perform its action (if any), done
-  4. otherwise the screen must be one we could legitimately be passing through
+     to the model: auto-recovering overlays are waited out, everything else fails)
+  5. otherwise the screen must be one we could legitimately be passing through
      (previous target, the action's expect list, and anything the engine reaches on
      its own from there) -> keep waiting; anything else is an UnexpectedState
-  5. step timeout -> StepTimeout, carrying the exact last observation
+  6. step timeout -> StepTimeout, carrying the exact last observation
 
 Every state change is recorded to ActionReporter (with a screenshot) so the HTML report
 reads as a timeline of states, not just clicks. Failures carry the Observation, so the
@@ -20,13 +21,14 @@ message says where the app actually was.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
 
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model, State
 from orchestration.statemachine.observer import Observation, Observer
 from orchestration.statemachine.scenario import Policy, RoleScript, Step
+from utils import environment
 
 DEFAULT_AUTO_RECOVER_CAP_SECONDS = 600.0
 DEFAULT_CLICK_POLICY_MAX = 5
@@ -38,7 +40,7 @@ DEFAULT_SETTLE_SECONDS = 3.0
 
 
 class RunnerError(Exception):
-    def __init__(self, message: str, observation: Optional[Observation] = None, step: Optional[Step] = None):
+    def __init__(self, message: str, observation: Observation | None = None, step: Step | None = None):
         self.observation = observation
         self.step = step
         where = f" [{observation.key()}]" if observation else ""
@@ -66,7 +68,7 @@ class PolicyExhausted(RunnerError):
 class _OverlayTracking:
     first_seen: float
     clicks: int = 0
-    last_click: Optional[float] = None
+    last_click: float | None = None
     logged_wait: bool = False
 
 
@@ -82,8 +84,6 @@ class Runner:
         clock: Callable[[], float] = time.monotonic,
         settle_seconds: float = DEFAULT_SETTLE_SECONDS,
     ):
-        self.settle_seconds = settle_seconds
-        self._last_action_at: Optional[float] = None
         self.model = model
         self.script = script
         self.ctx = ctx
@@ -91,27 +91,31 @@ class Runner:
         self.reporter = reporter
         self._sleep = sleep
         self._clock = clock
+        self.settle_seconds = settle_seconds
         self.log = ctx.log
-        self.history: List[Observation] = []
-        self._last: Optional[Observation] = None
-        self._tracking: Dict[str, _OverlayTracking] = {}
-        self._previous_target: Optional[str] = None
+        self.history: list[Observation] = []
+        self._last: Observation | None = None
+        self._tracking: dict[str, _OverlayTracking] = {}
+        self._previous_target: str | None = None
         self._previous_action_expect: tuple = ()
+        self._last_action_at: float | None = None
 
     # ------------------------------------------------------------------ public
 
     def run(self) -> None:
-        self.log.info(f"Runner starting: {len(self.script.steps)} steps, role={self.ctx.role}")
-        for step in self.script.steps:
-            self._run_step(step)
+        steps = self.script.steps
+        self.log.info(f"Runner starting: {len(steps)} steps, role={self.ctx.role}")
+        for i, step in enumerate(steps):
+            next_step = steps[i + 1] if i + 1 < len(steps) else None
+            self._run_step(step, next_step)
             if step.done:
-                self.log.success(f"Scenario script complete at {step.at}")
+                self.log.success(f"Scenario script complete at {'/'.join(step.at)}")
                 return
         self.log.success("Scenario script complete")
 
     # ------------------------------------------------------------------ one step
 
-    def _run_step(self, step: Step) -> None:
+    def _run_step(self, step: Step, next_step: Step | None = None) -> None:
         timeout = step.timeout if step.timeout is not None else self.script.step_timeout
         deadline = self._clock() + timeout
         transit = self._transit_states(step)
@@ -127,9 +131,14 @@ class Runner:
                 self._sleep(self.script.tick)
                 continue
 
-            if self._at_target(obs, step):
-                self._perform(step, obs)
-                self._previous_target = step.at
+            matched = self._at_target(obs, step)
+            if matched is not None:
+                self._perform(step, obs, matched)
+                self._previous_target = matched
+                return
+
+            if step.optional and next_step is not None and self._at_target(obs, next_step) is not None:
+                self.log.info(f"{step.label()} skipped -- {obs.top()} (the next step's target) is already showing")
                 return
 
             interrupter = obs.close_prompt or obs.overlay
@@ -137,23 +146,23 @@ class Runner:
                 if not self._settling(interrupter):
                     self._apply_policy(interrupter, obs, step)
                 if self._clock() >= deadline:
-                    raise StepTimeout(f"{step.at} never showed; {interrupter} kept interrupting", obs, step)
+                    raise StepTimeout(f"{'/'.join(step.at)} never showed; {interrupter} kept interrupting", obs, step)
                 self._sleep(self.script.tick)
                 continue
 
-            if obs.screen is None:
-                pass  # mid-transition or nothing recognised yet -- keep waiting
-            else:
+            if obs.screen is not None:
                 screen = self.model.get(obs.screen)
                 if screen.terminal:
                     raise TerminalState(f"reached terminal state {obs.screen}", obs, step)
                 if obs.screen not in transit:
                     raise UnexpectedState(
-                        f"expected {step.at} (or in transit via {sorted(transit)}), got {obs.screen}", obs, step
+                        f"expected {'/'.join(step.at)} (or in transit via {sorted(transit)}), got {obs.screen}",
+                        obs, step,
                     )
+            # obs.screen is None: mid-transition or nothing recognised yet -- keep waiting
 
             if self._clock() >= deadline:
-                raise StepTimeout(f"{step.at} did not appear within {timeout:.0f}s", obs, step)
+                raise StepTimeout(f"{'/'.join(step.at)} did not appear within {timeout:.0f}s", obs, step)
             self._sleep(self.script.tick)
 
     def _settling(self, state_id: str) -> bool:
@@ -163,18 +172,24 @@ class Runner:
             return False
         return (self._clock() - self._last_action_at) < self.settle_seconds
 
-    def _at_target(self, obs: Observation, step: Step) -> bool:
-        target = self.model.get(step.at)
-        if target.layer == "screen":
-            # a screen step is only "reached" when nothing is stacked over it
-            return obs.screen == step.at and obs.overlay is None and obs.close_prompt is None
-        if target.layer == "overlay":
-            return obs.overlay == step.at and obs.close_prompt is None
-        return obs.close_prompt == step.at
+    def _at_target(self, obs: Observation, step: Step) -> str | None:
+        """The step target that is showing right now, or None."""
+        for target in step.at:
+            state = self.model.get(target)
+            if state.layer == "screen":
+                # a screen step is only "reached" when nothing is stacked over it
+                if obs.screen == target and obs.overlay is None and obs.close_prompt is None:
+                    return target
+            elif state.layer == "overlay":
+                if obs.overlay == target and obs.close_prompt is None:
+                    return target
+            elif obs.close_prompt == target:
+                return target
+        return None
 
     def _transit_states(self, step: Step) -> set:
         """Screens we may legitimately see while waiting for this step's target."""
-        seeds = {step.at}
+        seeds = set(step.at)
         if self._previous_target:
             seeds.add(self._previous_target)
         seeds.update(self._previous_action_expect)
@@ -184,23 +199,33 @@ class Runner:
         # a previous *user* state we just acted on may still be rendering for a moment
         return reachable | seeds
 
-    def _perform(self, step: Step, obs: Observation) -> None:
+    def _perform(self, step: Step, obs: Observation, matched: str) -> None:
+        if step.wait_before:
+            self.log.info(f"{step.label()} reached -- pausing {step.wait_before:.0f}s before acting")
+            self._sleep(step.wait_before)
         if step.is_wait:
             self.log.success(f"{step.label()} reached")
-            self._previous_action_expect = ()
+            self._previous_action_expect = tuple(step.expect) if step.expect else ()
             return
-        state = self.model.get(step.at)
-        action = state.action(step.do)
-        self.log.info(f"{step.label()} -- performing {action.name}" + (f" {step.args}" if step.args else ""))
+
+        if step.env is not None:
+            name, perform, default_expect = step.env, environment.resolve(step.env), ()
+            perform_args = (self.ctx,)
+        else:
+            action = self.model.get(matched).action(step.do)
+            name, perform, default_expect = action.name, action.perform, action.expect
+            perform_args = (self.ctx, step.args)
+
+        self.log.info(f"{step.label()} -- performing {name}" + (f" {step.args}" if step.args else ""))
         start = self._clock()
         try:
-            action.perform(self.ctx, step.args)
+            perform(*perform_args)
         except Exception as exc:
-            self._record(step.at, action.name, "fail", (self._clock() - start) * 1000, error=str(exc))
-            raise RunnerError(f"action {action.name} on {step.at} failed: {exc}", obs, step) from exc
-        self._record(step.at, action.name, "pass", (self._clock() - start) * 1000)
+            self._record(matched, name, "fail", (self._clock() - start) * 1000, error=str(exc))
+            raise RunnerError(f"{name} on {matched} failed: {exc}", obs, step) from exc
+        self._record(matched, name, "pass", (self._clock() - start) * 1000)
         self._last_action_at = self._clock()
-        self._previous_action_expect = tuple(step.expect) if step.expect else action.expect
+        self._previous_action_expect = tuple(step.expect) if step.expect else tuple(default_expect)
 
     # ------------------------------------------------------------------ policies
 
@@ -279,7 +304,7 @@ class Runner:
         self._record("StateMachine", f"observe {obs.key()}", "pass", 0.0, screenshot=True)
 
     def _record(self, component: str, action: str, status: str, duration_ms: float,
-                error: Optional[str] = None, screenshot: bool = False) -> None:
+                error: str | None = None, screenshot: bool = False) -> None:
         if self.reporter is None:
             return
         shot = shot_err = None

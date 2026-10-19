@@ -19,8 +19,9 @@ own stacking (TARGET_STATE_MACHINE.md Sec 1).
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Protocol
+from typing import Protocol
 
 from loguru import logger
 
@@ -29,10 +30,10 @@ from orchestration.statemachine.model import Model, State, normalize
 
 @dataclass
 class Observation:
-    screen: Optional[str]
-    overlay: Optional[str]
-    close_prompt: Optional[str]
-    error: Optional[str] = None
+    screen: str | None
+    overlay: str | None
+    close_prompt: str | None
+    error: str | None = None
     at: float = field(default_factory=time.monotonic)
     snapshot_len: int = 0
 
@@ -42,11 +43,11 @@ class Observation:
             f"prompt={self.close_prompt or '-'}" + (f" error={self.error!r}" if self.error else "")
         )
 
-    def top(self) -> Optional[str]:
+    def top(self) -> str | None:
         """The state id that currently has the user's attention."""
         return self.close_prompt or self.overlay or self.screen
 
-    def same_as(self, other: Optional["Observation"]) -> bool:
+    def same_as(self, other: Observation | None) -> bool:
         return (
             other is not None
             and self.screen == other.screen
@@ -60,7 +61,7 @@ class Observer(Protocol):
     def observe(self, session) -> Observation: ...
 
 
-def _first_match(states, predicate: Callable[[State], bool]) -> Optional[str]:
+def _first_match(states, predicate: Callable[[State], bool]) -> str | None:
     for state in states:
         try:
             if predicate(state):
@@ -71,7 +72,7 @@ def _first_match(states, predicate: Callable[[State], bool]) -> Optional[str]:
 
 
 class SnapshotObserver:
-    def __init__(self, model: Model, source_fn: Optional[Callable[[object], str]] = None):
+    def __init__(self, model: Model, source_fn: Callable[[object], str] | None = None):
         self.model = model
         self._source_fn = source_fn or (lambda session: session.page_source)
         self.last_snapshot: str = ""

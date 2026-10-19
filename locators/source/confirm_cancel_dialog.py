@@ -11,3 +11,7 @@ in this project -- avoids the curly-vs-straight-apostrophe trap in "don't".
 """
 
 NO_DONT_CANCEL_BUTTON_LOCATOR = ("xpath", '//Button[contains(@Name, "No, don")]')
+# Added 2026-10-19 for the state-machine runner's "old PC cancels" scenarios -- resx
+# CancelNow_Text in MigrateToDell.UI/Resources/Resources.resx (verified against source,
+# not live).
+YES_CANCEL_NOW_BUTTON_LOCATOR = ("xpath", '//Button[@Name="Yes, cancel now"]')

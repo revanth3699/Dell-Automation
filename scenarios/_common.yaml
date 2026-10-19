@@ -1,0 +1,38 @@
+# Named policy sets shared by every scenario in this folder. A role script opts in with
+#   policies: {base: happy_path, <overlay>: <override>, ...}
+# Policies decide what the runner does when an overlay/close prompt appears that is NOT the
+# step's own target. See TARGET_STATE_MACHINE.md Sec 3 for the per-overlay reasoning.
+policy_sets:
+  target:
+    happy_path:
+      trustNetwork: {click: trust_network}
+      closeApplications: {click: close_applications}
+      closeApplicationsFailed: {click: retry, max: 3}
+      installBrowser: {click: skip}
+      accountMismatch: {click: continue}
+      signInLaunching: {wait_until_gone: 300}
+      signInFailed: {click: retry, max: 3}
+      signOut: {wait_until_gone: 180}
+      signOutError: {click: cancel}
+      noNetwork: {wait_until_gone: 600}        # the app resumes on its own when the network is back
+      otherPcNoNetwork: {wait_until_gone: 600}
+      batteryCritical: {wait_until_gone: 600}  # clears when AC power is plugged in
+      desktopShortcut: {click: no_thanks}
+      cancelMigrationConfirm: {click: no_continue}
+      connectionLost: {click: try_again, max: 2}
+      driveMapping: {click: cancel}
+      feedbackModal: {click: cancel}
+      noDeviceFound: fail
+      migrationCancelled: fail
+      notAdmin: fail
+      localeMismatch: fail
+      localeNotSupported: fail
+      failure: fail
+  source:
+    happy_path:
+      trustNetwork: {click: yes_continue}
+      batteryCritical: {wait_until_gone: 600}
+      noNetwork: {wait_until_gone: 600}
+      otherPcLost: {wait_until_gone: 600}
+      confirmCancel: {click: no_dont_cancel}
+      regionalNotSupported: fail

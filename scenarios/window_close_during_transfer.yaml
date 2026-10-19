@@ -1,0 +1,68 @@
+name: window_close_during_transfer
+description: >
+  Press the window X while a transfer runs: the cancel-migration prompt appears; "Continue
+  migration" dismisses it; a second X and "Cancel migration" start the close sequence,
+  which asks about a desktop shortcut first (when none exists). Covers both close prompts
+  (Sec 4).
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      cancelMigrationConfirm: fail   # handled explicitly below
+      desktopShortcut: fail
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: migrating
+        do: close_window
+        wait_before: 30
+      - at: cancelMigrationConfirm
+        do: no_continue
+      - at: migrating
+        do: close_window
+        wait_before: 10
+      - at: cancelMigrationConfirm
+        do: yes_cancel
+      - at: desktopShortcut
+        do: create_shortcut
+        timeout: 120
+        done: true
+        note: the app closes right after; a shortcut named after the launcher should now be on the Desktop
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [cancelledByOtherPc, migrationError, migrationPartialTryAgain, migrationPartialSummary, migrationComplete]
+        do: close
+        timeout: 1800
+        done: true

@@ -10,7 +10,7 @@ clicking Continue, consumed by the sign-in action one step later).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -21,9 +21,9 @@ class RunContext:
     app: Any                          # WinAppDriverSession attached to the app window
     coordination: Any                 # utils.coordination_client.CoordinationClient
     log: Any                          # loguru logger bound to the role
-    env: Dict[str, str] = field(default_factory=dict)      # credentials/paths from the environment
-    scratch: Dict[str, Any] = field(default_factory=dict)  # per-run working storage for actions
-    scenario_name: Optional[str] = None
+    env: dict[str, str] = field(default_factory=dict)      # credentials/paths from the environment
+    scratch: dict[str, Any] = field(default_factory=dict)  # per-run working storage for actions
+    scenario_name: str | None = None
 
     def require_env(self, name: str) -> str:
         value = self.env.get(name)

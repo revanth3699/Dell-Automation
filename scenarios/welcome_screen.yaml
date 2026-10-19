@@ -1,0 +1,49 @@
+name: welcome_screen
+description: >
+  Target only, no Source PC needed. Remind-me-later family (pick a time, Set reminder,
+  success/error, Close; then Close without setting), Sign out, Sign-in modal Cancel, a
+  deliberately failed sign-in (wrong OTP then cancel) and its Retry, ending on the
+  connect-old-PC screen. Covers 1.2-1.5 and overlays signIn/signInFailed/signOut.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 180, tick: 0.5}
+    policies:
+      base: happy_path
+      signInFailed: fail          # the script handles it explicitly below
+    steps:
+      - at: welcome
+        do: remind_me_later
+        timeout: 120
+        note: needs an entitled, signed-in Welcome (Remind me later is hidden otherwise)
+      - at: welcomeDeferral
+        do: select_option
+        args: {option: tomorrow}
+      - at: welcomeDeferral
+        do: set_reminder
+      - at: [deferralSuccess, welcomeDeferralError]
+        do: close
+      - at: welcome
+        do: remind_me_later
+      - at: welcomeDeferral
+        do: close
+      - at: welcome
+        do: sign_out
+      - at: welcomeSignedOut
+        do: continue
+        timeout: 240
+      - at: signIn
+        do: cancel
+      - at: welcomeSignedOut
+        do: continue
+      - at: signIn
+        do: sign_in
+        args: {negative_check: true}
+        timeout: 300
+        note: wrong OTP then Cancel in the browser -> We couldn't sign you in
+      - at: signInFailed
+        do: retry
+        timeout: 300
+      - at: connectOldPc
+        timeout: 900
+        done: true

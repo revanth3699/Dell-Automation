@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Tuple
+from typing import Any, Literal
 
 Layer = Literal["screen", "overlay", "close_prompt"]
 Kind = Literal["user", "waiting", "peer", "terminal"]
@@ -45,9 +46,9 @@ class TextMatch:
     present, at least one of `any` must be present (if given), and no `none` term may be
     present. Terms are normalized at construction."""
 
-    all: Tuple[str, ...] = ()
-    any: Tuple[str, ...] = ()
-    none: Tuple[str, ...] = ()
+    all: tuple[str, ...] = ()
+    any: tuple[str, ...] = ()
+    none: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "all", tuple(normalize(t) for t in self.all))
@@ -74,7 +75,7 @@ class Action:
 
     name: str
     perform: Callable[..., Any]
-    expect: Tuple[str, ...] = ()
+    expect: tuple[str, ...] = ()
     description: str = ""
 
 
@@ -83,10 +84,10 @@ class State:
     id: str
     layer: Layer
     kind: Kind = "user"
-    text: Optional[TextMatch] = None
-    probe: Optional[Callable[..., bool]] = None
-    actions: Dict[str, Action] = field(default_factory=dict)
-    next: Tuple[str, ...] = ()
+    text: TextMatch | None = None
+    probe: Callable[..., bool] | None = None
+    actions: dict[str, Action] = field(default_factory=dict)
+    next: tuple[str, ...] = ()
     auto_recovers: bool = False
     terminal: bool = False
     priority: int = 0
@@ -108,7 +109,7 @@ class State:
 @dataclass
 class Model:
     role: str
-    states: Dict[str, State] = field(default_factory=dict)
+    states: dict[str, State] = field(default_factory=dict)
 
     def add(self, state: State) -> State:
         if state.id in self.states:
@@ -125,18 +126,18 @@ class Model:
     def has(self, state_id: str) -> bool:
         return state_id in self.states
 
-    def by_layer(self, layer: Layer) -> List[State]:
+    def by_layer(self, layer: Layer) -> list[State]:
         """States of one layer, highest priority first, insertion order within a tier."""
         ordered = [s for s in self.states.values() if s.layer == layer]
         return sorted(ordered, key=lambda s: -s.priority)
 
-    def screens(self) -> List[State]:
+    def screens(self) -> list[State]:
         return self.by_layer("screen")
 
-    def overlays(self) -> List[State]:
+    def overlays(self) -> list[State]:
         return self.by_layer("overlay")
 
-    def close_prompts(self) -> List[State]:
+    def close_prompts(self) -> list[State]:
         return self.by_layer("close_prompt")
 
     def reachable_on_its_own(self, start_ids: Iterable[str]) -> set:

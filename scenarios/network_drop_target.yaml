@@ -1,0 +1,71 @@
+name: network_drop_target
+description: >
+  Disables this (Target) PC's network adapter mid-transfer, waits for the no-network
+  overlay, re-enables the adapter and expects the transfer to resume on its own
+  (Network.Status 2507). Needs an elevated run; DDA_NETWORK_ADAPTER_NAME may be set to
+  pick the adapter. Covers overlay noNetwork (ThisPcPostPairing) auto-recovery.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    teardown: [enable_network]
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+        note: the overlay must clear by itself once the engine reports the network back
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain]
+        do: close
+        timeout: 7200
+        done: true

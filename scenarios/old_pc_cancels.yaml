@@ -1,0 +1,103 @@
+name: old_pc_cancels
+description: >
+  The Source cancels twice. First before Migration.Start (while the Target is choosing):
+  the Target shows "The transfer was cancelled on your other PC", Try again re-pairs.
+  Then mid-transfer: the Target's summary reports the old PC cancelled. Covers overlay
+  migrationCancelled and the CancelledByOldPc ending of 1.11.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      migrationCancelled: fail       # handled explicitly below
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: publish
+        args: {value: chooseWhatToMove}
+        timeout: 600
+      - at: migrationCancelled
+        timeout: 600
+        note: the Source cancels once it sees target_state=chooseWhatToMove
+      - at: migrationCancelled
+        do: try_again
+      - at: connectOldPc
+        timeout: 120
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: resultsSummary
+        timeout: 1800
+        note: the Source cancels mid-transfer; summary reason CancelledByOldPc
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      confirmCancel: fail            # handled explicitly below
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: readyToMigrate
+        do: wait_for_peer
+        args: {state: chooseWhatToMove, timeout: 600}
+        timeout: 900
+      - at: readyToMigrate
+        do: cancel
+      - at: confirmCancel
+        do: yes_cancel_now
+      - at: welcome
+        timeout: 300
+        note: where the Source lands after its own cancel is unconfirmed live
+      - at: welcome
+        do: lets_get_started
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: wait_for_peer
+        args: {state: migrating, timeout: 900}
+        timeout: 1800
+      - at: migrating
+        do: cancel
+        wait_before: 30
+      - at: confirmCancel
+        do: yes_cancel_now
+      - at: [welcome, cancelledByOtherPc, migrationError, migrationPartialTryAgain]
+        timeout: 600
+        done: true

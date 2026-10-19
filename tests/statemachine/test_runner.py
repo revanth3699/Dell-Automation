@@ -5,13 +5,19 @@ logic (policies, transit, timeouts, failure messages) is what's under test."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 import pytest
 from loguru import logger
 
 from orchestration.statemachine.context import RunContext
-from orchestration.statemachine.model import Action, Model, ModelError, State, TextMatch, normalize
+from orchestration.statemachine.model import (
+    Action,
+    Model,
+    ModelError,
+    State,
+    TextMatch,
+    normalize,
+)
 from orchestration.statemachine.observer import Observation, SnapshotObserver
 from orchestration.statemachine.runner import (
     PolicyExhausted,
@@ -29,7 +35,6 @@ from orchestration.statemachine.scenario import (
     validate_role_script,
 )
 
-
 # ----------------------------------------------------------------- fixtures / fakes
 
 def obs(screen=None, overlay=None, prompt=None):
@@ -40,7 +45,7 @@ class ScriptedObserver:
     """Returns queued observations in order; repeats the last one forever."""
 
     def __init__(self, *queue: Observation):
-        self.queue: List[Observation] = list(queue)
+        self.queue: list[Observation] = list(queue)
         self.current = self.queue.pop(0) if self.queue else obs()
         self.ticks = 0
 
@@ -57,7 +62,7 @@ class ScriptedObserver:
 
 @dataclass
 class Calls:
-    performed: List[str] = field(default_factory=list)
+    performed: list[str] = field(default_factory=list)
 
 
 def make_model(calls: Calls, observer: ScriptedObserver) -> Model:
@@ -316,3 +321,66 @@ def test_bad_policy_shapes_are_rejected():
         Policy.parse("X", {"click": "a", "fail": None})
     with pytest.raises(ScenarioError):
         parse_scenario({"name": "n", "roles": {"t": {"steps": [{"at": "A", "bogus": 1}]}}})
+
+
+# ----------------------------------------------------------------- at-lists, optional, env, wait_before
+
+def test_at_list_matches_any_target_and_uses_that_states_action():
+    calls, observer = Calls(), ScriptedObserver(obs("C"))
+    model = make_model(calls, observer)
+    observer.push(obs("A"))
+    run(model, [Step(["A", "C"], "finish", index=0), Step("A", done=True, index=1)], observer)
+    assert calls.performed == ["C.finish"]
+
+
+def test_optional_step_is_skipped_when_next_target_shows_first():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    observer.push(obs("B"), obs("C"))  # Y never appears; C (next step) does
+    model.get("A").actions["go"].perform = lambda ctx, a: calls.performed.append("A.go")
+    run(model, [Step("A", "go", index=0), Step("Y", "dismiss", optional=True, index=1),
+                Step("C", done=True, index=2)], observer)
+    assert calls.performed == ["A.go"]
+
+
+def test_env_step_runs_registered_environment_function(monkeypatch):
+    from utils import environment
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    monkeypatch.setitem(environment.STEPS, "fake_env", lambda ctx: calls.performed.append("env"))
+    run(model, [Step("A", env="fake_env", index=0), Step("A", done=True, index=1)], observer)
+    assert calls.performed == ["env"]
+
+
+def test_wait_before_pauses_then_acts():
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    observer.push(obs("B"))
+    script = RoleScript(role="test", steps=[Step("A", "go", wait_before=7, index=0), Step("B", done=True, index=1)],
+                        step_timeout=30, tick=1.0)
+    clock = FakeClock()
+    Runner(model, script, make_ctx(), observer, sleep=clock.sleep, clock=clock).run()
+    assert clock.now >= 7 and calls.performed == ["A.go"]
+
+
+def test_validation_checks_env_names_and_at_lists():
+    calls, observer = Calls(), ScriptedObserver()
+    model = make_model(calls, observer)
+    data = {"name": "e", "roles": {"test": {
+        "setup": ["nope_setup"],
+        "steps": [{"at": ["A", "Q"], "do": "go"}, {"at": "A", "env": "nope_env"}, {"at": "A", "done": True, "optional": True}],
+    }}}
+    problems = "\n".join(validate_role_script(parse_scenario(data).role("test"), model))
+    for needle in ("unknown state 'Q'", "unknown environment step 'nope_env'", "nope_setup", "cannot be optional"):
+        assert needle in problems, needle
+
+
+def test_policy_base_merges_named_set_with_overrides():
+    data = {"name": "p", "policy_sets": {"test": {"std": {"X": {"wait_until_gone": 5}, "F": "fail"}}},
+            "roles": {"test": {"policies": {"base": "std", "X": {"wait_until_gone": 9}},
+                               "steps": [{"at": "A", "done": True}]}}}
+    policies = parse_scenario(data).role("test").policies
+    assert policies["X"].cap == 9 and policies["F"].kind == "fail"
+    with pytest.raises(ScenarioError):
+        parse_scenario({"name": "p", "roles": {"test": {"policies": {"base": "missing"},
+                                                        "steps": [{"at": "A", "done": True}]}}})

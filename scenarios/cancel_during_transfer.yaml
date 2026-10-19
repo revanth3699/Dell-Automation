@@ -1,0 +1,75 @@
+name: cancel_during_transfer
+description: >
+  Start a transfer, open the cancel prompt and keep going ("No, continue"), then cancel for
+  real ("Yes, cancel"): the summary shows the cancelled run, Finish -> Migration Done ->
+  Transfer more data -> Welcome. Covers 1.11 Cancel rows and the Migration Done
+  transfer_more_data row.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      cancelMigrationConfirm: fail     # handled explicitly below
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: migrating
+        do: cancel
+        wait_before: 30
+      - at: cancelMigrationConfirm
+        do: no_continue
+      - at: migrating
+        do: cancel
+        wait_before: 15
+      - at: cancelMigrationConfirm
+        do: yes_cancel
+      - at: resultsSummary
+        timeout: 600
+        note: Cancel ack or the app's own 10 s timeout, then Migration.Report
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [cancelledByOtherPc, migrationError, migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+        do: announce
+        timeout: 1800
+        note: which screen the Source shows after a Target-side cancel is unconfirmed live
+      - at: [cancelledByOtherPc, migrationError, migrationPartialSummary, migrationPartialTryAgain, migrationComplete]
+        do: close
+        done: true

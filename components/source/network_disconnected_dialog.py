@@ -14,7 +14,7 @@ checked AND clicked in one call).
 import time
 
 from components.base_component import BaseComponent
-from locators.source.network_disconnected_dialog import CHECK_AGAIN_BUTTON_LOCATOR
+from locators.source.network_disconnected_dialog import CANCEL_BUTTON_LOCATOR, CHECK_AGAIN_BUTTON_LOCATOR
 
 
 class NetworkDisconnectedDialog:
@@ -27,7 +27,14 @@ class NetworkDisconnectedDialog:
 
     def __init__(self, app_session):
         self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
+        self._cancel_button = BaseComponent(app_session, *CANCEL_BUTTON_LOCATOR, "NetworkDisconnectedCancelButton")
 
     def click_check_again(self) -> None:
         time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
         self._check_again_button.click(timeout=2.0)
+
+    def click_cancel(self) -> None:
+        """The dialog's only real button (2026-10-19, verified against MigrateToDell.UI
+        source, not live -- see locators/source/network_disconnected_dialog.py). Opens
+        the Are you sure you want to cancel? prompt."""
+        self._cancel_button.click(timeout=2.0)

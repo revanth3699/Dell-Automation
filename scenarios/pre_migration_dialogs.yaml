@@ -1,0 +1,85 @@
+name: pre_migration_dialogs
+description: >
+  Forces the dialogs that gate Migrate now and handles each one explicitly: Close
+  applications (Notepad is started before launch), Want to keep your browser bookmarks
+  (needs a browser with bookmarks on the Source that is absent here) and Your user account
+  names don't match (needs different Windows user names on the two PCs). Each step is
+  optional, so the scenario still passes on a machine where a dialog does not fire.
+  Covers overlays closeApplications, installBrowser, accountMismatch.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    setup: [open_notepad]
+    teardown: [close_notepad]
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: closeApplications
+        do: close_applications
+        optional: true
+        timeout: 900
+        note: precheck variant, before pairing
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: accountMismatch
+        do: continue
+        optional: true
+        timeout: 600
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: installBrowser
+        do: resume
+        optional: true
+        timeout: 120
+      - at: installBrowser
+        do: skip
+        optional: true
+        timeout: 30
+      - at: closeApplications
+        do: close_applications
+        optional: true
+        timeout: 120
+        note: chain variant, after Migrate now
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 300
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain]
+        do: close
+        timeout: 7200
+        done: true

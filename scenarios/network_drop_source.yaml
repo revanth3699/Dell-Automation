@@ -1,0 +1,73 @@
+name: network_drop_source
+description: >
+  The Source PC drops its network mid-transfer. The Target shows "It looks like your
+  network has been disconnected" and must resume on its own once the Source is back.
+  Needs an elevated run on the Source. Covers Target overlay otherPcNoNetwork and Source
+  overlay noNetwork.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: otherPcNoNetwork
+        timeout: 600
+      - at: migrating
+        timeout: 600
+        note: clears by itself after the Source re-enables its adapter
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    teardown: [enable_network]
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: wait_for_peer
+        args: {state: migrating, timeout: 600}
+        timeout: 1800
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: [noNetwork, migrating]
+        env: enable_network
+        wait_before: 30
+        note: the Source may or may not surface its own no-network page
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain]
+        do: close
+        timeout: 7200
+        done: true

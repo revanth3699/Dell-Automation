@@ -1,0 +1,171 @@
+"""State-machine scenario runner -- the entry point for YAML-driven scenarios.
+
+    python -m orchestration.scenario_runner --role target --run-id <id> --scenario full_transfer
+    python -m orchestration.scenario_runner --role source --run-id <id> --scenario full_transfer
+    python -m orchestration.scenario_runner --scenario full_transfer --validate-only
+
+--scenario is a name under scenarios/ (full_transfer -> scenarios/full_transfer.yaml) or a
+path. Both machines run this as fully independent processes with the same --run-id and
+only ever meet through the Coordination Service (CLAUDE.md "Both machines, one channel").
+
+Compared with orchestration/role_runner.py (the original hand-written flows, kept
+untouched): the screen sequence and the dialog policies come from the YAML file, the
+waiting/polling comes from orchestration/statemachine/runner.py, and which assertions/
+components back each state comes from target_model.py / source_model.py. Prerequisites,
+Session launch/teardown, reporting and credentials are handled exactly as role_runner
+does them.
+
+Environment (same variables as role_runner; see README):
+  Target: DDA_TARGET_BUILD_PATH, DDA_TARGET_SIGNIN_USERNAME, DDA_TARGET_SIGNIN_PASSWORD,
+          DDA_TARGET_OTP_STATIC_VALUE, DDA_CDM_SIMULATOR_PATH (--launch simulator only)
+  Source: DDA_SOURCE_BUILD_PATH
+  Both:   DDA_COORDINATION_SERVICE_URL
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from factory.logger_factory import LoggerFactory
+from factory.session import MachineRole, Session
+from orchestration.statemachine import source_model, target_model
+from orchestration.statemachine.context import RunContext
+from orchestration.statemachine.model import Model
+from orchestration.statemachine.observer import ProbeObserver, SnapshotObserver
+from orchestration.statemachine.runner import Runner, RunnerError
+from orchestration.statemachine.scenario import (
+    Scenario,
+    ScenarioError,
+    load_scenario,
+    validate_scenario,
+)
+from reports.action_reporter import ActionReporter
+from reports.html_report_builder import build_report
+from utils import environment
+from utils.coordination_client import CoordinationClient
+from utils.prerequisites import ensure_prerequisites
+
+SCENARIO_DIR = Path(__file__).resolve().parent.parent / "scenarios"
+MODEL_BUILDERS = {"target": target_model.build, "source": source_model.build}
+
+
+def resolve_scenario_path(name_or_path: str) -> Path:
+    candidate = Path(name_or_path)
+    if candidate.suffix in (".yaml", ".yml") or candidate.exists():
+        return candidate
+    return SCENARIO_DIR / f"{name_or_path}.yaml"
+
+
+def build_models(app_session=None, roles=None) -> dict[str, Model]:
+    roles = roles or list(MODEL_BUILDERS)
+    return {role: MODEL_BUILDERS[role](app_session) for role in roles if role in MODEL_BUILDERS}
+
+
+def load_and_validate(name_or_path: str) -> Scenario:
+    path = resolve_scenario_path(name_or_path)
+    if not path.exists():
+        raise ScenarioError(f"scenario file not found: {path}")
+    scenario = load_scenario(path)
+    validate_scenario(scenario, build_models(None, list(scenario.roles)))
+    return scenario
+
+
+def _env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k.startswith("DDA_")}
+
+
+def _require(env: dict[str, str], name: str) -> str:
+    value = env.get(name)
+    if not value:
+        raise RuntimeError(f"Required environment variable {name} is not set")
+    return value
+
+
+def _launch_session(role: MachineRole, env: dict[str, str], launch_mode: str) -> Session:
+    if role is MachineRole.TARGET:
+        simulator_path = _require(env, "DDA_CDM_SIMULATOR_PATH") if launch_mode == "simulator" else None
+        return Session.get(role, build_path=_require(env, "DDA_TARGET_BUILD_PATH"),
+                           launch_mode=launch_mode, simulator_path=simulator_path)
+    return Session.get(role, build_path=_require(env, "DDA_SOURCE_BUILD_PATH"))
+
+
+def _run_environment_steps(names, ctx, phase: str) -> None:
+    for name in names:
+        step = environment.resolve(name)
+        ctx.log.info(f"{phase}: {name}")
+        try:
+            step(ctx)
+        except Exception as exc:
+            if phase == "setup":
+                raise
+            ctx.log.error(f"teardown step {name} failed: {exc}")  # keep tearing down
+
+
+def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, observer_kind: str,
+        skip_prerequisites: bool = False) -> None:
+    role = MachineRole(role_name)
+    script = scenario.role(role_name)
+    env = _env()
+    log = LoggerFactory.get_logger(role_name)
+
+    if not skip_prerequisites:
+        ensure_prerequisites()
+    ActionReporter.start_run(run_id, role_name)
+    reporter = ActionReporter.current()
+    reporter.set_test_name(scenario.name)
+
+    session = _launch_session(role, env, launch_mode)
+    ctx = RunContext(role=role_name, run_id=run_id, session=session, app=session.app,
+                     coordination=CoordinationClient(), log=log, env=env, scenario_name=scenario.name)
+    model = MODEL_BUILDERS[role_name](session.app)
+    observer = SnapshotObserver(model) if observer_kind == "snapshot" else ProbeObserver(model)
+    try:
+        _run_environment_steps(script.setup, ctx, "setup")
+        Runner(model, script, ctx, observer, reporter=reporter).run()
+        log.success(f"Scenario {scenario.name!r} ({role_name}) PASSED")
+    finally:
+        try:
+            _run_environment_steps(script.teardown, ctx, "teardown")
+        finally:
+            session.close()
+            build_report()
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--scenario", required=True, help="scenario name under scenarios/ or a YAML path")
+    parser.add_argument("--role", choices=["target", "source"])
+    parser.add_argument("--run-id")
+    parser.add_argument("--launch", choices=["exe", "mock", "simulator"],
+                        help="Target launch mode (default: the scenario's 'launch', else exe)")
+    parser.add_argument("--observer", choices=["snapshot", "probe"], default="snapshot",
+                        help="snapshot = one page_source per tick (default); probe = per-locator find_element")
+    parser.add_argument("--validate-only", action="store_true", help="load + validate the scenario, launch nothing")
+    parser.add_argument("--skip-prerequisites", action="store_true")
+    args = parser.parse_args(argv)
+
+    try:
+        scenario = load_and_validate(args.scenario)
+    except ScenarioError as exc:
+        print(f"INVALID SCENARIO: {exc}", file=sys.stderr)
+        return 2
+    print(f"Scenario {scenario.name!r} valid for roles {sorted(scenario.roles)}")
+    if args.validate_only:
+        return 0
+    if not args.role or not args.run_id:
+        parser.error("--role and --run-id are required unless --validate-only")
+
+    launch_mode = args.launch or scenario.launch or "exe"
+    try:
+        run(args.role, args.run_id, scenario, launch_mode, args.observer, args.skip_prerequisites)
+    except RunnerError as exc:
+        print(f"SCENARIO FAILED: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

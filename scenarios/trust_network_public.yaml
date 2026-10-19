@@ -1,0 +1,36 @@
+name: trust_network_public
+description: >
+  Target only. With the network profile set to Public the precheck raises "Connect to a
+  trusted network": Cancel returns to Welcome; a second Continue and "Trust network" moves
+  on to the connect-old-PC screen. Needs an elevated run (Set-NetConnectionProfile).
+  Covers overlay trustNetwork.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    setup: [set_network_public]
+    teardown: [set_network_private]
+    policies:
+      base: happy_path
+      trustNetwork: fail            # handled explicitly below
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: trustNetwork
+        timeout: 600
+      - at: trustNetwork
+        do: cancel
+      - at: welcome
+        do: continue
+        timeout: 180
+      - at: trustNetwork
+        do: trust_network
+        timeout: 600
+      - at: connectOldPc
+        timeout: 600
+        done: true
