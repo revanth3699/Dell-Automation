@@ -329,7 +329,7 @@ their own role (plus `DDA_COORDINATION_SERVICE_URL`, which both must agree on). 
 
 | Variable | Target PC | Source PC | Notes |
 |---|---|---|---|
-| `DDA_TARGET_BUILD_PATH` | **Required** | not used | Path to `DellDataAssistant.TargetPc.exe` on this machine (no installer exists for this build). |
+| `DDA_TARGET_BUILD_PATH` | **Required** | not used | Path to `MyDellExperience.exe` on this machine (no installer exists for this build; renamed from `DellDataAssistant.TargetPc.exe`, confirmed 2026-10-19). |
 | `DDA_SOURCE_BUILD_PATH` | not used | **Required** | Path to the *already-installed* `DellDataAssistant.exe` (the Source build is a self-extracting installer -- point at what it produces, not the original downloaded installer). |
 | `DDA_TARGET_SIGNIN_USERNAME` | **Required** | not used | Real environment variable only -- never put credentials in `.env`. |
 | `DDA_TARGET_SIGNIN_PASSWORD` | **Required** | not used | Same as above. |

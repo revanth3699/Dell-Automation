@@ -26,8 +26,13 @@ WINAPPDRIVER_HOST = os.environ.get("DDA_WINAPPDRIVER_HOST", "127.0.0.1")
 WINAPPDRIVER_PORT = int(os.environ.get("DDA_WINAPPDRIVER_PORT", "4723"))
 WINAPPDRIVER_URL = f"http://{WINAPPDRIVER_HOST}:{WINAPPDRIVER_PORT}"
 
-TARGET_EXE_NAME = os.environ.get("DDA_TARGET_EXE_NAME", "DellDataAssistant.TargetPc.exe")
-TARGET_PROCESS_NAME = os.environ.get("DDA_TARGET_PROCESS_NAME", "DellDataAssistant.TargetPc")
+# Renamed product, confirmed directly by the user (2026-10-19): the Target PC UI app
+# build now ships as "MyDellExperience" (confirmed via the exe's own ProductName/
+# FileDescription version metadata), not "DellDataAssistant.TargetPc" -- the old name
+# this project started with. Still overridable via env var for a build that uses a
+# different name again.
+TARGET_EXE_NAME = os.environ.get("DDA_TARGET_EXE_NAME", "MyDellExperience.exe")
+TARGET_PROCESS_NAME = os.environ.get("DDA_TARGET_PROCESS_NAME", "MyDellExperience")
 
 # Confirmed via live Phase 0 spike (2026-10-06): the Source PC's downloaded exe is a
 # self-extracting installer, not the real app -- running it installs to (and launches)
