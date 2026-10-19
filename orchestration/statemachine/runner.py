@@ -106,8 +106,7 @@ class Runner:
         steps = self.script.steps
         self.log.info(f"Runner starting: {len(steps)} steps, role={self.ctx.role}")
         for i, step in enumerate(steps):
-            next_step = steps[i + 1] if i + 1 < len(steps) else None
-            self._run_step(step, next_step)
+            self._run_step(step, steps[i + 1:])
             if step.done:
                 self.log.success(f"Scenario script complete at {'/'.join(step.at)}")
                 return
@@ -115,10 +114,14 @@ class Runner:
 
     # ------------------------------------------------------------------ one step
 
-    def _run_step(self, step: Step, next_step: Step | None = None) -> None:
+    def _run_step(self, step: Step, later_steps: list | None = None) -> None:
         timeout = step.timeout if step.timeout is not None else self.script.step_timeout
         deadline = self._clock() + timeout
         transit = self._transit_states(step)
+        # an optional step is skipped the moment the app is at ANY later step's target --
+        # confirmed necessary live (2026-10-19): after View details the app lands on
+        # either complete or skippedFiles, and the branch not taken must fall through
+        later_targets = {t for s in (later_steps or []) for t in s.at} if step.optional else set()
         self.log.info(f"{step.label()} -- waiting up to {timeout:.0f}s" + (f" ({step.note})" if step.note else ""))
 
         while True:
@@ -137,8 +140,8 @@ class Runner:
                 self._previous_target = matched
                 return
 
-            if step.optional and next_step is not None and self._at_target(obs, next_step) is not None:
-                self.log.info(f"{step.label()} skipped -- {obs.top()} (the next step's target) is already showing")
+            if step.optional and obs.top() in later_targets:
+                self.log.info(f"{step.label()} skipped -- {obs.top()} (a later step's target) is already showing")
                 return
 
             interrupter = obs.close_prompt or obs.overlay

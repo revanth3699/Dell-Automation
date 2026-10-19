@@ -20,7 +20,7 @@ Shape (see scenarios/*.yaml and scenarios/_common.yaml):
             do: continue
           - at: signIn
             do: sign_in
-            optional: true           # skipped if the NEXT step's target shows up first
+            optional: true           # skipped if ANY later step's target shows up first
             timeout: 600
           - at: migrating
             env: disable_network     # an environment step instead of a model action

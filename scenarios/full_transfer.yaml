@@ -37,12 +37,22 @@ roles:
         timeout: 7200
       - at: resultsSummary
         do: view_details
+      - at: [complete, skippedFiles]
+        timeout: 120
+        note: complete when nothing was skipped, skippedFiles otherwise (confirmed live 2026-10-19 -- both happen)
       - at: complete
         do: open_pdf
+        optional: true
       - at: complete
         do: back_to_summary
+        optional: true
       - at: resultsSummary
         do: finish
+        optional: true
+      - at: skippedFiles
+        do: finish
+        optional: true
+        note: Finish on the skipped-files screen goes straight to Migration Done
       - at: migrationDone
         do: download_pdf
       - at: migrationDone

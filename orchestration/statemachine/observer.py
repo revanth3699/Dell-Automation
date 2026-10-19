@@ -106,6 +106,21 @@ class ProbeObserver:
         self.model = model
         self.probe_timeout = probe_timeout
 
+        self._last_screen: str | None = None
+
+    def _screen_order(self) -> list:
+        """Sticky ordering -- confirmed live (2026-10-19): probing every screen in turn
+        costs ~0.3-0.6 s each, ~15 s per tick with 20+ screens. The screen seen last is
+        far more likely to still be showing, so it is probed right after any screen that
+        outranks it; if it is still there, the lower-ranked screens are skipped."""
+        screens = self.model.screens()
+        if self._last_screen is None:
+            return screens
+        last = self.model.get(self._last_screen)
+        ahead = [s for s in screens if s.priority > last.priority]
+        rest = [s for s in screens if s.priority <= last.priority and s.id != last.id]
+        return ahead + [last] + rest
+
     def observe(self, session) -> Observation:
         def showing(state: State) -> bool:
             if state.probe is None:
@@ -113,8 +128,10 @@ class ProbeObserver:
             return bool(state.probe(session, timeout=self.probe_timeout))
 
         try:
+            screen = _first_match(self._screen_order(), showing)
+            self._last_screen = screen or self._last_screen
             return Observation(
-                screen=_first_match(self.model.screens(), showing),
+                screen=screen,
                 overlay=_first_match(self.model.overlays(), showing),
                 close_prompt=_first_match(self.model.close_prompts(), showing),
                 via="probe",
@@ -156,4 +173,6 @@ class HybridObserver:
                 return self.probe.observe(session)
             return obs
         self._blank_streak = 0
+        if obs.screen is not None:
+            self.probe._last_screen = obs.screen  # keep the probe's sticky order current
         return obs

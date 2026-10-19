@@ -421,3 +421,30 @@ def test_hybrid_observer_probes_when_snapshot_errors_or_stays_blank():
     assert o.screen == "A" and o.via == "probe"                               # second blank: probe
     session.mode = "ok"
     assert hybrid.observe(session).via == "snapshot"                          # recovered
+
+
+def test_optional_step_is_skipped_when_any_later_target_shows():
+    # View-details lands on C (not B); the optional B step must fall through to the C step
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    observer.push(obs("C"))
+    model.get("A").actions["go"].perform = lambda ctx, a: calls.performed.append("A.go")
+    model.get("A").actions["go"].expect = ("B", "C")
+    run(model, [Step("A", "go", index=0), Step("B", optional=True, index=1), Step("D", optional=True, index=2),
+                Step("C", "finish", index=3), Step("A", done=True, index=4)], observer)
+    assert calls.performed == ["A.go", "C.finish"]
+
+
+def test_probe_observer_sticky_order_checks_last_screen_first():
+    from orchestration.statemachine.observer import ProbeObserver
+    calls, observer = Calls(), ScriptedObserver()
+    model = make_model(calls, observer)
+    order = []
+    for sid in ("A", "B", "C", "D"):
+        model.get(sid).probe = (lambda s: lambda session, timeout: order.append(s) or s == "C")(sid)
+    probe = ProbeObserver(model)
+    assert probe.observe(object()).screen == "C"
+    assert order == ["A", "B", "C"]          # first pass: model order until C matches
+    order.clear()
+    assert probe.observe(object()).screen == "C"
+    assert order == ["C"]                    # second pass: C probed first, rest skipped
