@@ -54,14 +54,25 @@ def ctx_with(values):
 
 
 def accepted_after(monkeypatch, n_rejections):
-    """gone() returns False for the first n calls (code rejected), then True."""
+    """_code_accepted() returns False for the first n calls (code rejected), then True."""
     calls = {"n": 0}
 
-    def fake_gone(session, locator, name, timeout, poll_interval=0.5):
+    def fake_accepted(ctx, confirm):
         calls["n"] += 1
         return calls["n"] > n_rejections
 
-    monkeypatch.setattr(target_model, "gone", fake_gone)
+    monkeypatch.setattr(target_model, "_code_accepted", fake_accepted)
+
+
+def test_code_accepted_recognises_rejection_message_and_success(monkeypatch):
+    from assertions.target import pairing_code_entry_screen as a
+    monkeypatch.setattr(target_model.time, "sleep", lambda s: None)
+    ctx = ctx_with([])
+    monkeypatch.setattr(a, "is_showing", lambda s, timeout=0.1: True)
+    monkeypatch.setattr(a, "is_rejected_showing", lambda s, timeout=0.1: True)
+    assert target_model._code_accepted(ctx, confirm=5) is False       # red message -> rejected at once
+    monkeypatch.setattr(a, "is_showing", lambda s, timeout=0.1: False)
+    assert target_model._code_accepted(ctx, confirm=5) is True        # heading gone -> accepted
 
 
 def test_first_code_accepted(model, monkeypatch):

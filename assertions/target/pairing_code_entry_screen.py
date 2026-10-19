@@ -41,6 +41,17 @@ CONNECTION_SUCCESSFUL_STATUS_LOCATOR = (
 )
 
 
+# Confirmed via a user-supplied screenshot (2026-10-20): a wrong code clears the boxes
+# and shows "That code didn't match. Check your old PC and try again." in red under
+# them. Matched on the apostrophe-free second sentence.
+REJECTED_STATUS_CONTAINS_TEXT = "Check your old PC and try again"
+REJECTED_STATUS_LOCATOR = ("xpath", f'//*[contains(@Name, "{REJECTED_STATUS_CONTAINS_TEXT}")]')
+
+
+def is_rejected_showing(session, timeout: float = 0.1) -> bool:
+    return text_exists(session, REJECTED_STATUS_LOCATOR, "PairingCodeRejectedStatus", timeout=timeout)
+
+
 def is_locked_showing(session, timeout: float = 0.1) -> bool:
     return text_exists(session, LOCKED_STATUS_LOCATOR, "PairingCodeLockedStatus", timeout=timeout)
 

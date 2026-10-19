@@ -111,7 +111,6 @@ from orchestration.statemachine.peer import (
 from orchestration.statemachine.peer import (
     publish as _publish,
 )
-from assertions.common import gone
 from utils.coordination_client import PAIRING_CODE_KEY
 
 PAIRING_ATTEMPTS_DEFAULT = 5
@@ -148,6 +147,22 @@ def _fresh_pairing_code(ctx, exclude: set, deadline: float) -> str:
         if value not in exclude:
             return value
         time.sleep(2.0)
+
+
+def _code_accepted(ctx, confirm: float) -> bool:
+    """After typing a code: True once the code-entry heading is gone (paired, or the
+    1 s success state), False as soon as the app shows the rejection message
+    (confirmed via screenshot 2026-10-20: "That code didn't match. Check your old PC
+    and try again.") or when `confirm` seconds pass with neither."""
+    from assertions.target import pairing_code_entry_screen as code_assertions
+    deadline = time.monotonic() + confirm
+    while time.monotonic() < deadline:
+        if not code_assertions.is_showing(ctx.app, timeout=0.5):
+            return True
+        if code_assertions.is_rejected_showing(ctx.app, timeout=0.5):
+            ctx.log.warning("app says the code did not match")
+            return False
+    return False
 
 
 def _wait_while_locked(ctx, deadline: float) -> None:
@@ -288,8 +303,7 @@ def build(app_session) -> Model:
             ctx.log.info(f"typing pairing code {code} (attempt {attempt}/{attempts})")
             code_entry.enter_code(code)
             tried.add(code)
-            if gone(ctx.app, pairing_code_entry_screen.CONNECT_TWO_PCS_HEADING_LOCATOR, "ConnectTwoPcsHeading",
-                    timeout=confirm):
+            if _code_accepted(ctx, confirm):
                 ctx.log.success(f"pairing code {code} accepted")
                 return
             ctx.log.warning(f"pairing code {code} was not accepted within {confirm:.0f}s")
