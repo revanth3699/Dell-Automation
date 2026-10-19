@@ -96,6 +96,16 @@ all the way back to the Welcome-back home screen (same reset mechanic already ha
 for PlugIntoAcPowerDialog in flows/target/authentication/sign_in_flow.py) -- still
 non-fatal, just a bigger reset than previously assumed. See
 _recover_from_network_disconnected_reset().
+
+Bug fixed here, confirmed via a live run (2026-10-19): the account-mismatch confirm
+dialog was never actually getting clicked -- the real cause was
+assertions/target/confirm_accounts_dialog.py's exact-match locator hitting the
+apostrophe trap (see that file's own docstring), not a timeout problem. Per explicit
+user direction, every dialog-race check in this file was also widened from its prior
+0.1s per-cycle timeout to 1.5s, same change applied project-wide (see
+flows/target/pairing_flow.py, flows/target/authentication/sign_in_flow.py,
+flows/source/transfer_flow.py, flows/source/common_dialogs.py,
+flows/source/pairing_flow.py).
 """
 
 import time
@@ -171,7 +181,7 @@ class TargetTransferFlow:
         2026-10-09: this exact 3-line check used to be copy-pasted at three separate
         call sites). Raises TransferFlowError immediately if "Something went wrong"
         is showing; a no-op otherwise."""
-        if migration_error_assertions.is_showing(self.app_session, timeout=0.1):
+        if migration_error_assertions.is_showing(self.app_session, timeout=1.5):
             error_text = self.migration_error_dialog.read_error_text()
             raise TransferFlowError(f"Migration failed: Something went wrong appeared -- {error_text}")
 
@@ -186,7 +196,7 @@ class TargetTransferFlow:
         is what then actually closes the app and WinAppDriver -- same cleanup path
         every other failure in this flow already goes through, nothing extra needed
         here."""
-        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+        if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
             self.log.error(
                 "The other PC isn't connected to a network. appeared -- clicking "
                 "Cancel transfer and aborting"
@@ -204,7 +214,7 @@ class TargetTransferFlow:
         Target and Source PCs are set to different, incompatible regions -- nothing to
         retry, so per explicit user direction this clicks Close and raises
         immediately, aborting the run."""
-        if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+        if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=1.5):
             self.log.error(
                 "Your regional settings aren't supported. appeared -- clicking "
                 "Close and aborting"
@@ -256,7 +266,7 @@ class TargetTransferFlow:
         transfer, then clicks back through Welcome-back's Get started, and lets the
         caller's loop continue; if the network is still down, this just fires again
         next cycle, same as every other recoverable dialog here."""
-        if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+        if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
             self.network_disconnected_dialog.cancel_transfer()
             self.log.warning(
                 "This PC isn't connected to a network. appeared -- clicked Cancel "
@@ -275,35 +285,38 @@ class TargetTransferFlow:
         place to actually hit a real low-battery condition. Not fatal -- clicks Cancel
         (after PlugIntoAcPowerDialog's own 15s wait) and lets the caller's loop
         continue."""
-        if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+        if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=1.5):
             self.plug_into_ac_power_dialog.click_cancel()
             self.log.warning("Plug into AC power appeared -- waited and clicked Cancel")
             return True
         return False
 
     def _accept_install_browsers_dialog_if_showing(self) -> bool:
-        """Confirmed directly by the user via a live screenshot (2026-10-14): "Install
-        one or more browsers to migrate your bookmarks" appears right after clicking
-        the migrate button when the Source PC has a browser (e.g. Firefox) installed
-        that this (Target) PC doesn't. Not fatal -- per explicit user direction, waits
-        and clicks Rescan once (giving it one chance), then re-checks is_showing()
-        before clicking Skip (same re-check-before-the-next-click pattern used
-        elsewhere in this project, e.g. flows/source/common_dialogs.py's
-        check_battery_critically_low()) -- if Rescan already cleared the dialog
+        """"Want to keep your browser bookmarks?" appears right after clicking the
+        migrate button when the Source PC has a browser (e.g. Firefox) installed that
+        this (Target) PC doesn't. Not fatal -- per explicit user direction, waits and
+        clicks Resume once (giving it one chance), then re-checks is_showing() before
+        clicking Skip (same re-check-before-the-next-click pattern used elsewhere in
+        this project, e.g. flows/source/common_dialogs.py's
+        check_battery_critically_low()) -- if Resume already cleared the dialog
         (browser now detected), Skip is skipped too since there is nothing left to
-        dismiss."""
-        if not install_browsers_assertions.is_showing(self.app_session, timeout=0.1):
+        dismiss.
+
+        Bug fixed here, confirmed via a user-supplied screenshot (2026-10-19): the
+        button previously named "Rescan" is actually named "Resume" -- see
+        components/target/common_dialogs.py's InstallBrowsersToMigrateBookmarksDialog
+        for the rename."""
+        if not install_browsers_assertions.is_showing(self.app_session, timeout=1.5):
             return False
-        self.install_browsers_dialog.click_rescan()
+        self.install_browsers_dialog.click_resume()
         self.log.warning(
-            "Install one or more browsers to migrate your bookmarks appeared -- "
-            "waited and clicked Rescan"
+            "Want to keep your browser bookmarks? appeared -- waited and clicked Resume"
         )
         if install_browsers_assertions.is_showing(self.app_session, timeout=1.0):
             self.install_browsers_dialog.click_skip()
-            self.log.warning("Still showing after Rescan -- clicked Skip to continue without those bookmarks")
+            self.log.warning("Still showing after Resume -- clicked Skip to continue without those bookmarks")
         else:
-            self.log.success("Dialog cleared after Rescan -- browser now detected, no Skip needed")
+            self.log.success("Dialog cleared after Resume -- browser now detected, no Skip needed")
         return True
 
     def _accept_desktop_shortcut_if_showing(self) -> bool:
@@ -314,7 +327,7 @@ class TargetTransferFlow:
         _accept_plug_into_ac_power_if_showing(), which can genuinely appear anywhere).
         Not fatal -- clicks "Create shortcut" per explicit user direction and lets the
         caller's loop continue."""
-        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
+        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=1.5):
             self.desktop_shortcut_dialog.click_create_shortcut()
             self.log.success(
                 "Add a desktop shortcut before you go appeared -- clicked Create shortcut"
@@ -348,7 +361,7 @@ class TargetTransferFlow:
                 # check for the close-apps dialog one more time, right here, before
                 # clicking -- it can appear layered over this exact screen, and a check
                 # from an earlier poll cycle doesn't guarantee it's still clear now.
-                while close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+                while close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                     self.close_apps_dialog.click_close_application()
                     self.log.success(
                         "We need to close all other applications appeared right "
@@ -376,7 +389,7 @@ class TargetTransferFlow:
                             "settings confirmed"
                         )
                         return
-                    if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+                    if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                         self.close_apps_dialog.click_close_application()
                         self.log.success(
                             "We need to close all other applications appeared "
@@ -412,14 +425,14 @@ class TargetTransferFlow:
                     "We're moving your files and settings never appeared within "
                     f"{progress_screen_timeout:.0f}s after clicking Migrate now"
                 )
-            if not confirmed_accounts and confirm_accounts_assertions.is_showing(self.app_session, timeout=0.1):
+            if not confirmed_accounts and confirm_accounts_assertions.is_showing(self.app_session, timeout=1.5):
                 self.confirm_accounts_dialog.click_continue()
                 self.log.success(
                     "Account-mismatch confirm dialog appeared during the "
                     "preparing-files wait -- clicked Continue"
                 )
                 confirmed_accounts = True
-            if close_apps_assertions.is_showing(self.app_session, timeout=0.1):
+            if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                 self.close_apps_dialog.click_close_application()
                 self.log.success(
                     "We need to close all other applications appeared -- clicked "

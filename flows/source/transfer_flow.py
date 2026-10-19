@@ -255,7 +255,7 @@ class SourceTransferFlow:
             ):
                 deadline += time.monotonic() - iteration_start
                 continue
-            if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=0.1):
+            if transfer_progress_assertions.is_migration_error_confirmed(self.app_session, timeout=1.5):
                 self.log.warning(
                     "We ran into a problem during your migration. appeared -- "
                     "clicking Try Again"

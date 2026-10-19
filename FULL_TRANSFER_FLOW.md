@@ -314,8 +314,8 @@ flowchart TD
     RS2 -.-> FatalRS2(["raise TransferFlowError"])
     RS2 --> AC2{"'Plug into AC power' showing?"}
     AC2 -->|"yes"| ClickAC2["click Cancel"] --> Inner
-    AC2 -->|"no"| Browsers{"'Install one or more browsers<br/>to migrate your bookmarks' showing?"}
-    Browsers -->|"yes"| ClickRescan["wait 10s, click Rescan once,<br/>re-check, click Skip if still showing"] --> Inner
+    AC2 -->|"no"| Browsers{"'Want to keep your browser<br/>bookmarks?' showing?"}
+    Browsers -->|"yes"| ClickRescan["wait 10s, click Resume once,<br/>re-check, click Skip if still showing"] --> Inner
     Browsers -->|"no"| Moving{"'We're moving your files<br/>and settings' showing? (0.5s)"}
     Moving -->|"yes"| SuccessStart(["return -- transfer confirmed started"])
     Moving -->|"no"| CloseAppsInner{"'close other apps' showing?"}

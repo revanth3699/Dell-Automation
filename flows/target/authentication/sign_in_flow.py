@@ -278,7 +278,7 @@ class SignInFlow:
         found = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
-            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
                     "This PC isn't connected to a network. appeared while waiting for "
@@ -293,7 +293,7 @@ class SignInFlow:
                     remaining=deadline - time.monotonic()
                 )
                 continue
-            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=1.5):
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "Plug into AC power appeared while waiting for Source PC -- "
@@ -393,7 +393,7 @@ class SignInFlow:
         class, same "race it continuously" treatment as NetworkDisconnectedDialog/
         PlugIntoAcPowerDialog. Not fatal -- clicks "Create shortcut" and lets the
         caller's loop continue."""
-        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=0.1):
+        if desktop_shortcut_assertions.is_showing(self.app_session, timeout=1.5):
             self.desktop_shortcut_dialog.click_create_shortcut()
             self.log.success("Add a desktop shortcut before you go appeared -- clicked Create shortcut")
             return True
@@ -477,16 +477,16 @@ class SignInFlow:
                 if find_new_browser_window_hwnd(known_hwnds) is not None:
                     return True
 
-                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=0.1)
+                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=1.5)
                 if matched:
                     self.log.success(
                         f"User is already logged in -- transition screen detected: {matched!r}"
                     )
                     return False
-                if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
+                if trust_network_assertions.is_showing(self.app_session, timeout=1.5):
                     self.log.success("User is already logged in -- trust-network dialog detected")
                     return False
-                if pairing_discovery_assertions.is_showing(self.app_session, timeout=0.1):
+                if pairing_discovery_assertions.is_showing(self.app_session, timeout=1.5):
                     self.log.success("User is already logged in -- pairing-discovery screen detected")
                     return False
 
@@ -667,10 +667,10 @@ class SignInFlow:
             self._assert_app_alive()
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if sign_in_failed_assertions.is_showing(self.app_session, timeout=0.1):
+            if sign_in_failed_assertions.is_showing(self.app_session, timeout=1.5):
                 return "failed"
             if transition_matched_at is None:
-                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=0.1)
+                matched = migration_preparation_transition.wait_until_any_showing(self.app_session, timeout=1.5)
                 if matched:
                     matched_phrase = matched
                     transition_matched_at = time.monotonic()
@@ -904,13 +904,13 @@ class SignInFlow:
         trust_network_accepted = False
         while time.monotonic() < deadline:
             self._assert_app_alive()
-            if sign_in_failed_assertions.is_showing(self.app_session, timeout=0.1):
+            if sign_in_failed_assertions.is_showing(self.app_session, timeout=1.5):
                 raise _LateSignInFailure(
                     "The sign-in-failed dialog (We couldn't sign you in) appeared "
                     "while waiting for pairing-discovery -- an earlier transition-screen "
                     "match had looked like success, but sign-in did not actually succeed."
                 )
-            if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+            if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=1.5):
                 self.log.error(
                     "Set both of your PCs to the same supported region appeared while "
                     "waiting for pairing-discovery -- clicking Close and aborting"
@@ -921,7 +921,7 @@ class SignInFlow:
                     "appeared -- Target and Source PCs are set to different regions; "
                     "clicked Close"
                 )
-            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
                     "This PC isn't connected to a network. appeared while waiting for "
@@ -929,7 +929,7 @@ class SignInFlow:
                 )
                 self._recover_from_cancel_transfer_reset()
                 continue
-            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=1.5):
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.warning(
                     "Plug into AC power appeared while waiting for pairing-discovery "
@@ -939,7 +939,7 @@ class SignInFlow:
                 continue
             if self._accept_desktop_shortcut_if_showing():
                 continue
-            if pairing_discovery_assertions.is_showing(self.app_session, timeout=0.1):
+            if pairing_discovery_assertions.is_showing(self.app_session, timeout=1.5):
                 if trust_network_accepted:
                     self.log.success("Pairing-discovery screen confirmed (after accepting trust-network)")
                 else:
@@ -948,13 +948,13 @@ class SignInFlow:
                         "trust-network dialog never appeared)"
                     )
                 return
-            if pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1):
+            if pairing_code_entry_assertions.is_showing(self.app_session, timeout=1.5):
                 self.log.success(
                     "Pairing-code-entry screen already showing -- pairing-discovery was "
                     "skipped entirely (Source PC was found immediately)"
                 )
                 return
-            if not trust_network_accepted and trust_network_assertions.is_showing(self.app_session, timeout=0.1):
+            if not trust_network_accepted and trust_network_assertions.is_showing(self.app_session, timeout=1.5):
                 self.trust_network_dialog.click_trust_network()
                 self.log.success("Trust-network dialog accepted -- continuing to watch for pairing-discovery")
                 trust_network_accepted = True

@@ -21,7 +21,7 @@ from components.base_component import BaseComponent
 from locators.target.close_apps_dialog import CLOSE_APPLICATION_BUTTON_LOCATOR
 from locators.target.desktop_shortcut_dialog import CREATE_SHORTCUT_BUTTON_LOCATOR
 from locators.target.install_browsers_to_migrate_bookmarks_dialog import (
-    RESCAN_BUTTON_LOCATOR,
+    RESUME_BUTTON_LOCATOR,
     SKIP_BUTTON_LOCATOR,
 )
 from locators.target.migration_error_dialog import MIGRATION_ERROR_BODY_LOCATOR
@@ -255,28 +255,31 @@ class RegionalSettingsNotSupportedDialog:
 
 
 class InstallBrowsersToMigrateBookmarksDialog:
-    """"Install one or more browsers to migrate your bookmarks" -- confirmed from a
-    user-supplied screenshot (2026-10-14): appears right after clicking the migrate
-    button ("Bring everything over for me") when the Source PC has a browser (e.g.
-    Firefox) installed that this (Target) PC doesn't, so that browser's bookmarks
-    can't be migrated. Has "Skip" and "Rescan" buttons. Not fatal -- per explicit user
-    direction, click_rescan() waits RESCAN_DELAY_SECONDS then clicks Rescan (giving it
-    one chance in case the browser gets installed/detected in the meantime);
-    click_skip() is a separate, plain click so the caller can re-check is_showing()
-    between the two (see flows/target/transfer_flow.py) and skip the second click if
-    Rescan already cleared the dialog. See
+    """"Want to keep your browser bookmarks?" -- appears right after clicking the
+    migrate button ("Bring everything over for me") when the Source PC has a browser
+    (e.g. Firefox) installed that this (Target) PC doesn't, so that browser's
+    bookmarks can't be migrated. Has "Skip" and "Resume" buttons. Not fatal -- per
+    explicit user direction, click_resume() waits RESUME_DELAY_SECONDS then clicks
+    Resume (giving it one chance in case the browser gets installed/detected in the
+    meantime); click_skip() is a separate, plain click so the caller can re-check
+    is_showing() between the two (see flows/target/transfer_flow.py) and skip the
+    second click if Resume already cleared the dialog. See
     assertions/target/install_browsers_to_migrate_bookmarks_dialog.py's is_showing().
+
+    Bug fixed here, confirmed via a user-supplied screenshot (2026-10-19): the button
+    previously named "Rescan" (and this class's click_rescan()) is actually named
+    "Resume" -- renamed throughout to match the live dialog.
     """
 
-    RESCAN_DELAY_SECONDS = 10.0
+    RESUME_DELAY_SECONDS = 10.0
 
     def __init__(self, app_session):
-        self._rescan_button = BaseComponent(app_session, *RESCAN_BUTTON_LOCATOR, "InstallBrowsersRescanButton")
+        self._resume_button = BaseComponent(app_session, *RESUME_BUTTON_LOCATOR, "InstallBrowsersResumeButton")
         self._skip_button = BaseComponent(app_session, *SKIP_BUTTON_LOCATOR, "InstallBrowsersSkipButton")
 
-    def click_rescan(self) -> None:
-        time.sleep(self.RESCAN_DELAY_SECONDS)
-        self._rescan_button.click(timeout=2.0)
+    def click_resume(self) -> None:
+        time.sleep(self.RESUME_DELAY_SECONDS)
+        self._resume_button.click(timeout=2.0)
 
     def click_skip(self) -> None:
         self._skip_button.click(timeout=2.0)

@@ -134,7 +134,7 @@ class TargetPairingFlow:
         while time.monotonic() < deadline:
             if condition_fn():
                 return True
-            if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.log.error(
                     "The other PC isn't connected to a network. appeared -- clicking "
                     "Cancel transfer and aborting"
@@ -144,7 +144,7 @@ class TargetPairingFlow:
                     "Pairing failed: The other PC isn't connected to a network. appeared -- "
                     "the Source PC lost network connectivity; clicked Cancel transfer"
                 )
-            if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=0.1):
+            if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=1.5):
                 self.log.error(
                     "Your regional settings aren't supported. appeared -- clicking "
                     "Close and aborting"
@@ -154,7 +154,7 @@ class TargetPairingFlow:
                     "Pairing failed: Your regional settings aren't supported. appeared -- "
                     "Target and Source PCs are set to different regions; clicked Close"
                 )
-            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
                     "This PC isn't connected to a network. appeared -- clicked Cancel "
@@ -162,7 +162,7 @@ class TargetPairingFlow:
                 )
                 self._recover_from_network_disconnected_reset()
                 continue
-            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=0.1):
+            if plug_into_ac_power_assertions.is_showing(self.app_session, timeout=1.5):
                 self.plug_into_ac_power_dialog.click_cancel()
                 self.log.info("Plug into AC power appeared -- waited and clicked Cancel")
                 continue
@@ -172,7 +172,7 @@ class TargetPairingFlow:
     def _wait_for_screen(self, screen_timeout: float) -> None:
         self.log.info("Waiting for the pairing-code entry screen (Let's connect your two PCs)")
         if not self._poll_with_network_recovery(
-            lambda: pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1), max(screen_timeout, 5.0)
+            lambda: pairing_code_entry_assertions.is_showing(self.app_session, timeout=1.5), max(screen_timeout, 5.0)
         ):
             raise PairingError(
                 "Pairing-code entry screen (Let's connect your two PCs) never appeared "
@@ -185,7 +185,7 @@ class TargetPairingFlow:
 
         self.log.info("Waiting for the pairing-code entry screen to clear (code accepted)")
         if not self._poll_with_network_recovery(
-            lambda: not pairing_code_entry_assertions.is_showing(self.app_session, timeout=0.1), advance_timeout
+            lambda: not pairing_code_entry_assertions.is_showing(self.app_session, timeout=1.5), advance_timeout
         ):
             raise PairingError(
                 f"Pairing-code entry screen still showing after {advance_timeout:.0f}s -- "

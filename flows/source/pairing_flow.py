@@ -197,7 +197,7 @@ class SourcePairingFlow:
                 ):
                     deadline += time.monotonic() - iteration_start
                     continue
-                if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+                if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                     self.network_disconnected_dialog.click_check_again()
                     self.log.warning(
                         "This PC isn't connected to a network appeared mid-discovery-wait "
@@ -205,7 +205,7 @@ class SourcePairingFlow:
                     )
                     deadline += time.monotonic() - iteration_start
                     continue
-                if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
+                if trust_network_assertions.is_showing(self.app_session, timeout=1.5):
                     self.trust_network_dialog.click_yes_continue()
                     self.log.info("Trust-network dialog accepted (appeared mid-discovery-wait)")
                 if check_battery_critically_low(self.app_session, self.battery_critically_low_dialog, self.confirm_cancel_dialog, self.log):
@@ -254,7 +254,7 @@ class SourcePairingFlow:
             ):
                 deadline += time.monotonic() - iteration_start
                 continue
-            if network_disconnected_assertions.is_showing(self.app_session, timeout=0.1):
+            if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
                     "This PC isn't connected to a network appeared mid-publish-loop "
@@ -262,7 +262,7 @@ class SourcePairingFlow:
                 )
                 deadline += time.monotonic() - iteration_start
                 continue
-            if trust_network_assertions.is_showing(self.app_session, timeout=0.1):
+            if trust_network_assertions.is_showing(self.app_session, timeout=1.5):
                 self.trust_network_dialog.click_yes_continue()
                 self.log.info("Trust-network dialog accepted (appeared mid-publish-loop)")
                 continue

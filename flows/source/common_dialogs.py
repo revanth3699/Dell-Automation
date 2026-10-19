@@ -38,7 +38,7 @@ def check_other_pc_disconnected(app_session, dialog, confirm_cancel_dialog, log)
     so a follow-up confirmation never sits there until its own timeout. (The heading
     and button text here were also corrected -- see
     assertions/source/other_pc_network_disconnected_dialog.py's own docstring.)"""
-    if not other_pc_network_disconnected_assertions.is_showing(app_session, timeout=0.1):
+    if not other_pc_network_disconnected_assertions.is_showing(app_session, timeout=1.5):
         return False
     dialog.click_cancel()
     log.warning("We lost connection to your other PC. appeared -- clicked Cancel")
@@ -57,7 +57,7 @@ def check_battery_critically_low(app_session, battery_dialog, confirm_cancel_dia
     ("Are you sure you want to cancel?"), asking to confirm cancelling the whole
     pairing/migration -- dismissed immediately too (via "No, don't cancel") so a
     follow-up confirmation never sits there until its own timeout."""
-    if not battery_critically_low_assertions.is_showing(app_session, timeout=0.1):
+    if not battery_critically_low_assertions.is_showing(app_session, timeout=1.5):
         return False
     battery_dialog.click_cancel()
     log.warning("Your battery is critically low. appeared -- clicked Cancel")
@@ -76,7 +76,7 @@ def check_welcome_screen(app_session, welcome_screen, log) -> bool:
     SourcePairingFlow.run() (its original one-off check there is unchanged -- this is
     for every OTHER point it could show up). Clicks "Let's get started" and lets the
     caller's loop continue."""
-    if not welcome_screen_assertions.is_showing(app_session, timeout=0.1):
+    if not welcome_screen_assertions.is_showing(app_session, timeout=1.5):
         return False
     welcome_screen.click_get_started()
     log.warning("Welcome to Dell Migrate. appeared -- clicked Let's get started")
@@ -90,7 +90,7 @@ def raise_if_regional_settings_not_supported(app_session, dialog, log) -> None:
     (which click through and let the caller's loop continue), this clicks Close then
     raises immediately, aborting the run -- same "detect, dismiss, then raise" shape as
     Target's own _raise_if_migration_error() in flows/target/transfer_flow.py."""
-    if not regional_settings_not_supported_assertions.is_showing(app_session, timeout=0.1):
+    if not regional_settings_not_supported_assertions.is_showing(app_session, timeout=1.5):
         return
     dialog.click_close()
     log.error("Your regional settings aren't supported. appeared -- clicked Close; the app is closing")
