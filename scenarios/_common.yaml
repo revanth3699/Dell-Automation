@@ -10,6 +10,7 @@ policy_sets:
       closeApplicationsFailed: {click: retry, max: 3}
       installBrowser: {click: skip}
       accountMismatch: {click: continue}
+      signIn: {click: sign_in, max: 2}         # an unexpected sign-in prompt (expired cached login) is just signed in
       signInLaunching: {wait_until_gone: 300}
       signInFailed: {click: retry, max: 3}
       signOut: {wait_until_gone: 180}
