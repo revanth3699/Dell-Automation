@@ -9,7 +9,7 @@ locators/ -- per explicit user direction (2026-10-14).
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "The other PC isn't connected to a network."
+HEADING_TEXT = "It looks like your network has been disconnected"
 OTHER_PC_NETWORK_DISCONNECTED_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 

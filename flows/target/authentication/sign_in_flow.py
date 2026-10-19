@@ -281,7 +281,7 @@ class SignInFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network. appeared while waiting for "
+                    "Connect this PC to a trusted network appeared while waiting for "
                     "Source PC -- clicked Cancel transfer"
                 )
                 self._recover_from_cancel_transfer_reset()
@@ -896,7 +896,7 @@ class SignInFlow:
         raises SignInError immediately.
         """
         self.log.info(
-            "Waiting for pairing-discovery ('We're looking for your other PC'), racing "
+            "Waiting for pairing-discovery ('We're searching the network for your other PC'), racing "
             "the 'Connect to a trusted network' dialog and the pairing-code-entry screen "
             "in case either appears first"
         )
@@ -924,7 +924,7 @@ class SignInFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network. appeared while waiting for "
+                    "Connect this PC to a trusted network appeared while waiting for "
                     "pairing-discovery -- clicked Cancel transfer"
                 )
                 self._recover_from_cancel_transfer_reset()
@@ -960,6 +960,6 @@ class SignInFlow:
                 trust_network_accepted = True
             time.sleep(0.5)
         raise SignInError(
-            "Did not reach the pairing-discovery screen ('We're looking for your other "
+            "Did not reach the pairing-discovery screen ('We're searching the network for your other "
             "PC') after sign-in -- check for an unexpected error dialog"
         )

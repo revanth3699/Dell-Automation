@@ -7,8 +7,11 @@ target, so it lives here rather than in locators/ -- per explicit user direction
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "We need to close all other applications"
-CLOSE_APPS_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
+# Updated 2026-10-19 from rebit TargetPc.UI Resources.resx: the first prompt is
+# CloseApplications_Title, and the retry prompt after a failed close is CloseApplications_ErrorTitle.
+HEADING_TEXT = "Close other applications"
+ERROR_HEADING_TEXT = "Close all other applications"
+CLOSE_APPS_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}" or @Name="{ERROR_HEADING_TEXT}"]')
 
 
 def is_showing(session, timeout: float = 2.0) -> bool:

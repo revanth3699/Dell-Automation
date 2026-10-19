@@ -11,7 +11,7 @@ this is the real heading for this screen.
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "Your migration is now complete"
+HEADING_TEXT = "Your transfer is now complete"
 MIGRATION_COMPLETE_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 

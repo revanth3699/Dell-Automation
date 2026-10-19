@@ -11,16 +11,20 @@ class now holds only the two click actions.
 """
 
 from components.base_component import BaseComponent
-from locators.target.migration_complete_screen import BACK_TO_HOME_LINK_LOCATOR, DOWNLOAD_PDF_LINK_LOCATOR
+from locators.target.migration_complete_screen import DOWNLOAD_PDF_LINK_LOCATOR, TRANSFER_MORE_DATA_BUTTON_LOCATOR
 
 
 class MigrationCompleteScreen:
     def __init__(self, app_session):
         self._download_pdf_link = BaseComponent(app_session, *DOWNLOAD_PDF_LINK_LOCATOR, "DownloadPdfLink")
-        self._back_to_home_link = BaseComponent(app_session, *BACK_TO_HOME_LINK_LOCATOR, "BackToHomeLink")
+        self._transfer_more_data_button = BaseComponent(
+            app_session, *TRANSFER_MORE_DATA_BUTTON_LOCATOR, "TransferMoreDataButton"
+        )
 
     def click_download_pdf_link(self) -> None:
         self._download_pdf_link.click()
 
-    def click_back_to_home(self) -> None:
-        self._back_to_home_link.click()
+    def click_transfer_more_data(self) -> None:
+        """Replaces the removed "Back to Home" link -- see
+        locators/target/migration_complete_screen.py."""
+        self._transfer_more_data_button.click()

@@ -8,8 +8,11 @@ component exists -- this screen has no action of its own, only these checks.
 
 from assertions.common import gone, text_exists
 
-HEADING_TEXT = "We're moving your files and settings"
-MOVING_FILES_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
+# Updated 2026-10-19 from rebit TargetPc.UI Resources.resx (Migrating_Title): the real heading
+# is now "We’re transferring your files and settings" (curly apostrophe), so this matches on an
+# apostrophe-free substring instead of the full text.
+HEADING_CONTAINS_TEXT = "transferring your files and settings"
+MOVING_FILES_HEADING_LOCATOR = ("xpath", f'//*[contains(@Name, "{HEADING_CONTAINS_TEXT}")]')
 
 
 def is_showing(session, timeout: float = 2.0) -> bool:

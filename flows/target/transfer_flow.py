@@ -210,12 +210,12 @@ class TargetTransferFlow:
         here."""
         if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
             self.log.error(
-                "The other PC isn't connected to a network. appeared -- clicking "
+                "It looks like your network has been disconnected appeared -- clicking "
                 "Cancel transfer and aborting"
             )
             self.other_pc_network_disconnected_dialog.cancel_transfer()
             raise TransferFlowError(
-                "Migration failed: The other PC isn't connected to a network. appeared -- "
+                "Migration failed: It looks like your network has been disconnected appeared -- "
                 "the Source PC lost network connectivity mid-transfer; clicked Cancel transfer"
             )
 
@@ -281,7 +281,7 @@ class TargetTransferFlow:
         if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
             self.network_disconnected_dialog.cancel_transfer()
             self.log.warning(
-                "This PC isn't connected to a network. appeared -- clicked Cancel "
+                "Connect this PC to a trusted network appeared -- clicked Cancel "
                 "transfer"
             )
             self._recover_from_network_disconnected_reset()
@@ -377,13 +377,13 @@ class TargetTransferFlow:
                 while close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                     self.close_apps_dialog.click_close_application()
                     self.log.success(
-                        "We need to close all other applications appeared right "
-                        "before clicking Migrate now -- clicked Close Application"
+                        "Close other applications appeared right "
+                        "before clicking Migrate now -- clicked Close applications"
                     )
                 self.log.success("Ready to transfer your files -- starting transfer (Bring everything over for me)")
                 self.transfer_receive_screen.start_transfer()
 
-                self.log.info("Waiting for We're moving your files and settings...")
+                self.log.info("Waiting for We're transferring your files and settings...")
                 progress_deadline = time.monotonic() + progress_screen_timeout
                 last_click = time.monotonic()
                 while time.monotonic() < progress_deadline:
@@ -398,15 +398,15 @@ class TargetTransferFlow:
                         continue
                     if transfer_progress_assertions.is_showing(self.app_session, timeout=0.5):
                         self.log.success(
-                            "Transfer in progress -- We're moving your files and "
+                            "Transfer in progress -- We're transferring your files and "
                             "settings confirmed"
                         )
                         return
                     if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                         self.close_apps_dialog.click_close_application()
                         self.log.success(
-                            "We need to close all other applications appeared "
-                            "after clicking Migrate now -- clicked Close Application"
+                            "Close other applications appeared "
+                            "after clicking Migrate now -- clicked Close applications"
                         )
                     elif time.monotonic() - last_click >= RECLICK_INTERVAL_SECONDS:
                         # Confirmed live (2026-10-07): the first click can report
@@ -423,7 +423,7 @@ class TargetTransferFlow:
                         # the check at the top of this loop iteration missed it.
                         if transfer_progress_assertions.is_showing(self.app_session, timeout=0.3):
                             self.log.success(
-                                "Transfer in progress -- We're moving your files and "
+                                "Transfer in progress -- We're transferring your files and "
                                 "settings confirmed right before a re-click -- not "
                                 "clicking again"
                             )
@@ -435,7 +435,7 @@ class TargetTransferFlow:
                         self.transfer_receive_screen.start_transfer()
                         last_click = time.monotonic()
                 raise TransferFlowError(
-                    "We're moving your files and settings never appeared within "
+                    "We're transferring your files and settings never appeared within "
                     f"{progress_screen_timeout:.0f}s after clicking Migrate now"
                 )
             if not confirmed_accounts and confirm_accounts_assertions.is_showing(self.app_session, timeout=1.5):
@@ -448,8 +448,8 @@ class TargetTransferFlow:
             if close_apps_assertions.is_showing(self.app_session, timeout=1.5):
                 self.close_apps_dialog.click_close_application()
                 self.log.success(
-                    "We need to close all other applications appeared -- clicked "
-                    "Close Application"
+                    "Close other applications appeared -- clicked "
+                    "Close applications"
                 )
         raise TransferFlowError(
             f"We're ready to transfer your files screen never appeared within {screen_timeout:.0f}s"
@@ -484,7 +484,7 @@ class TargetTransferFlow:
         (idempotent either way), so this isn't a substitute for that cleanup, just an
         explicit, graceful close through the app's own UI first.
         """
-        self.log.info("Waiting for the transfer to finish (We're moving your files and settings to clear)...")
+        self.log.info("Waiting for the transfer to finish (We're transferring your files and settings to clear)...")
         # Confirmed live (2026-10-08): "Something went wrong" (a fatal engine error,
         # e.g. "error 2969") can appear layered over this exact screen while it's still
         # showing "0 B/s"/"...minutes left" behind it. Races the error dialog every
@@ -526,7 +526,7 @@ class TargetTransferFlow:
         # now proper racing loops, same shape and same dialog set as every other wait
         # in this file, so a dropped network (or any other known dialog) gets caught
         # and handled here too, not just before/after this point.
-        self.log.info("Waiting for Here's a summary of your migration results...")
+        self.log.info("Waiting for Your transfer is complete...")
         deadline = time.monotonic() + summary_timeout
         summary_confirmed = False
         while True:
@@ -544,13 +544,13 @@ class TargetTransferFlow:
                 break
         if not summary_confirmed:
             raise TransferFlowError(
-                f"Here's a summary of your migration results never appeared within "
+                f"Your transfer is complete never appeared within "
                 f"{summary_timeout:.0f}s after the transfer finished"
             )
         self.log.success("Migration-summary screen confirmed -- clicking Finish")
         self.migration_summary_screen.click_finish()
 
-        self.log.info("Waiting for Your migration is now complete...")
+        self.log.info("Waiting for Your transfer is now complete...")
         deadline = time.monotonic() + complete_timeout
         complete_confirmed = False
         while True:
@@ -568,18 +568,18 @@ class TargetTransferFlow:
                 break
         if not complete_confirmed:
             raise TransferFlowError(
-                f"Your migration is now complete never appeared within {complete_timeout:.0f}s "
+                f"Your transfer is now complete never appeared within {complete_timeout:.0f}s "
                 "after clicking Finish"
             )
         self.log.success(
-            "Migration-complete screen confirmed -- clicking download a PDF, then Back to Home"
+            "Migration-complete screen confirmed -- clicking download a PDF, then Transfer more data"
         )
         self.migration_complete_screen.click_download_pdf_link()
         self.log.info(f"Waiting {PDF_OPEN_WAIT_SECONDS:.0f}s for the downloaded PDF to open...")
         time.sleep(PDF_OPEN_WAIT_SECONDS)
-        self.migration_complete_screen.click_back_to_home()
+        self.migration_complete_screen.click_transfer_more_data()
 
-        self.log.info("Confirming return to the home screen (Sign Out visible)...")
+        self.log.info("Confirming return to the home screen (Sign out visible)...")
         # Bug fixed here, confirmed directly by the user via a live screenshot
         # (2026-10-13): "Add a desktop shortcut before you go" can appear layered over
         # this exact wait -- a plain single is_home_confirmed() call had no way to
@@ -607,7 +607,7 @@ class TargetTransferFlow:
         if not home_confirmed:
             raise TransferFlowError(
                 f"Did not confirm return to the home screen within {home_timeout:.0f}s "
-                "after clicking Back to Home"
+                "after clicking Transfer more data"
             )
         self.log.success("Confirmed back on the home screen -- migration flow complete")
 

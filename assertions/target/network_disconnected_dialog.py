@@ -7,7 +7,7 @@ lives here rather than in locators/ -- per explicit user direction (2026-10-14).
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "This PC isn't connected to a network."
+HEADING_TEXT = "Connect this PC to a trusted network"
 NETWORK_DISCONNECTED_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 
