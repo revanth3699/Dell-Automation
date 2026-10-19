@@ -107,12 +107,43 @@ def _normalize_for_comparison(value_type: str, data) -> Union[int, str, bytes, t
     return data
 
 
+# REG_MULTI_SZ separators as they can appear on the backed-up side: a real NUL (hex(7)
+# decode) or the two-character text "\0" (the tool's .reg export writes some multi-string
+# values as "en-IN\0en-US" inside a quoted REG_SZ-looking literal, which
+# settings_backup._unescape_reg_string deliberately leaves alone).
+_MULTI_SZ_SEPARATORS = ("\x00", "\\0")
+
+
+def _as_multi_string(data) -> tuple:
+    """A multi-string in either shape -> tuple of its non-empty parts."""
+    if isinstance(data, (list, tuple)):
+        parts = []
+        for item in data:
+            parts.extend(_as_multi_string(item) if isinstance(item, str) else (item,))
+        return tuple(parts)
+    text = str(data)
+    for sep in _MULTI_SZ_SEPARATORS:
+        text = text.replace(sep, "\x00")
+    return tuple(p for p in text.split("\x00") if p)
+
+
 def _matches(expectation: RegistryValueExpectation, found: bool, live_data) -> bool:
     if not found:
         return False
     expected = _normalize_for_comparison(expectation.value_type, expectation.expected_data)
     actual = _normalize_for_comparison(expectation.value_type, live_data)
-    return expected == actual
+    if expected == actual:
+        return True
+    # Bug fixed here, confirmed live (2026-10-20): the backup held Languages as the single
+    # string 'en-IN\0en-US' while winreg read the live REG_MULTI_SZ back as
+    # ['en-IN', 'en-US'] -- the same value in two shapes, reported as a mismatch. When
+    # either side is a multi-string (or carries a separator), compare the split parts.
+    multi_involved = isinstance(expected, tuple) or isinstance(actual, tuple) or any(
+        isinstance(side, str) and any(sep in side for sep in _MULTI_SZ_SEPARATORS) for side in (expected, actual)
+    )
+    if multi_involved and isinstance(expected, (str, tuple)) and isinstance(actual, (str, tuple)):
+        return _as_multi_string(expected) == _as_multi_string(actual)
+    return False
 
 
 def check_value(expectation: RegistryValueExpectation) -> RegistryCheckResult:
