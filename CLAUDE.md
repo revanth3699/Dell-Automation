@@ -247,12 +247,9 @@ as a flag-based prefix-skip and reverted; a generic solution is still open).
   `flows/target/authentication/sign_in_flow.py`'s `_LateSignInFailure` for the pattern
   (race the failure dialog for the ENTIRE remaining wait, not just a short fixed
   window after the first "looks like success" signal).
-- **Dead files — don't edit, don't import:** `factory/wait_utils.py`,
-  `factory/coordination_client.py`, and `factory/prerequisites.py` are unused
-  duplicates of the real `utils/wait_utils.py`, `utils/coordination_client.py`, and
-  `utils/prerequisites.py` (confirmed via `git grep` — nothing in the active codebase
-  imports the `factory.*` versions). Use the `utils/` ones; the `factory/` copies
-  should eventually be deleted.
+- **No duplicate helpers:** `utils/wait_utils.py`, `utils/coordination_client.py` and
+  `utils/prerequisites.py` are the only copies (the stale `factory/` duplicates were
+  deleted 2026-10-20). Put new standalone helpers in `utils/`, not `factory/`.
 
 ## Verification without live hardware
 

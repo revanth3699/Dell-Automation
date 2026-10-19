@@ -101,8 +101,7 @@ dell-automation/
 │                            unconditional all-or-nothing teardown via close().
 │
 ├── flows/                    Business-logic chains built on Components, per role.
-│   ├── source/                pairing_flow.py, transfer_flow.py,
-│   │                        data_selection_flow.py (still a stub).
+│   ├── source/                pairing_flow.py, transfer_flow.py.
 │   └── target/                 authentication/sign_in_flow.py, pairing_flow.py,
 │                            transfer_flow.py.
 │
