@@ -30,7 +30,7 @@ runner"). Every file below is validated against the model by
 
 | Scenario | Needs Source PC | Environment setup | Covers |
 |---|---|---|---|
-| `full_transfer` | yes | none | sign-in, trust network, pairing, transfer everything, summary -> details -> back, Finish, Migration Done (PDF, feedback, Erase your old PC), Back to Home |
+| `full_transfer` | yes | none | sign-in, trust network, pairing, transfer everything, summary -> details (one Retry round when files were skipped; the Source re-syncs via target_state=retrying) -> back, Finish, Migration Done (PDF, validator, feedback, Erase your old PC), Back to Home |
 | `welcome_screen` | no | none | Remind me later family, Sign out, sign-in modal Cancel, failed sign-in (wrong OTP) + Retry |
 | `cancel_before_pairing` | no | none | Cancel on prerequisites / searching, Continue re-enters |
 | `pairing_code_errors` | yes | none | 3 wrong codes -> locked -> unlock -> pair; Cancel on the choose screen |

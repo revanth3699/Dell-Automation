@@ -332,6 +332,15 @@ def build(app_session) -> Model:
             feedback.type_comment(str(comment))
         feedback.click_submit()
 
+    def retry_if_offered(ctx, args) -> None:
+        """full_transfer's one retry round: click Retry when the skipped-files card offers
+        it; when the card reads Finish instead (cancelled run / network lost) there is
+        nothing to retry, so log it and let the next steps fall through."""
+        if skipped_files_screen.retry_is_offered(ctx.app, timeout=float(args.get("check_timeout", 2.0))):
+            skipped.click_retry()
+            return
+        ctx.log.warning("skippedFiles offers no Retry (card reads Finish) -- nothing to retry, moving on")
+
     def select_reminder(ctx, args) -> None:
         deferral.select_option(str(args.get("option", "tonight")))
 
@@ -506,6 +515,8 @@ def build(app_session) -> Model:
         probe=skipped_files_screen.is_showing,
         actions={
             "retry": click(skipped.click_retry, "migrating", name="retry"),
+            "retry_if_offered": Action("retry_if_offered", retry_if_offered, expect=("migrating", "skippedFiles"),
+                                       description="Retry when offered, otherwise stay (full_transfer)"),
             "finish": click(skipped.click_finish, "migrationDone", "welcome", name="finish"),
             "go_to_summary": click(skipped.click_go_to_summary, "migrationDone", "welcome", name="go_to_summary"),
         },

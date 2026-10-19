@@ -1,8 +1,9 @@
 name: full_transfer
 description: >
   Sign in, pair, transfer everything, then walk the whole results family: summary ->
-  details -> back -> Finish -> Migration Done (PDF, feedback, Erase your old PC) -> Back
-  to Home. Covers TARGET_STATE_MACHINE.md screens 1.2, 1.4, 1.6-1.13, 1.15, 1.16.
+  details -> (one Retry round when files were skipped) -> back -> Finish -> Migration
+  Done (PDF, validator, feedback, Erase your old PC) -> Back to Home. Covers
+  TARGET_STATE_MACHINE.md screens 1.2, 1.4, 1.6-1.16.
 launch: exe
 roles:
   target:
@@ -42,6 +43,29 @@ roles:
       - at: [complete, skippedFiles]
         timeout: 120
         note: complete when nothing was skipped, skippedFiles otherwise (confirmed live 2026-10-19 -- both happen)
+      - at: skippedFiles
+        do: retry_if_offered
+        optional: true
+        timeout: 120
+        note: >
+          one retry round for the skipped items: clicks Retry when the card offers it (the card reads
+          Finish instead after a cancelled run / lost network -- then nothing happens here). Skipped on
+          the complete branch.
+      - at: migrating
+        do: publish
+        args: {value: retrying}
+        timeout: 180
+        note: tells the Source script a second transfer round is running; skipped when there was nothing to retry
+      - at: resultsSummary
+        optional: true
+        timeout: 7200
+      - at: resultsSummary
+        do: view_details
+        optional: true
+      - at: [complete, skippedFiles]
+        optional: true
+        timeout: 120
+        note: the retry round's outcome -- whatever is still skipped is reported, not retried again
       - at: complete
         do: open_pdf
         optional: true
@@ -55,9 +79,9 @@ roles:
         do: go_to_summary
         optional: true
         note: >
-          no retry in this scenario -- the header link "Go to summary" calls the same finish channel as
-          the Finish card and goes straight to Migration Done; the card itself reads Retry whenever a
-          retry is possible (confirmed live 2026-10-20: Finish was not on screen)
+          after the retry round the header link "Go to summary" calls the same finish channel as the
+          Finish card and goes straight to Migration Done (confirmed live 2026-10-20: the card still read
+          Retry, Finish was not on screen)
       - at: migrationDone
         do: download_pdf
       - at: migrationDone
@@ -95,6 +119,15 @@ roles:
         do: announce
         timeout: 7200
         note: any ending (confirmed live 2026-10-19 -- a partial migration lands on migrationPartialSummary)
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: wait_for_peer
+        args: {state: [retrying, finished, failed], timeout: 7200}
+        timeout: 7260
+        note: the Target retries skipped files once (target_state=retrying) -- that restarts the transfer on this side
+      - at: migrating
+        optional: true
+        timeout: 600
+        note: the retry round; skipped when the Target had nothing to retry
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
         args: {state: [finished, failed], timeout: 7200}
