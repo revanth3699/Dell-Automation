@@ -52,9 +52,12 @@ roles:
         do: finish
         optional: true
       - at: skippedFiles
-        do: finish
+        do: go_to_summary
         optional: true
-        note: Finish on the skipped-files screen goes straight to Migration Done
+        note: >
+          no retry in this scenario -- the header link "Go to summary" calls the same finish channel as
+          the Finish card and goes straight to Migration Done; the card itself reads Retry whenever a
+          retry is possible (confirmed live 2026-10-20: Finish was not on screen)
       - at: migrationDone
         do: download_pdf
       - at: migrationDone
