@@ -2,9 +2,19 @@
 
 Confirmed from a user-supplied screenshot (2026-10-06): after pairing, the app shows
 "We're preparing your files and settings in your previous PC" (can genuinely take a
-few minutes per its own on-screen text), then "Your files are ready to move".
-start_transfer() waits for that second screen and clicks the default "Bring everything
-over for me" option.
+few minutes per its own on-screen text), then a file-selection screen. start_transfer()
+waits for that second screen and clicks the default "Bring everything over for me"
+option.
+
+Bug fixed here, confirmed via a user-supplied screenshot (2026-10-19): the second
+screen's heading above, originally assumed to be "Your files are ready to move", does
+not match the live app -- see assertions/target/transfer_receive_screen.py's own
+docstring for the real heading ("We're ready to transfer your files") and the new
+card-based layout underneath it. Every "Your files are ready to move"/"Migrate now"
+reference below describes this project's history as understood BEFORE that correction;
+the button locator (components/target/transfer_receive_screen.py's
+BRING_EVERYTHING_OVER_BUTTON_LOCATOR, "Migrate now") has not yet been re-confirmed
+against the new layout.
 
 Bug fixed here, confirmed live (2026-10-06): the account-mismatch confirm dialog
 ("Your user account names don't match" -- heading corrected 2026-10-19 via a live
@@ -338,7 +348,8 @@ class TargetTransferFlow:
         return False
 
     def start_transfer(self, screen_timeout: float = 300.0, progress_screen_timeout: float = 30.0) -> None:
-        """Waits up to screen_timeout for "Your files are ready to move" -- the
+        """Waits up to screen_timeout for "We're ready to transfer your files" (heading
+        corrected 2026-10-19 -- was "Your files are ready to move") -- the
         preceding "preparing your files" step can genuinely take a few minutes per its
         own on-screen text, so this defaults much longer than a normal screen
         transition -- then clicks "Bring everything over for me" to start the
@@ -347,7 +358,7 @@ class TargetTransferFlow:
         account-mismatch confirm dialog and the close-other-apps dialog the whole time
         too (see module docstring) and clicks through either.
         """
-        self.log.info("Waiting for Your files are ready to move (Target is preparing/scanning files)...")
+        self.log.info("Waiting for We're ready to transfer your files (Target is preparing/scanning files)...")
         deadline = time.monotonic() + screen_timeout
         confirmed_accounts = False
         while time.monotonic() < deadline:
@@ -369,7 +380,7 @@ class TargetTransferFlow:
                         "We need to close all other applications appeared right "
                         "before clicking Migrate now -- clicked Close Application"
                     )
-                self.log.success("Files ready to move -- starting transfer (Bring everything over for me)")
+                self.log.success("Ready to transfer your files -- starting transfer (Bring everything over for me)")
                 self.transfer_receive_screen.start_transfer()
 
                 self.log.info("Waiting for We're moving your files and settings...")
@@ -418,7 +429,7 @@ class TargetTransferFlow:
                             )
                             return
                         self.log.warning(
-                            "Still on Your files are ready to move -- Migrate now "
+                            "Still on We're ready to transfer your files -- Migrate now "
                             "may not have registered, clicking it again"
                         )
                         self.transfer_receive_screen.start_transfer()
@@ -441,7 +452,7 @@ class TargetTransferFlow:
                     "Close Application"
                 )
         raise TransferFlowError(
-            f"Your files are ready to move screen never appeared within {screen_timeout:.0f}s"
+            f"We're ready to transfer your files screen never appeared within {screen_timeout:.0f}s"
         )
 
     def wait_for_completion(

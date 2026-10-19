@@ -7,8 +7,10 @@ two PCs" (enter the verification code shown on Source PC) -> if accepted AND the
 account names differ, a "Your user account names don't match" confirm dialog (heading
 corrected 2026-10-19 via a live screenshot -- see
 assertions/target/confirm_accounts_dialog.py's own docstring for the correction
-history) -> file-selection screen ("Your files are ready to move" -- out of scope here,
-a later phase of the migration, not part of pairing).
+history) -> file-selection screen ("We're ready to transfer your files" -- heading
+corrected 2026-10-19, was wrongly assumed to be "Your files are ready to move"; see
+assertions/target/transfer_receive_screen.py's own docstring -- out of scope here, a
+later phase of the migration, not part of pairing).
 
 Target-PC-only, same as SignInFlow -- Source PC's side of this exchange (showing its own
 code) lives under flows/source/pairing_flow.py (SourcePairingFlow), which publishes the

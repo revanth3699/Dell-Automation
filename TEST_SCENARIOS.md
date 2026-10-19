@@ -76,7 +76,7 @@ flowchart TD
     FetchCode --> AccountMismatch{"Account names differ?"}
     AccountMismatch -->|"yes"| ConfirmAccounts["Click Continue"]
     AccountMismatch -->|"no"| ReadyToMove
-    ConfirmAccounts --> ReadyToMove["'Your files are ready to move'"]
+    ConfirmAccounts --> ReadyToMove["'We're ready to transfer your files'<br/>(heading corrected 2026-10-19,<br/>was 'Your files are ready to move')"]
     ReadyToMove --> ClickMigrate["Click 'Bring everything over for me'<br/>(periodic re-click if it silently no-ops)"]
     ClickMigrate --> Moving["'We're moving your files and settings'"]
     Moving --> Summary["Migration summary -> click Finish"]
@@ -101,7 +101,7 @@ path and what happens.*
 | Pairing-discovery | Waits for "We're looking for your other PC" to clear once the (separately-running) Source process becomes network-discoverable | **Confirmed live**, default 10-minute budget matching the app's own `PairingTimeoutInMilliseconds` |
 | Pairing -- code entry | Waits for "Let's connect your two PCs," fetches the current pairing code from the Coordination Service (published by the independent Source-side process, rotates every ~59s), types it, retries the whole fetch+enter cycle up to 3 times if the code rotates out from under a slow entry | **Confirmed live**, including the retry-on-rotation path |
 | Pairing -- account-mismatch confirm | "Your user account names don't match" (heading corrected 2026-10-19 via a live screenshot -- the previous "Let's make sure we're connecting the right user accounts" text this row listed was never actually confirmed against the real app, despite the earlier claim below) -- only shown when the two PCs' account names differ; clicked through if shown, not treated as a failure if it isn't | **Not yet re-confirmed live** with the corrected heading -- the dialog itself was seen live, but the Continue click had never actually fired before this fix |
-| Transfer -- start | Waits for "Your files are ready to move," clicks "Bring everything over for me," periodically re-clicks if the first click silently didn't register, waits for "We're moving your files and settings" to confirm the transfer actually started | **Confirmed live**, including the re-click recovery path |
+| Transfer -- start | Waits for "We're ready to transfer your files" (heading corrected 2026-10-19 via a live screenshot -- was wrongly assumed to be "Your files are ready to move"), clicks "Bring everything over for me," periodically re-clicks if the first click silently didn't register, waits for "We're moving your files and settings" to confirm the transfer actually started | **Not yet re-confirmed live** with the corrected heading -- the button locator ("Migrate now") also has not been re-confirmed against this screen's redesigned card-based layout |
 | Transfer -- completion, full success | Transfer finishes -> migration-summary screen -> click Finish -> "Your migration is now complete" -> click download a PDF -> wait -> click Back to Home -> confirm return to the Welcome-back home screen -> close the app window via its own native close button | **Confirmed live end to end**, including the app's own window-close step |
 | Data/category selection | Not automated for either role -- both transfer flows begin at the "ready to move"/"ready to migrate" screens, i.e. after whatever data-selection step the app itself requires | **Not started.** The app is assumed to already be configured for a full transfer (or the user drives this step manually) before the automation's transfer stage begins |
 
@@ -194,7 +194,8 @@ the approach.
   regression suite's real test steps (not just titles) shows the app has a
   **Compatibility check page -> Migration Info page (drive mapping, duplicate
   detection, "Recalculate space") -> Advance migration page (custom file/setting
-  selection)** sequence between pairing and "Your files are ready to move" -- none of
+  selection)** sequence between pairing and "We're ready to transfer your files" (heading
+  corrected 2026-10-19, was "Your files are ready to move") -- none of
   which exist in `locators/`/`assertions/`/`components/`/`flows/` today. Both transfer
   flows assume this is already decided before they start. This single gap is what
   blocks 14 of the 40 regression cases (all of Migration Info & Rescan, all of Files &

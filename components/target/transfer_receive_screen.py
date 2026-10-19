@@ -1,10 +1,21 @@
-"""Target-role "Your files are ready to move" screen -- shown after pairing succeeds
-(and the account-mismatch confirm dialog, if shown, has already been accepted -- see
-flows/target/pairing_flow.py's TargetPairingFlow) once Target finishes
-preparing/scanning the previous PC's files. The preceding "We're preparing your files
-and settings in your previous PC" screen is a pure wait, nothing to interact with --
-not modeled as its own component for that reason. Confirmed from a user-supplied
-screenshot (2026-10-06).
+"""Target-role "We're ready to transfer your files" screen (heading corrected
+2026-10-19 -- see assertions/target/transfer_receive_screen.py's own docstring; this
+screen was previously assumed to be headed "Your files are ready to move") -- shown
+after pairing succeeds (and the account-mismatch confirm dialog, if shown, has already
+been accepted -- see flows/target/pairing_flow.py's TargetPairingFlow) once Target
+finishes preparing/scanning the previous PC's files. The preceding "We're preparing
+your files and settings in your previous PC" screen is a pure wait, nothing to interact
+with -- not modeled as its own component for that reason.
+
+NOT YET RE-CONFIRMED (2026-10-19): a user-supplied screenshot showed this screen has a
+different card-based layout than the single-button one BRING_EVERYTHING_OVER_BUTTON_LOCATOR
+was built from on 2026-10-06 -- a "Transfer my selections" card (estimated time, a round
+arrow button) and a separate "Let me choose what to transfer" option, with no visible
+"Bring everything over for me"/"Migrate now" text anywhere. The "Migrate now" locator may
+no longer match anything at all. start_transfer()'s existing diagnostic fallback below
+(enumerate every non-chrome button if the primary click fails) should surface the real
+candidate(s) in the log the next time this runs live -- share that log to get the
+locator corrected for real, rather than guessing the new accessible Name here.
 """
 
 from loguru import logger

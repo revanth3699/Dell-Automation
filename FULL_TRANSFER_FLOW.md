@@ -295,7 +295,7 @@ flowchart TD
     RS1 -.->|"showing -- click Close"| FatalRS1(["raise TransferFlowError"])
     RS1 --> AC1{"'Plug into AC power' showing?"}
     AC1 -->|"yes"| ClickAC1["click Cancel<br/>(no Get-started recovery here -- pre-pairing only)"] --> Outer
-    AC1 -->|"no"| Ready{"'Your files are ready to move' showing? (0.5s)"}
+    AC1 -->|"no"| Ready{"'We're ready to transfer<br/>your files' showing? (0.5s)"}
     Ready -->|"no"| AccountCheck{"Account-mismatch confirm<br/>showing? (only checked once)"}
     AccountCheck -->|"yes, not yet confirmed"| ClickAccounts["click Continue"] --> CloseAppsOuter
     AccountCheck -->|"no / already confirmed"| CloseAppsOuter{"'We need to close all<br/>other applications' showing?"}
