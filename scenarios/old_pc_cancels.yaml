@@ -33,6 +33,7 @@ roles:
       - at: migrationCancelled
         do: try_again
       - at: connectOldPc
+        optional: true
         timeout: 120
       - at: enterCode
         do: type_code

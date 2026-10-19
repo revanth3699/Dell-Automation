@@ -31,6 +31,6 @@ roles:
       - at: trustNetwork
         do: trust_network
         timeout: 600
-      - at: connectOldPc
+      - at: [connectOldPc, enterCode]
         timeout: 600
         done: true

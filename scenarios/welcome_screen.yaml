@@ -44,6 +44,6 @@ roles:
       - at: signInFailed
         do: retry
         timeout: 300
-      - at: connectOldPc
+      - at: [connectOldPc, enterCode]
         timeout: 900
         done: true

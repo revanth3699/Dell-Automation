@@ -23,12 +23,12 @@ roles:
       - at: welcome
         do: continue
         timeout: 180
-      - at: connectOldPc
+      - at: [connectOldPc, enterCode]
         do: cancel
         timeout: 600
       - at: welcome
         do: continue
         timeout: 180
-      - at: connectOldPc
+      - at: [connectOldPc, enterCode]
         timeout: 600
         done: true

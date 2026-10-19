@@ -20,7 +20,9 @@ roles:
       - at: connectOldPc
         do: publish
         args: {value: connectOldPc}
+        optional: true
         timeout: 900
+        note: skipped when the Source is already searching and the app jumps straight to enterCode (seen live 2026-10-20)
       - at: enterCode
         do: type_code
         args: {timeout: 600}
