@@ -30,3 +30,20 @@ def app_attach_capabilities(hwnd_hex: str) -> dict:
             "deviceName": "WindowsPC",
         }
     }
+
+
+def desktop_session_capabilities() -> dict:
+    """WinAppDriver's conventional desktop/shell session -- `app: "Root"` -- used for
+    automating UI outside any one app's own window (here, a Windows toast notification,
+    hosted by ShellExperienceHost/Action Center, not the Dell app's process). Never
+    attempted in this codebase before this feature; whether this session can actually
+    see toast/Action Center UI at all is an open risk, see the notification-automation
+    plan's "Known open risks" #1.
+    """
+    return {
+        "desiredCapabilities": {
+            "app": "Root",
+            "platformName": "Windows",
+            "deviceName": "WindowsPC",
+        }
+    }

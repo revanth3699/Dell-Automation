@@ -60,9 +60,11 @@ from flows.source.pairing_flow import SourcePairingFlow
 from flows.source.transfer_flow import SourceTransferFlow
 from flows.target.authentication.sign_in_flow import SignInFlow
 from flows.target.pairing_flow import TargetPairingFlow
+from flows.target.reminder_flow import ReminderFlow
 from flows.target.transfer_flow import TargetTransferFlow
 from reports.action_reporter import ActionReporter
 from reports.html_report_builder import build_report
+from utils.notifications.mock_toasts import send_mock_toast_sequence
 
 
 class RoleRunnerError(Exception):
@@ -160,6 +162,61 @@ class SourceRunner:
             session.close()
 
 
+class TargetNotificationRunner:
+    """Owns the target_notification scenario -- NO sign-in/pairing fixed prefix (unlike
+    TargetRunner), per the notification-automation plan: signs in normally, stops at the
+    Welcome-back screen (via SignInFlow(stop_at_welcome_back=True)) instead of
+    continuing past it, sets the reminder there, closes the session. Fits
+    RoleRunner.run()'s existing runner_class contract with zero changes to
+    RoleRunner/TargetRunner/SourceRunner -- see CLAUDE.md's "Adding a new scenario"
+    recipe and this plan's correction of the "generic solution still open" gap: a new
+    scenario that diverges before pairing just gets its OWN runner class, rather than a
+    flag-based prefix-skip on the existing ones (tried and reverted previously, per
+    role_runner.py's own module docstring).
+
+    Corrected (2026-10-19) after real screenshots showed the reminder is set from the
+    ordinary Welcome-back screen, not a GlassFloor-entitlement-gated one -- no special
+    launch args or mock server needed, just a plain sign-in.
+
+    Rewired (2026-10-19), per explicit user direction: no longer opens a second session
+    to wait for/click a real notification (that modeled a Dell integration that doesn't
+    exist in the product yet -- see factory/session.py's
+    _await_notification_then_attach(), kept for later use, not called here anymore).
+    Instead, after Phase 1 sets the reminder, sends a scripted mock-toast sequence (one
+    wrong-heading toast, then one right-heading toast 10s later -- see
+    utils/notifications/mock_toasts.py) so the whole set-reminder -> toast -> detect ->
+    launch chain can be exercised in one command. The actual detection and launch is
+    done entirely by utils/notifications/listener.py, running independently and
+    continuously as its own Task-Scheduler-managed process (see
+    utils/notifications/scheduler.py) -- this method does not wait for or drive that
+    part at all, and post_pairing_steps is unused here (kept only so this still matches
+    RoleRunner.run()'s generic runner_class.run(run_id, post_pairing_steps, launch_mode)
+    call signature).
+    """
+
+    REMINDER_OPTION = "tonight"  # overridden per-invocation by target_notification() below, from --remainder
+
+    @staticmethod
+    def run(run_id: str, post_pairing_steps: List[Callable[[Session], None]], launch_mode: str = "exe") -> None:
+        build_path = _require_env("DDA_TARGET_BUILD_PATH")
+        username = _require_env("DDA_TARGET_SIGNIN_USERNAME")
+        password = _require_env("DDA_TARGET_SIGNIN_PASSWORD")
+        otp = _require_env("DDA_TARGET_OTP_STATIC_VALUE")
+
+        # Phase 1: ordinary launch + sign-in, stopping at the Welcome-back screen to set
+        # the reminder there, then close.
+        session = Session.get(MachineRole.TARGET, build_path=build_path, launch_mode=launch_mode)
+        try:
+            SignInFlow(session, username, password, otp, stop_at_welcome_back=True).run()
+            ReminderFlow(session.app).select_and_confirm(TargetNotificationRunner.REMINDER_OPTION, run_id)
+        finally:
+            session.close()
+
+        # "For now" trigger -- see class docstring. The listener (a separate, already-
+        # running process) does the real work from here.
+        send_mock_toast_sequence()
+
+
 class RoleRunner:
     @staticmethod
     def run(
@@ -230,8 +287,43 @@ def full_transfer(role: MachineRole, run_id: str, launch_mode: str = "exe") -> N
         raise RoleRunnerError(f"Unknown role: {role!r}")
 
 
+def target_notification(role: MachineRole, run_id: str, launch_mode: str = "exe", reminder_option: str = "tonight") -> None:
+    """Target-only (see the notification-automation plan): sets a reminder, then does a
+    short interactive wait-and-click round trip for the real notification, then resumes
+    pairing + transfer -- doubles as this feature's own end-to-end test. Has no
+    Source-side counterpart; Source never shows this reminder UI.
+
+    reminder_option is one of ReminderFlow.REMINDER_DELAYS's keys ("tonight"/"tomorrow"/
+    "next_week") -- see the CLI's --remainder flag for the 1/2/3 mapping. Set on
+    TargetNotificationRunner as a class attribute right before the call: safe here since
+    this is a single-shot CLI invocation, not a concurrent/multi-scenario process (same
+    shape the REMINDER_OPTION class attribute already had, just no longer hardcoded).
+    """
+    if role is not MachineRole.TARGET:
+        raise RoleRunnerError(f"target_notification is Target-only, got role={role!r}")
+    TargetNotificationRunner.REMINDER_OPTION = reminder_option
+    RoleRunner.run(role, run_id, TargetNotificationRunner, [full_transfer_target], launch_mode=launch_mode)
+
+
+def target_notification_resume(role: MachineRole, run_id: str, launch_mode: str = "exe") -> None:
+    """What utils/notification_listener.py actually spawns once the real notification
+    fires (or its deadline-fallback triggers) -- reuses TargetRunner UNCHANGED, just with
+    launch_mode forced to "await_notification" (ignoring whatever --launch was passed),
+    since the reminder was already set in an earlier, separate target_notification run.
+    """
+    if role is not MachineRole.TARGET:
+        raise RoleRunnerError(f"target_notification_resume is Target-only, got role={role!r}")
+    RoleRunner.run(role, run_id, TargetRunner, [full_transfer_target], launch_mode="await_notification")
+
+
+# 1/2/3 matches the real app's on-screen order (Tonight/Tomorrow/Next week) -- see
+# flows/target/reminder_flow.py's REMINDER_DELAYS for the actual key names.
+REMINDER_OPTION_MAP = {1: "tonight", 2: "tomorrow", 3: "next_week"}
+
 SCENARIOS = {
     "full_transfer": full_transfer,
+    "target_notification": target_notification,
+    "target_notification_resume": target_notification_resume,
 }
 
 
@@ -255,6 +347,13 @@ if __name__ == "__main__":
              "(real SupportAssist integration isn't built yet) -- requires "
              "DDA_CDM_SIMULATOR_PATH to be set.",
     )
+    parser.add_argument(
+        "--remainder", type=int, default=1, choices=[1, 2, 3],
+        help="Which reminder option to pick (--scenario target_notification only, "
+             "ignored otherwise): 1=Tonight, 2=Tomorrow, 3=Next week -- matches the real "
+             "app's on-screen order (flows/target/reminder_flow.py's REMINDER_DELAYS). "
+             "Default: 1 (Tonight).",
+    )
     args = parser.parse_args()
 
     role = MachineRole.TARGET if args.role == "target" else MachineRole.SOURCE
@@ -268,7 +367,12 @@ if __name__ == "__main__":
     if role is MachineRole.SOURCE and args.launch != "exe":
         parser.error("--launch only applies to --role target (Source has no launcher concept)")
 
-    SCENARIOS[args.scenario](role, args.run_id, launch_mode=args.launch)
+    if args.scenario == "target_notification":
+        SCENARIOS[args.scenario](
+            role, args.run_id, launch_mode=args.launch, reminder_option=REMINDER_OPTION_MAP[args.remainder]
+        )
+    else:
+        SCENARIOS[args.scenario](role, args.run_id, launch_mode=args.launch)
     print(
         f"RoleRunner complete for role={args.role!r}, run_id={args.run_id!r}, "
         f"scenario={args.scenario!r}, launch={args.launch!r}."

@@ -14,6 +14,7 @@ dependencies = [
     "loguru",
     "Pillow",
     "pypdf>=6.20.1",
+    "winsdk>=1.0.0b10",
 ]
 
 [dependency-groups]

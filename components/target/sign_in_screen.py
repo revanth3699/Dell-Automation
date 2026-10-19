@@ -13,7 +13,7 @@ now hold only click actions.
 
 from components.base_component import BaseComponent
 from locators.target.welcome_screen import SIGN_IN_BUTTON_LOCATOR
-from locators.target.welcome_back_screen import GET_STARTED_BUTTON_LOCATOR
+from locators.target.welcome_back_screen import GET_STARTED_BUTTON_LOCATOR, REMIND_ME_LATER_LOCATOR
 
 
 class WelcomeScreen:
@@ -36,6 +36,10 @@ class WelcomeBackScreen:
 
     def __init__(self, app_session):
         self._get_started_button = BaseComponent(app_session, *GET_STARTED_BUTTON_LOCATOR, "GetStartedButton")
+        self._remind_me_later_link = BaseComponent(app_session, *REMIND_ME_LATER_LOCATOR, "RemindMeLaterLink")
 
     def click_get_started(self) -> None:
         self._get_started_button.click()
+
+    def click_remind_me_later(self) -> None:
+        self._remind_me_later_link.click()

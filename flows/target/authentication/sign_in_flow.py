@@ -162,7 +162,7 @@ class SignInFlow:
     # See _wait_for_auth_outcome's own docstring for the fix.
     AUTH_OUTCOME_CONFIRMATION_WINDOW = 5.0
 
-    def __init__(self, session, username: str, password: str, otp: str):
+    def __init__(self, session, username: str, password: str, otp: str, stop_at_welcome_back: bool = False):
         self.session = session
         self.app_session = session.app  # Page Objects take the raw WinAppDriverSession
         self.username = username
@@ -174,6 +174,15 @@ class SignInFlow:
         # pairing-discovery/trust-network shortcuts), so run() needs to know to wait for
         # UAC approval afterward too. See run()'s use of this flag.
         self._just_clicked_get_started = False
+        # notification-automation feature: when True, _already_signed_in()'s "Welcome
+        # back" branch stops right after detecting the screen instead of clicking Get
+        # Started -- needed so a caller (ReminderFlow) gets a turn at "Remind me later."
+        # before this flow would otherwise click straight past it. Default False
+        # preserves every existing caller's behavior unchanged. See
+        # self.stopped_at_welcome_back, which run() checks to short-circuit before any
+        # of the post-"already signed in" UAC/trust-network/pairing-discovery waits.
+        self.stop_at_welcome_back = stop_at_welcome_back
+        self.stopped_at_welcome_back = False
 
         self.welcome_screen = WelcomeScreen(self.app_session)
         self.welcome_back_screen = WelcomeBackScreen(self.app_session)
@@ -223,6 +232,13 @@ class SignInFlow:
                     self._wait_for_uac_approval(remaining=deadline - time.monotonic())
                     self._wait_for_trust_network_then_pairing_discovery(remaining=deadline - time.monotonic())
             else:
+                if self.stopped_at_welcome_back:
+                    self.log.info(
+                        "Stopped at the Welcome-back screen per stop_at_welcome_back=True "
+                        "-- not waiting for UAC/trust-network/pairing-discovery, leaving "
+                        "control to the caller with Welcome-back still on screen."
+                    )
+                    return
                 self.log.info(
                     "App already signed in (cached session detected before the sign-in "
                     "button) -- skipped credential entry, proceeding to confirm the "
@@ -425,6 +441,13 @@ class SignInFlow:
         # a no-op pass-through: the user confirmed directly that this screen's own blue
         # circular button must still be clicked to proceed.
         if welcome_back_assertions.is_showing(self.app_session, timeout=1.0):
+            if self.stop_at_welcome_back:
+                self.log.info(
+                    "Already signed in: 'Welcome back' screen showing -- "
+                    "stop_at_welcome_back=True, NOT clicking Get Started"
+                )
+                self.stopped_at_welcome_back = True
+                return True
             self.log.info("Already signed in: 'Welcome back' screen showing -- clicking Get Started")
             self.welcome_back_screen.click_get_started()
             self._just_clicked_get_started = True

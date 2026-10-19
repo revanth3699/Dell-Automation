@@ -51,6 +51,7 @@ from factory.config import (
     BROWSER_PROCESS_NAMES,
     CDM_SIMULATOR_EXE_NAME,
     CDM_SIMULATOR_PROCESS_NAME,
+    NOTIFICATION_WAIT_TIMEOUT_SECONDS,
     SIGN_IN_WINDOW_TITLE_KEYWORDS,
     SOURCE_EXE_NAME,
     SOURCE_PROCESS_NAME,
@@ -123,7 +124,7 @@ def _is_process_running(exe_name: str) -> bool:
     return output == "yes"
 
 
-def _kill_existing_instances(exe_name: str) -> None:
+def _kill_existing_instances(exe_name: str, grace_period_seconds: float = 3.0) -> None:
     """Kills every process whose command line mentions exe_name -- not just the one with
     a visible window. Confirmed necessary: the app's single-instance lock silently
     swallows a new launch's CLI args if ANY matching instance (visible or hidden) is
@@ -135,7 +136,26 @@ def _kill_existing_instances(exe_name: str) -> None:
     documented on driver_factory.kill_winappdriver(). Now verifies the plain kill
     actually worked and retries elevated (one more admin prompt) if not, so
     error/interrupt cleanup is guaranteed rather than silently incomplete.
+
+    Bug fixed here, confirmed live (2026-10-19): this used to force-kill
+    (`Stop-Process -Force`) immediately, with no check for whether the process was
+    already exiting on its own -- e.g. right after a real in-app "Close" click
+    (components/target/reminder_confirmation_panel.py), which the user confirmed
+    actually closes the app. A forceful kill looks like a crash to Windows, not a clean
+    exit, and an app registered for Windows' Restart Manager
+    (`RegisterApplicationRestart`) can respond to that by auto-relaunching itself --
+    suspected cause of the app reappearing in a blank/stuck WebView2-render-failure
+    window (a known class of issue already documented elsewhere in this file) right
+    after automation had just "closed" it. Now gives the process a brief grace period to
+    exit on its own first -- the common case when it's already closing gracefully --
+    and only force-kills if it's still around afterward, same as before.
     """
+    deadline = time.monotonic() + grace_period_seconds
+    while time.monotonic() < deadline:
+        if not _is_process_running(exe_name):
+            return  # already exited on its own -- no force-kill needed at all
+        time.sleep(0.5)
+
     _run_powershell(
         f"Get-CimInstance Win32_Process | Where-Object {{ $_.CommandLine -like '*{exe_name}*' "
         f"-or $_.Name -eq '{exe_name}' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId "
@@ -303,6 +323,50 @@ def _launch_then_attach(
     bring_window_to_foreground(hwnd_hex)
     time.sleep(APP_FOREGROUND_SETTLE_SECONDS)
 
+    return session
+
+
+def _await_notification_then_attach(
+    exe_name: str = TARGET_EXE_NAME,
+    process_name: str = TARGET_PROCESS_NAME,
+    notification_timeout: float = NOTIFICATION_WAIT_TIMEOUT_SECONDS,
+) -> WinAppDriverSession:
+    """Waits for the real Windows notification to appear and clicks it (reopening the
+    Target PC UI app), then attaches to its window -- same return shape/contract as
+    _launch_then_attach()/_launch_via_simulator_then_attach(), so Session.get() callers
+    don't need to know which launch path produced the session. Does NOT launch the app
+    itself first -- unlike the other two launch paths, there is nothing to launch here;
+    the app is expected to already be closed (set by an earlier target_notification
+    Phase 1 run) and reopened BY clicking the notification, not by us.
+
+    UNCONFIRMED (see the notification-automation plan's "Known open risks" #1): whether
+    a WinAppDriver `Root`/desktop session (desktop_session_capabilities()) can actually
+    see and click a real Windows toast at all has not been tested live in this
+    environment -- WinAppDriver isn't installed here and installing it requires a UAC
+    elevation prompt this environment can't click through. This function is written to
+    the plan's design but not yet live-verified.
+    """
+    from flows.target.notification_flow import NotificationFlow  # local import: avoids a
+    # flows -> factory -> flows cycle, since flows/ already imports factory/ (see
+    # CLAUDE.md's layer-import-direction rule -- factory/ must not import from flows/ at
+    # module level).
+
+    ensure_winappdriver_running()
+    desktop_session = _create_winappdriver_session(caps.desktop_session_capabilities())
+    try:
+        NotificationFlow(desktop_session).wait_and_click(timeout=notification_timeout)
+    finally:
+        try:
+            desktop_session.quit()
+        except Exception:
+            pass
+
+    hwnd_hex = poll_until(
+        lambda: _find_main_window_hwnd(process_name), timeout=WINDOW_POLL_TIMEOUT, interval=WINDOW_POLL_INTERVAL,
+    )
+    session = _create_winappdriver_session(caps.app_attach_capabilities(hwnd_hex))
+    bring_window_to_foreground(hwnd_hex)
+    time.sleep(APP_FOREGROUND_SETTLE_SECONDS)
     return session
 
 
@@ -582,9 +646,13 @@ class Session:
         "mock" is reserved for the separate GlassFloor entitlement mock server,
         utils/mock_server.py, not wired in here); "simulator" launches it indirectly
         via the CDM Simulator WPF app instead (see
-        _launch_via_simulator_then_attach()), and requires simulator_path. Source has
-        no equivalent launcher concept -- always launches directly regardless of
-        launch_mode.
+        _launch_via_simulator_then_attach()), and requires simulator_path.
+        "await_notification" (new, notification-automation feature) does not launch the
+        app at all -- it waits for/clicks a real Windows notification that reopens it
+        (see _await_notification_then_attach()); build_path is still required (passed
+        through to ValueError's check below for a consistent calling contract) but
+        unused by this branch specifically. Source has no equivalent launcher concept --
+        always launches directly regardless of launch_mode.
         """
         exe_name, process_name = (
             (SOURCE_EXE_NAME, SOURCE_PROCESS_NAME) if role is MachineRole.SOURCE
@@ -598,16 +666,39 @@ class Session:
                 raise ValueError("build_path is required to create a new session")
             session = cls()
             session._exe_name = exe_name
-            if role is MachineRole.TARGET and launch_mode == "simulator":
-                if not simulator_path:
-                    raise ValueError("simulator_path is required when launch_mode='simulator'")
-                session.app = _launch_via_simulator_then_attach(
-                    build_path, simulator_path, app_arguments, exe_name=exe_name, process_name=process_name
-                )
-            else:
-                session.app = _launch_then_attach(
-                    build_path, app_arguments, exe_name=exe_name, process_name=process_name
-                )
+            try:
+                if role is MachineRole.TARGET and launch_mode == "simulator":
+                    if not simulator_path:
+                        raise ValueError("simulator_path is required when launch_mode='simulator'")
+                    session.app = _launch_via_simulator_then_attach(
+                        build_path, simulator_path, app_arguments, exe_name=exe_name, process_name=process_name
+                    )
+                elif role is MachineRole.TARGET and launch_mode == "await_notification":
+                    session.app = _await_notification_then_attach(exe_name=exe_name, process_name=process_name)
+                else:
+                    session.app = _launch_then_attach(
+                        build_path, app_arguments, exe_name=exe_name, process_name=process_name
+                    )
+            except BaseException:
+                # Bug fixed here, confirmed live (2026-10-19): every caller's own
+                # try/finally wraps Session.get()'s RETURN VALUE (`session = Session.get(...)`
+                # sits before the try:), so if get() itself raises -- e.g.
+                # _await_notification_then_attach()'s NotificationFlowError when the
+                # notification never appears -- no caller's cleanup ever runs, even
+                # though WinAppDriver (and possibly a partially-launched app process)
+                # may already be up. Confirmed live: this orphaned an elevated
+                # WinAppDriver.exe that a plain Stop-Process couldn't even touch.
+                # Clean up here, once, centrally, for every launch path and every
+                # caller, then re-raise so the original failure is never swallowed.
+                try:
+                    _kill_existing_instances(exe_name)
+                except Exception:
+                    pass
+                try:
+                    kill_winappdriver()
+                except Exception:
+                    pass
+                raise
             cls._instances[role] = session
             return session
 

@@ -39,6 +39,11 @@ SOURCE_PROCESS_NAME = os.environ.get("DDA_SOURCE_PROCESS_NAME", "DellDataAssista
 
 MOCK_SERVER_DEFAULT_PORT = int(os.environ.get("DDA_MOCK_SERVER_PORT", "8443"))
 
+# notification-automation feature: how long NotificationFlow.wait_and_click() waits for
+# the real Windows toast before giving up. Defaults short, for interactive dev testing --
+# a real production check should override this to several hours via the env var.
+NOTIFICATION_WAIT_TIMEOUT_SECONDS = float(os.environ.get("DDA_NOTIFICATION_WAIT_TIMEOUT_SECONDS", "120"))
+
 # CDM Simulator WPF app ("CDMSimulatorUI") -- mimics Dell SupportAssist's role in
 # launching the Target PC UI app (real SupportAssist integration isn't built yet).
 # Confirmed from a user-supplied screenshot (2026-10-12). CDM_SIMULATOR_PATH has no

@@ -215,6 +215,30 @@ class WinAppDriverElement:
         self._session._post("/moveto", {"element": self.id})
         self._session._post("/click", {"button": 0})
 
+    def find_element(self, by: str, value: str) -> "WinAppDriverElement":
+        """Element-relative search (POST /element/{id}/element), scoped to this
+        element's own subtree -- added (2026-10-19) because every search previously had
+        to go through WinAppDriverSession.find_element(), which always searches the
+        WHOLE session scope. Confirmed live: on a Root/desktop session, that means
+        scanning the entire visible desktop's UIA tree for every single lookup, which
+        was dramatically slower than expected (a lookup for a toast's own action button
+        that doesn't exist yet, polled repeatedly, took long enough to blow through a
+        60s+ test budget). Finding a narrower element first (e.g. the toast's own
+        window) and searching WITHIN it via this method should be much faster than
+        repeatedly re-scanning the whole desktop.
+        """
+        result = self._session._post(f"/element/{self.id}/element", {"using": by, "value": value})
+        element_id = result.get("ELEMENT") or result.get("element-6066-11e4-a52e-4f735466cecf")
+        return WinAppDriverElement(self._session, element_id)
+
+    def find_elements(self, by: str, value: str) -> list:
+        results = self._session._post(f"/element/{self.id}/elements", {"using": by, "value": value}) or []
+        elements = []
+        for r in results:
+            element_id = r.get("ELEMENT") or r.get("element-6066-11e4-a52e-4f735466cecf")
+            elements.append(WinAppDriverElement(self._session, element_id))
+        return elements
+
     def send_keys(self, text: str, verify: bool = True, max_attempts: int = 3) -> None:
         # Confirmed bug: sending the whole string in one /value call against a
         # React-controlled input (e.g. the sign-in email field) only sticks the LAST
