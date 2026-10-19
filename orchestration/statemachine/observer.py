@@ -36,11 +36,14 @@ class Observation:
     error: str | None = None
     at: float = field(default_factory=time.monotonic)
     snapshot_len: int = 0
+    via: str = "snapshot"
 
     def key(self) -> str:
         return (
             f"screen={self.screen or '-'} overlay={self.overlay or '-'} "
-            f"prompt={self.close_prompt or '-'}" + (f" error={self.error!r}" if self.error else "")
+            f"prompt={self.close_prompt or '-'}"
+            + (f" via={self.via}" if self.via != "snapshot" else "")
+            + (f" error={self.error!r}" if self.error else "")
         )
 
     def top(self) -> str | None:
@@ -114,6 +117,43 @@ class ProbeObserver:
                 screen=_first_match(self.model.screens(), showing),
                 overlay=_first_match(self.model.overlays(), showing),
                 close_prompt=_first_match(self.model.close_prompts(), showing),
+                via="probe",
             )
         except Exception as exc:
-            return Observation(None, None, None, error=f"{type(exc).__name__}: {exc}")
+            return Observation(None, None, None, error=f"{type(exc).__name__}: {exc}", via="probe")
+
+
+class HybridObserver:
+    """Snapshot first; probe when the snapshot cannot be trusted.
+
+    Confirmed live (2026-10-19, first scenario_runner run): WinAppDriver answered
+    GET /source with HTTP 400 once the Target app reached the code-entry screen, after
+    serving earlier screens fine -- the snapshot observer alone goes blind exactly when
+    the UI tree gets complicated. This observer falls back to per-locator probing when
+    the snapshot call errors, and also after `probe_after_blank` consecutive snapshots
+    that recognised nothing (a screen whose text the snapshot does not carry). Probing is
+    slower (one find_element per state), so it is only used while the snapshot is
+    failing; a recognised snapshot resets the counter."""
+
+    def __init__(self, model: Model, probe_timeout: float = 0.3, probe_after_blank: int = 3):
+        self.snapshot = SnapshotObserver(model)
+        self.probe = ProbeObserver(model, probe_timeout=probe_timeout)
+        self.probe_after_blank = probe_after_blank
+        self._blank_streak = 0
+
+    def observe(self, session) -> Observation:
+        obs = self.snapshot.observe(session)
+        if obs.error:
+            logger.debug(f"snapshot failed ({obs.error}) -- probing instead")
+            probed = self.probe.observe(session)
+            if probed.error:
+                probed.error = f"snapshot: {obs.error}; probe: {probed.error}"
+            return probed
+        if obs.top() is None:
+            self._blank_streak += 1
+            if self._blank_streak >= self.probe_after_blank:
+                logger.debug(f"{self._blank_streak} blank snapshots -- probing instead")
+                return self.probe.observe(session)
+            return obs
+        self._blank_streak = 0
+        return obs

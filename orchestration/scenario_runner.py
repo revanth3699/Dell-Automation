@@ -34,7 +34,7 @@ from factory.session import MachineRole, Session
 from orchestration.statemachine import source_model, target_model
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model
-from orchestration.statemachine.observer import ProbeObserver, SnapshotObserver
+from orchestration.statemachine.observer import HybridObserver, ProbeObserver, SnapshotObserver
 from orchestration.statemachine.runner import Runner, RunnerError
 from orchestration.statemachine.scenario import (
     Scenario,
@@ -121,7 +121,8 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
     ctx = RunContext(role=role_name, run_id=run_id, session=session, app=session.app,
                      coordination=CoordinationClient(), log=log, env=env, scenario_name=scenario.name)
     model = MODEL_BUILDERS[role_name](session.app)
-    observer = SnapshotObserver(model) if observer_kind == "snapshot" else ProbeObserver(model)
+    observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}
+    observer = observers[observer_kind](model)
     try:
         _run_environment_steps(script.setup, ctx, "setup")
         Runner(model, script, ctx, observer, reporter=reporter).run()
@@ -141,8 +142,9 @@ def main(argv=None) -> int:
     parser.add_argument("--run-id")
     parser.add_argument("--launch", choices=["exe", "mock", "simulator"],
                         help="Target launch mode (default: the scenario's 'launch', else exe)")
-    parser.add_argument("--observer", choices=["snapshot", "probe"], default="snapshot",
-                        help="snapshot = one page_source per tick (default); probe = per-locator find_element")
+    parser.add_argument("--observer", choices=["hybrid", "snapshot", "probe"], default="hybrid",
+                        help="hybrid (default) = one page_source per tick, falling back to per-locator probing "
+                             "when /source fails or recognises nothing; snapshot / probe = that one method only")
     parser.add_argument("--validate-only", action="store_true", help="load + validate the scenario, launch nothing")
     parser.add_argument("--skip-prerequisites", action="store_true")
     args = parser.parse_args(argv)

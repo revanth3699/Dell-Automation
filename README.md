@@ -337,10 +337,11 @@ current (screen, overlay, close prompt). The runner performs the step's action w
 target is showing; applies the scenario's policy when something else is stacked on top
 (click it, wait for it to clear, or fail); keeps waiting while the app is on a screen it
 can legitimately pass through; and fails with the exact observed state otherwise
-(`expected resultsSummary ... got screen=migrating overlay=failure`). `--observer probe`
-swaps the snapshot for per-locator `find_element` calls -- slower, but it uses exactly
-the locators the rest of the framework trusts; try it if the snapshot observer misses a
-screen.
+(`expected resultsSummary ... got screen=migrating overlay=failure`). The default
+`--observer hybrid` falls back to per-locator `find_element` probing whenever `/source`
+fails or recognises nothing for a few ticks -- confirmed necessary live (2026-10-19):
+WinAppDriver answered `/source` with HTTP 400 on the code-entry screen after serving the
+earlier screens fine. `--observer snapshot` / `probe` force one method only.
 
 Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are

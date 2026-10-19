@@ -384,3 +384,40 @@ def test_policy_base_merges_named_set_with_overrides():
     with pytest.raises(ScenarioError):
         parse_scenario({"name": "p", "roles": {"test": {"policies": {"base": "missing"},
                                                         "steps": [{"at": "A", "done": True}]}}})
+
+
+# ----------------------------------------------------------------- hybrid observer
+
+def test_hybrid_observer_probes_when_snapshot_errors_or_stays_blank():
+    from orchestration.statemachine.observer import HybridObserver
+    calls, observer = Calls(), ScriptedObserver()
+    model = make_model(calls, observer)
+    probe_calls = []
+
+    def probe_a(session, timeout):
+        probe_calls.append("A")
+        return True
+
+    model.get("A").probe = probe_a
+
+    class Session:
+        mode = "ok"
+
+        @property
+        def page_source(self):
+            if self.mode == "error":
+                raise RuntimeError("400 Bad Request")
+            return '<Text Name="Screen A"/>' if self.mode == "ok" else "<Window/>"
+
+    session = Session()
+    hybrid = HybridObserver(model, probe_after_blank=2)
+    assert hybrid.observe(session).screen == "A" and not probe_calls          # snapshot works
+    session.mode = "error"
+    o = hybrid.observe(session)
+    assert o.screen == "A" and o.via == "probe" and probe_calls == ["A"]      # error -> probe
+    session.mode = "blank"
+    assert hybrid.observe(session).screen is None                            # first blank: trust it
+    o = hybrid.observe(session)
+    assert o.screen == "A" and o.via == "probe"                               # second blank: probe
+    session.mode = "ok"
+    assert hybrid.observe(session).via == "snapshot"                          # recovered
