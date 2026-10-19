@@ -104,9 +104,23 @@ dell-automation/
 │                            (e.g. error_banner.py) rather than duplicate it.
 │
 ├── orchestration/
-│   └── role_runner.py         THE real entry point: `python -m orchestration.role_runner
-│                            --role {target,source} --run-id <id>`. Chains prerequisites
-│                            -> Session -> that role's flows -> report, for one machine.
+│   ├── role_runner.py         Original entry point: `python -m orchestration.role_runner
+│   │                        --role {target,source} --run-id <id>`. Chains prerequisites
+│   │                        -> Session -> that role's hand-written flows -> report.
+│   ├── scenario_runner.py     State-machine entry point (2026-10-19): `python -m
+│   │                        orchestration.scenario_runner --role --run-id --scenario
+│   │                        <name>`; drives a YAML scenario from scenarios/ through
+│   │                        the transition table. See "State-machine scenario runner".
+│   └── statemachine/          model.py (State/Action/Model), observer.py (snapshot +
+│                            probe observers), scenario.py (YAML loader + validation),
+│                            runner.py (the one observe->policy->act loop), peer.py
+│                            (publish/wait_for_peer over the coordination service),
+│                            target_model.py / source_model.py (the transition tables).
+│
+├── scenarios/                 YAML scenarios for scenario_runner.py, one file per
+│                            end-to-end case (full_transfer, cancel_during_transfer,
+│                            old_pc_cancels, ...); _common.yaml holds the shared
+│                            dialog-policy sets. Validated by tests/statemachine.
 │
 ├── reports/                   Per-run HTML reporting (no jsonl/meta sidecar files).
 │   ├── report_models.py        ActionRecord / RunReport dataclasses.
@@ -118,10 +132,11 @@ dell-automation/
 │   └── output/                 Generated reports land here (gitignored).
 │
 ├── tests/
-│   └── conftest.py            Pytest fixtures (Session + credentials) and the
-│                            reporting hooks (pytest_configure/pytest_sessionfinish).
-│                            No test_*.py files today -- superseded by
-│                            orchestration/role_runner.py's own live run + reporting.
+│   ├── conftest.py            Pytest fixtures (Session + credentials) and the
+│   │                        reporting hooks (pytest_configure/pytest_sessionfinish).
+│   └── statemachine/          Hardware-free unit tests for the runner/model/scenario
+│                            loader, plus validation of every scenarios/*.yaml against
+│                            the real models: `uv run pytest tests/statemachine`.
 │
 ├── tools/                     Manual/dev scripts (launch_target_app.py,
 │                            run_sign_in_flow.py, several _test_*.py one-off
@@ -138,6 +153,10 @@ dell-automation/
 │   │                           config; these are the helpers everything else reaches for.
 │   ├── prerequisites.py         Standalone one-time pass/fail gate, run once before
 │   │                           automation starts.
+│   ├── environment.py           Named machine setup/teardown steps for scenarios
+│   │                           (start Notepad, disable/enable the network adapter,
+│   │                           Public/Private network profile, Windows region) --
+│   │                           PowerShell-based, unverified live.
 │   ├── coordination_client.py   The pairing-code hand-off client (talks to
 │   │                           coordination_service/app.py).
 │   ├── mock_server.py           GlassFloor entitlement mock-server launcher (dev use).
@@ -165,6 +184,9 @@ Five layers, imports flow one direction only (lower layers never import from hig
 ```
 Locators  -->  Components  -->  Flows  -->  Orchestration (role_runner.py)
    |               |              |
+   |               `------------------>  Orchestration (statemachine/ + scenario_runner.py,
+   |                                     driven by scenarios/*.yaml; imports components/,
+   |                                     assertions/ and the browser part of flows/)
    `--- assertions/ (shared expected-text constants, read-only) ---'
 
 Factory (driver_factory.py, session.py, capabilities.py, config.py, logger_factory.py)
@@ -251,6 +273,44 @@ and calls `ActionReporter.current().record(...)`. `build_report()` renders every
 accumulated so far into one self-contained `reports/output/<run_id>_<role>_<timestamp>.html`
 and refreshes `reports/output/index.html` (a cross-run list) -- called from
 `RoleRunner.run()`'s `finally` for a live run, or `pytest_sessionfinish` for a pytest run.
+
+## State-machine scenario runner
+
+`orchestration/scenario_runner.py` is the second entry point, added 2026-10-19 alongside
+`role_runner.py` (which is unchanged). Instead of hand-written flows, it drives the app
+from a transition table (`orchestration/statemachine/target_model.py` and
+`source_model.py` -- the data form of [TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md))
+and a YAML scenario (`scenarios/*.yaml`) that lists the steps and the policy for every
+dialog that may interrupt them.
+
+```
+uv run python -m orchestration.scenario_runner --scenario full_transfer --validate-only
+uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
+uv run python -m orchestration.scenario_runner --role source --run-id r1 --scenario full_transfer
+```
+
+How a run works: each tick the observer reads one `page_source` snapshot and names the
+current (screen, overlay, close prompt). The runner performs the step's action when its
+target is showing; applies the scenario's policy when something else is stacked on top
+(click it, wait for it to clear, or fail); keeps waiting while the app is on a screen it
+can legitimately pass through; and fails with the exact observed state otherwise
+(`expected resultsSummary ... got screen=migrating overlay=failure`). `--observer probe`
+swaps the snapshot for per-locator `find_element` calls -- slower, but it uses exactly
+the locators the rest of the framework trusts; try it if the snapshot observer misses a
+screen.
+
+Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
+(`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
+documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,
+`teardown:`, a step's `env:`) come from `utils/environment.py`. Peer sync is the
+`publish` / `wait_for_peer` action every state has, over the coordination service only.
+Every scenario is validated against the models by `tests/statemachine/test_scenarios.py`;
+`uv run pytest tests/statemachine` needs no hardware.
+
+Status: everything under `orchestration/statemachine/`, `scenarios/`, `utils/environment.py`
+and the 2026-10-19 assertion/locator/component additions is verified against the rebit
+source only, not against the live app. The first live milestone is `full_transfer` on
+real hardware; `validation/` stays a separate manual step, as before.
 
 ## PDF migration-report validation
 
