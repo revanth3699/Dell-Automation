@@ -201,7 +201,13 @@ class Runner:
         # for it): a step whose every target is an engine-driven 'waiting' screen can be
         # skipped by the app itself, so it is optional whether or not the YAML says so.
         skippable = step.optional or all(self.model.get(t).kind == "waiting" for t in step.at)
-        later_targets = {t for s in (later_steps or []) for t in s.at} if skippable else set()
+        # Confirmed live (2026-10-20, run 651): a step inside a conditional group (`when:`)
+        # that may never run must not count as "a later step's target" for steps outside
+        # that group -- the second-round group's own `migrating` step made the whole retry
+        # round skip itself the moment the retried transfer started.
+        later_targets = {
+            t for s in (later_steps or []) if s.group is None or s.group == step.group for t in s.at
+        } if skippable else set()
         self.log.info(f"{step.label()} -- waiting up to {timeout:.0f}s" + (f" ({step.note})" if step.note else ""))
 
         while True:

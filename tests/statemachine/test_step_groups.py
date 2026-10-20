@@ -174,3 +174,28 @@ def test_scenario_runner_collects_custom_keys():
         {"at": "A", "do": "publish", "args": {"value": "migrating"}},
     ]).role("target")
     assert scenario_runner.coordination_keys(script) == ({"target_outcome", "source_hint"}, {"target_outcome"})
+
+
+def test_a_conditional_groups_steps_do_not_skip_optional_steps_outside_it():
+    """Run 651 (2026-10-20): the second-round group had its own `migrating` step, so every
+    optional step of the retry round was skipped while the retried transfer ran."""
+    observer = ScriptedObserver(obs("A"))
+    performed = []
+    model = make_model(observer, performed)
+    steps = [
+        Step(["A"], do="go", index=0),                                   # -> B
+        Step(["B"], do="finish", optional=True, index=1),                # must run: A is in the group only
+        Step(["A"], do="go", when={"key": "k", "is": "yes", "among": ["yes", "no"], "timeout": 5},
+             group="round 2", index=2),
+        Step(["B"], done=True, index=3),
+    ]
+    script = RoleScript(role="target", steps=steps, step_timeout=30, tick=1.0)
+    ctx = RunContext(role="target", run_id="r", session=None, app=object(),
+                     coordination=FakeCoordination({"k": "no"}), log=logger)
+    clock = {"now": 0.0}
+
+    def sleep(s):
+        clock["now"] += s
+
+    Runner(model, script, ctx, observer, sleep=sleep, clock=lambda: clock["now"]).run()
+    assert performed == ["go", "finish"]
