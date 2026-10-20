@@ -38,10 +38,67 @@ _ACTION_VERBS = {
     "get_text": "read",
 }
 
+# component/action pairs recorded directly by orchestration/statemachine/runner.py
+# (component is a model State id, e.g. "chooseWhatToMove", not a UI element name) never
+# go through BaseComponent, so they never produce one of these four literal action
+# strings -- used below to tell the two row shapes apart.
+_BASE_COMPONENT_ACTIONS = {"click", "click_at_center", "type", "get_text"}
+
+_CAMEL_SPLIT_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+
+def _humanize_state_id(state_id: str) -> str:
+    """"chooseWhatToMove" -> "Choose What To Move". Falls back to the raw id for "-"
+    (unset) or anything that isn't a plain camelCase identifier."""
+    if not state_id or state_id == "-":
+        return "(none)"
+    words = _CAMEL_SPLIT_RE.sub(" ", state_id).split()
+    return " ".join(w[:1].upper() + w[1:] for w in words) if words else state_id
+
+
+def _humanize_observe(action: str) -> str:
+    """Bug fixed here (2026-10-20): orchestration/statemachine/runner.py's _note()
+    records every state change as f"observe {Observation.key()}" -- a debug-oriented
+    string ("observe screen=welcome overlay=- prompt=-") meant for logs, rendered
+    verbatim as the report's dropdown title. Turns it into a short, readable summary
+    instead; falls back to the raw action text if the format ever changes underneath
+    this (best-effort only -- a report title is never worth crashing generation over).
+    """
+    body = action[len("observe "):]
+    fields: Dict[str, str] = {}
+    for part in body.split(" "):
+        if "=" in part:
+            key, _, value = part.partition("=")
+            fields.setdefault(key, value)
+    screen, overlay, prompt = fields.get("screen", "-"), fields.get("overlay", "-"), fields.get("prompt", "-")
+    parts = []
+    if prompt != "-":
+        parts.append(f"{_humanize_state_id(prompt)} (close prompt)")
+    elif overlay != "-":
+        parts.append(f"{_humanize_state_id(overlay)} (overlay)")
+    if screen != "-":
+        parts.append(_humanize_state_id(screen))
+    if not parts:
+        return "No recognized screen yet"
+    return "Observed: " + " over ".join(parts)
+
 
 def _humanize_action(component: str, action: str) -> str:
-    verb = _ACTION_VERBS.get(action, action.replace("_", " "))
-    return f"{html.escape(component)} {html.escape(verb)}"
+    if component == "StateMachine":
+        if action.startswith("observe "):
+            try:
+                return html.escape(_humanize_observe(action))
+            except Exception:
+                pass  # malformed/future observe() format -- fall through to the raw text
+        return f"StateMachine: {html.escape(action)}"
+    if action in _BASE_COMPONENT_ACTIONS:
+        verb = _ACTION_VERBS.get(action, action.replace("_", " "))
+        return f"{html.escape(component)} {html.escape(verb)}"
+    # A scenario-step action recorded directly by orchestration/statemachine/runner.py:
+    # component is a model State id (camelCase), action is already a human-readable verb
+    # phrase from the YAML/model (e.g. "continue", "migrate now"), optionally suffixed
+    # " (retry)"/" (retry N)" by Runner._maybe_perform_again().
+    return f"{html.escape(_humanize_state_id(component))}: {html.escape(action)}"
 
 
 def _build_run_report(reporter: ActionReporter) -> RunReport:

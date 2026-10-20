@@ -10,3 +10,9 @@ doesn't advance to the real completion screen ("Your migration is now complete")
 """
 
 FINISH_LINK_LOCATOR = ("xpath", '//*[@Name="Finish"]')
+
+# Added 2026-10-19 (verified against rebit source, not live): ResultsSummaryView.tsx's
+# subtitle ends with a <button className=subtitleLink> labelled ResultsSummary_Here ("View
+# the details") -- the only way into the details (skipped-files screen when anything was
+# not transferred, otherwise the Complete screen). This replaces the old "here" link copy.
+VIEW_DETAILS_LINK_LOCATOR = ("xpath", '//*[@Name="View the details"]')

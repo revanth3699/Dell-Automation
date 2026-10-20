@@ -1,0 +1,34 @@
+name: cancel_before_pairing
+description: >
+  Target only. Cancel on the prerequisites screen and again while searching for the other
+  PC; each Cancel sends Migration.Stop and returns to Welcome, and Continue re-enters.
+  Covers the Cancel rows of 1.6 and 1.7.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: [checkPrerequisites, connectOldPc]
+        do: cancel
+        timeout: 600
+        note: whichever shows first; checkPrerequisites may be too brief to catch
+      - at: welcome
+        do: continue
+        timeout: 180
+      - at: [connectOldPc, enterCode]
+        do: cancel
+        timeout: 600
+      - at: welcome
+        do: continue
+        timeout: 180
+      - at: [connectOldPc, enterCode]
+        timeout: 600
+        done: true

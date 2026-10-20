@@ -1,0 +1,26 @@
+name: not_admin
+description: >
+  Target only. Run the automation as a NON-administrator Windows user (no automated setup
+  exists for this): the precheck raises "Admin access is required"; Cancel transfer
+  returns to Welcome without closing the app. Covers overlay notAdmin.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      notAdmin: ignore
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: notAdmin
+        do: cancel_transfer
+        timeout: 600
+      - at: welcome
+        timeout: 120
+        done: true

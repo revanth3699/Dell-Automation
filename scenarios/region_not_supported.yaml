@@ -1,0 +1,27 @@
+name: region_not_supported
+description: >
+  Target only. With the Windows home location set to an unsupported region the precheck
+  raises "Set this PC's location to a supported region"; Close ends the app. Needs an
+  elevated run (Set-WinHomeLocation); the region is restored in teardown. Covers overlay
+  localeNotSupported (terminal).
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    setup: [set_region_unsupported]
+    teardown: [restore_region]
+    policies:
+      base: happy_path
+      localeNotSupported: ignore    # the step below is its target; ignore keeps it from failing while waiting
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: localeNotSupported
+        do: close
+        timeout: 600
+        done: true

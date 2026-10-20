@@ -13,7 +13,7 @@ confirmation that we're genuinely back on the home screen post-migration.
 from assertions.common import text_exists
 
 WELCOME_BACK_CONTAINS_TEXT = "Welcome back"
-SIGN_OUT_TEXT = "Sign Out"
+SIGN_OUT_TEXT = "Sign out"
 
 WELCOME_BACK_HEADING_LOCATOR = ("xpath", f'//*[contains(@Name, "{WELCOME_BACK_CONTAINS_TEXT}")]')
 SIGN_OUT_BUTTON_LOCATOR = ("xpath", f'//*[@Name="{SIGN_OUT_TEXT}"]')

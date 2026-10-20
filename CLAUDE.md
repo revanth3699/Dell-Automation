@@ -25,6 +25,10 @@ process.
   structure or phase-status claims without spot-checking the real code first.** It
   should be refreshed; flag this to the user if you're about to rely on it for
   anything consequential.
+- **TARGET_STATE_MACHINE.md** — the Target app's screen/overlay/close-prompt transition
+  table, derived from the rebit backend (2026-10-19). The data form of it is
+  `orchestration/statemachine/target_model.py`; keep the two in step when the backend
+  changes.
 - **This file** — durable architecture/convention reference (where code goes, shared
   primitives, established patterns). Changes rarely — only when the architecture
   itself changes, not when individual features are added.
@@ -35,10 +39,12 @@ Five layers, two cross-cutting ones. Imports flow one direction only — a layer
 imports from anything to its right:
 
 ```
-locators/  -->  components/  -->  flows/  -->  orchestration/ (role_runner.py)
-    ^
-    |
-assertions/  (imported directly by flows/, not just by components/)
+locators/  -->  components/  -->  flows/  -->  orchestration/role_runner.py
+    ^               |                 |
+    |               `-----------------+-->  orchestration/statemachine/ + scenario_runner.py
+    |                                       (driven by scenarios/*.yaml; imports components/,
+assertions/  (imported directly by          assertions/ and flows' browser sign-in only)
+              flows/ and statemachine/)
 
 factory/   -- Session, driver lifecycle, config, capabilities, logging. Used by
               components/flows/orchestration; never imports from them.
@@ -175,7 +181,24 @@ Shortcut dialog's scope correction).
 
 ## Adding a new scenario
 
-`orchestration/role_runner.py` is the one real entry point
+**Preferred since 2026-10-19: a YAML file under `scenarios/`**, run by
+`python -m orchestration.scenario_runner --role {target,source} --run-id <id> --scenario <name>`.
+A scenario is a step list per role (`at: <state>` + `do: <action>`) plus a policy for
+every overlay that may interrupt (`click` / `wait_until_gone` / `fail` / `ignore`);
+state and action names come from `orchestration/statemachine/target_model.py` /
+`source_model.py`, and `scenarios/_common.yaml` holds the shared policy sets. The
+loader validates every name against the model before launching anything, and
+`tests/statemachine/test_scenarios.py` validates all scenario files at test time, so
+`uv run pytest tests/statemachine` is the static check for this path. Writing Python
+is only needed when a step needs a screen, button or environment action that does not
+exist yet: add the assertion/locator/component per the recipe above, register it as a
+State/Action in the model (and an entry in `utils/environment.py` for machine setup),
+then reference it from YAML. Scenarios diverging before pairing are no longer a
+special case -- they are just a different step list. See README "State-machine
+scenario runner" and TARGET_STATE_MACHINE.md.
+
+The original hand-written path still exists and is unchanged:
+`orchestration/role_runner.py` is its entry point
 (`python -m orchestration.role_runner --role {target,source} --run-id <id> --scenario <name>`).
 `TargetRunner`/`SourceRunner` own only the fixed prefix every scenario shares
 (sign-in+pairing for Target, pairing for Source) — never touch those classes for a new
@@ -224,12 +247,9 @@ as a flag-based prefix-skip and reverted; a generic solution is still open).
   `flows/target/authentication/sign_in_flow.py`'s `_LateSignInFailure` for the pattern
   (race the failure dialog for the ENTIRE remaining wait, not just a short fixed
   window after the first "looks like success" signal).
-- **Dead files — don't edit, don't import:** `factory/wait_utils.py`,
-  `factory/coordination_client.py`, and `factory/prerequisites.py` are unused
-  duplicates of the real `utils/wait_utils.py`, `utils/coordination_client.py`, and
-  `utils/prerequisites.py` (confirmed via `git grep` — nothing in the active codebase
-  imports the `factory.*` versions). Use the `utils/` ones; the `factory/` copies
-  should eventually be deleted.
+- **No duplicate helpers:** `utils/wait_utils.py`, `utils/coordination_client.py` and
+  `utils/prerequisites.py` are the only copies (the stale `factory/` duplicates were
+  deleted 2026-10-20). Put new standalone helpers in `utils/`, not `factory/`.
 
 ## Verification without live hardware
 

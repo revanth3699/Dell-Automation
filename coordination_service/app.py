@@ -17,7 +17,6 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -62,6 +61,19 @@ def publish(run_id: str, key: str, body: PublishBody) -> dict:
         _state.setdefault(run_id, {})[key] = body.value
         _save_state(_state)
     return {"run_id": run_id, "key": key, "value": body.value}
+
+
+@app.delete("/runs/{run_id}/{key}")
+def delete_value(run_id: str, key: str) -> dict:
+    """Removes one key of a run (no error if absent). Each role clears the keys it
+    publishes when it starts, so a reused run id never hands the other side a value
+    from an earlier run."""
+    with _lock:
+        run = _state.get(run_id)
+        removed = bool(run) and run.pop(key, None) is not None
+        if removed:
+            _save_state(_state)
+    return {"run_id": run_id, "key": key, "removed": removed}
 
 
 @app.get("/runs/{run_id}/{key}")

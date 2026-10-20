@@ -1,0 +1,115 @@
+name: choose_files_and_retry
+description: >
+  "Let me choose" tree mode, Select all, drive-mapping modal (Change -> Cancel), Go back,
+  then transfer. Expects skipped files on the results (set up a file on the Source PC that
+  cannot be read, e.g. open with an exclusive lock), retries them from the skipped-files
+  screen, then finishes. Covers 1.10 tree mode + drive mapping, 1.12 View details ->
+  skippedFiles, 1.14 Retry/Finish.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies:
+      base: happy_path
+      driveMapping: fail          # handled explicitly below
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: let_me_choose
+        timeout: 600
+      - at: chooseFiles
+        do: select_all
+      - at: chooseFiles
+        do: change_drive
+        wait_before: 3
+      - at: driveMapping
+        do: rescan
+      - at: driveMapping
+        do: cancel
+        wait_before: 5
+      - at: chooseFiles
+        do: go_back
+      - at: chooseWhatToMove
+        do: let_me_choose
+      - at: chooseFiles
+        do: select_all
+        wait_before: 3
+      - at: chooseFiles
+        do: migrate_now
+        wait_before: 5
+        note: Migrate now stays disabled while the estimate recalculates (20 s cap in the app)
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: view_details
+      - at: skippedFiles
+        do: retry
+        timeout: 120
+        note: requires at least one skipped item -- see description
+      - at: migrating
+        timeout: 180
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: view_details
+      - at: [skippedFiles, complete]
+        timeout: 120
+      - at: skippedFiles
+        do: finish
+        optional: true
+      - at: complete
+        do: back_to_summary
+        optional: true
+      - at: resultsSummary
+        do: finish
+        optional: true
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: announce
+        timeout: 7200
+      - at: migrating
+        timeout: 600
+        note: the Target's Retry restarts the run on this side
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: close_app
+        timeout: 7200
+        done: true

@@ -7,7 +7,7 @@ reference walkthrough. Never a click target, so it lives here rather than in loc
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "Sign in to MyDell to continue"
+HEADING_TEXT = "Sign in to your Dell account"
 SIGN_IN_WAITING_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 

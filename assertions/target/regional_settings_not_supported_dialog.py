@@ -20,7 +20,13 @@ not asserted on here.
 from assertions.common import text_exists
 
 HEADING_TEXT = "Set both of your PCs to the same supported region"
-REGIONAL_SETTINGS_NOT_SUPPORTED_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
+# Added 2026-10-19 from rebit TargetPc.UI Resources.resx: LocaleNotSupported_Title ("Set this
+# PC’s location to a supported region", curly apostrophe) is the sibling terminal dialog with
+# the same Close footer, shown when this PC's own region is unsupported rather than mismatched.
+LOCATION_NOT_SUPPORTED_CONTAINS_TEXT = "location to a supported region"
+REGIONAL_SETTINGS_NOT_SUPPORTED_HEADING_LOCATOR = (
+    "xpath", f'//*[@Name="{HEADING_TEXT}" or contains(@Name, "{LOCATION_NOT_SUPPORTED_CONTAINS_TEXT}")]'
+)
 
 
 def is_showing(session, timeout: float = 0.1) -> bool:

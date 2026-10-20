@@ -10,6 +10,9 @@ automation actually drives and verifies end to end, and what's confirmed live vs
 See [FULL_TRANSFER_FLOW.md](FULL_TRANSFER_FLOW.md) for a precise, code-accurate
 flowchart of the full transfer scenario, one diagram per method, for reviewing or
 improving the automation itself.
+See [TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md) for the Target app's full
+screen/dialog transition table (from the backend code) that the YAML scenario runner
+is built on -- see **State-machine scenario runner** below for how to run it.
 
 Status: sign-in, pairing (via the Coordination Service), and transfer are implemented
 and have run live for both Target and Source PCs; per-run HTML reporting is wired into
@@ -35,10 +38,15 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    needs.
 4. Run anything through uv, e.g.:
    ```
+   uv run python utils/run_coordination_service.py
    uv run python -m orchestration.role_runner --role target --run-id <id>
    uv run python -m orchestration.role_runner --role source --run-id <id>
-   uv run python utils/run_coordination_service.py
+   uv run python -m orchestration.scenario_runner --role target --run-id <id> --scenario full_transfer
+   uv run python -m orchestration.scenario_runner --role source --run-id <id> --scenario full_transfer
    ```
+   `role_runner` is the original hand-written flow; `scenario_runner` drives a YAML
+   scenario from `scenarios/` (see **State-machine scenario runner** for the full
+   checklist).
    Target also takes `--launch {exe,mock,simulator}` (default `exe`): `simulator`
    launches the Target PC UI app indirectly via the CDM Simulator WPF app (mimics Dell
    SupportAssist, which isn't really integrated yet) instead of launching it directly --
@@ -93,8 +101,7 @@ dell-automation/
 │                            unconditional all-or-nothing teardown via close().
 │
 ├── flows/                    Business-logic chains built on Components, per role.
-│   ├── source/                pairing_flow.py, transfer_flow.py,
-│   │                        data_selection_flow.py (still a stub).
+│   ├── source/                pairing_flow.py, transfer_flow.py.
 │   └── target/                 authentication/sign_in_flow.py, pairing_flow.py,
 │                            transfer_flow.py.
 │
@@ -104,9 +111,23 @@ dell-automation/
 │                            (e.g. error_banner.py) rather than duplicate it.
 │
 ├── orchestration/
-│   └── role_runner.py         THE real entry point: `python -m orchestration.role_runner
-│                            --role {target,source} --run-id <id>`. Chains prerequisites
-│                            -> Session -> that role's flows -> report, for one machine.
+│   ├── role_runner.py         Original entry point: `python -m orchestration.role_runner
+│   │                        --role {target,source} --run-id <id>`. Chains prerequisites
+│   │                        -> Session -> that role's hand-written flows -> report.
+│   ├── scenario_runner.py     State-machine entry point (2026-10-19): `python -m
+│   │                        orchestration.scenario_runner --role --run-id --scenario
+│   │                        <name>`; drives a YAML scenario from scenarios/ through
+│   │                        the transition table. See "State-machine scenario runner".
+│   └── statemachine/          model.py (State/Action/Model), observer.py (snapshot +
+│                            probe observers), scenario.py (YAML loader + validation),
+│                            runner.py (the one observe->policy->act loop), peer.py
+│                            (publish/wait_for_peer over the coordination service),
+│                            target_model.py / source_model.py (the transition tables).
+│
+├── scenarios/                 YAML scenarios for scenario_runner.py, one file per
+│                            end-to-end case (full_transfer, cancel_during_transfer,
+│                            old_pc_cancels, ...); _common.yaml holds the shared
+│                            dialog-policy sets. Validated by tests/statemachine.
 │
 ├── reports/                   Per-run HTML reporting (no jsonl/meta sidecar files).
 │   ├── report_models.py        ActionRecord / RunReport dataclasses.
@@ -118,10 +139,11 @@ dell-automation/
 │   └── output/                 Generated reports land here (gitignored).
 │
 ├── tests/
-│   └── conftest.py            Pytest fixtures (Session + credentials) and the
-│                            reporting hooks (pytest_configure/pytest_sessionfinish).
-│                            No test_*.py files today -- superseded by
-│                            orchestration/role_runner.py's own live run + reporting.
+│   ├── conftest.py            Pytest fixtures (Session + credentials) and the
+│   │                        reporting hooks (pytest_configure/pytest_sessionfinish).
+│   └── statemachine/          Hardware-free unit tests for the runner/model/scenario
+│                            loader, plus validation of every scenarios/*.yaml against
+│                            the real models: `uv run pytest tests/statemachine`.
 │
 ├── tools/                     Manual/dev scripts (launch_target_app.py,
 │                            run_sign_in_flow.py, several _test_*.py one-off
@@ -138,6 +160,10 @@ dell-automation/
 │   │                           config; these are the helpers everything else reaches for.
 │   ├── prerequisites.py         Standalone one-time pass/fail gate, run once before
 │   │                           automation starts.
+│   ├── environment.py           Named machine setup/teardown steps for scenarios
+│   │                           (start Notepad, disable/enable the network adapter,
+│   │                           Public/Private network profile, Windows region) --
+│   │                           PowerShell-based, unverified live.
 │   ├── coordination_client.py   The pairing-code hand-off client (talks to
 │   │                           coordination_service/app.py).
 │   ├── mock_server.py           GlassFloor entitlement mock-server launcher (dev use).
@@ -165,6 +191,9 @@ Five layers, imports flow one direction only (lower layers never import from hig
 ```
 Locators  -->  Components  -->  Flows  -->  Orchestration (role_runner.py)
    |               |              |
+   |               `------------------>  Orchestration (statemachine/ + scenario_runner.py,
+   |                                     driven by scenarios/*.yaml; imports components/,
+   |                                     assertions/ and the browser part of flows/)
    `--- assertions/ (shared expected-text constants, read-only) ---'
 
 Factory (driver_factory.py, session.py, capabilities.py, config.py, logger_factory.py)
@@ -251,6 +280,135 @@ and calls `ActionReporter.current().record(...)`. `build_report()` renders every
 accumulated so far into one self-contained `reports/output/<run_id>_<role>_<timestamp>.html`
 and refreshes `reports/output/index.html` (a cross-run list) -- called from
 `RoleRunner.run()`'s `finally` for a live run, or `pytest_sessionfinish` for a pytest run.
+
+## State-machine scenario runner
+
+`orchestration/scenario_runner.py` is the second entry point, added 2026-10-19 alongside
+`role_runner.py` (which is unchanged). Instead of hand-written flows, it drives the app
+from a transition table (`orchestration/statemachine/target_model.py` and
+`source_model.py` -- the data form of [TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md))
+and a YAML scenario (`scenarios/*.yaml`) that lists the steps and the policy for every
+dialog that may interrupt them.
+
+### Running a scenario end to end
+
+1. **Pick a scenario** from `scenarios/` (the table in [TEST_SCENARIOS.md](TEST_SCENARIOS.md)
+   says which need a Source PC, admin rights, or manual setup). Check it before launching
+   anything -- this needs no hardware:
+   ```
+   uv run python -m orchestration.scenario_runner --scenario full_transfer --validate-only
+   ```
+   This refuses unknown states/actions and also prints a `WARNING:` for any ending the
+   app can reach that no later step handles (e.g. skipped files after a transfer) --
+   fix those before running; the test suite requires every shipped scenario to be clean.
+2. **Start the Coordination Service** once, on either machine or a third one, and put its
+   address in both machines' `.env` as `DDA_COORDINATION_SERVICE_URL`:
+   ```
+   uv run python utils/run_coordination_service.py
+   ```
+3. **Target PC** -- `.env` needs `DDA_TARGET_BUILD_PATH` (and `DDA_CDM_SIMULATOR_PATH` for
+   `--launch simulator`); the sign-in credentials must be set as environment variables.
+   Choose a **new** run id for every run and use the same one on both machines -- the
+   coordination service keeps its values per run id, so a reused id hands the Target the
+   previous run's pairing code (the Target now ignores a code that was already there when
+   it started, but a fresh id is the clean way):
+   ```
+   uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
+   ```
+4. **Source PC** -- `.env` needs `DDA_SOURCE_BUILD_PATH` (the already-installed exe):
+   ```
+   uv run python -m orchestration.scenario_runner --role source --run-id r1 --scenario full_transfer
+   ```
+   Start order does not matter: each side waits for the other through the coordination
+   service (the Target waits for the pairing code; `wait_for_peer` steps wait for the
+   other side's published state).
+5. **Watch for a UAC prompt** on the Target after the browser sign-in -- automation
+   cannot see or click it; approve it by hand.
+6. **Validation**: `full_transfer` runs the PDF migration-report validator (see the
+   next section) as a step on the Target once Migration Done is showing; a missing file
+   or a registry mismatch fails the run, and the HTML comparison lands in
+   `validation/output/`. Any scenario can do the same with
+   `env: validate_migration_report`.
+7. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` or
+   `SCENARIO FAILED: <reason> during step N [screen=... overlay=...]` (exit code 1; 2 for
+   an invalid scenario file). The HTML report, with a screenshot at every state change, is
+   written to `reports/output/<run_id>_<role>_<timestamp>.html` on each machine.
+
+Useful flags: `--launch {exe,mock,simulator}` (Target only; the scenario's own `launch:`
+is the default), `--observer {snapshot,probe}`, `--skip-prerequisites` to bypass the
+WinAppDriver/Developer-Mode checks on a machine already set up.
+
+Scenarios that need the machine prepared (`setup:` steps such as `set_network_public`,
+`disable_network`, `set_region_unsupported`) must run from an **elevated** terminal;
+`teardown:` restores the setting even when the run fails.
+
+How a run works: each tick the observer reads one `page_source` snapshot and names the
+current (screen, overlay, close prompt). The runner performs the step's action when its
+target is showing; applies the scenario's policy when something else is stacked on top
+(click it, wait for it to clear, or fail); keeps waiting while the app is on a screen it
+can legitimately pass through; and fails with the exact observed state otherwise
+(`expected resultsSummary ... got screen=migrating overlay=failure`). The default
+`--observer hybrid` falls back to per-locator `find_element` probing whenever `/source`
+fails or recognises nothing for a few ticks -- confirmed necessary live (2026-10-19):
+WinAppDriver answered `/source` with HTTP 400 on the code-entry screen after serving the
+earlier screens fine. `--observer snapshot` / `probe` force one method only.
+
+If the app has not moved 10 s after a step's action, the runner performs the action
+again, up to 4 times in total (`defaults: {reclick_after: 10, max_action_attempts: 4}`
+per role) -- the guard for WebView2 clicks that report success without doing anything.
+Browser sign-in, pairing-code entry, peer publishes and environment steps are exempt;
+they carry their own handling.
+
+If something sends the app **back** to a screen an earlier step was written for (a
+"Cancel transfer" policy landing on Welcome, a session reset after a network blip), the
+runner resumes from that earlier step instead of failing, re-running the steps in
+between -- up to `max_rewinds` (default 2) per role; `0` disables it. A screen that no
+earlier step knows is still a failure. Caveat for two-machine scenarios: the Source does
+not know the Target rewound, so a Target rewind past pairing only works where the Source
+script is written to pair again (the cancel scenarios); in `full_transfer` it covers
+resets after pairing.
+
+A run that PASSES closes the app the way a user does before teardown: the Target's
+caption Close button (answering the desktop-shortcut offer with No thanks), the
+Source's Close button or window icon, then a wait for the process to exit, so
+`Session.close()`'s process kill finds nothing to kill. A failed run keeps the
+immediate kill. Both models expose this as a `close_app` action on every screen, so a
+scenario can also close explicitly (the Source scripts end with it).
+
+When one side fails, both stop: the failing role publishes `<role>_state=failed` and
+kills its app; every wait on the other side (step waits every 10 s, `wait_for_peer`,
+the pairing-code loops) checks for that and ends with `PeerFailed`, after which that
+side closes its app gracefully and tears down. An app or WinAppDriver crash is caught
+on the side it happens: a step whose app cannot be observed for 60 s, or whose process
+is gone, fails with `AppGone` at once instead of waiting out its timeout.
+
+Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
+(`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
+documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,
+`teardown:`, a step's `env:`) come from `utils/environment.py`. Peer sync is the
+`publish` / `wait_for_peer` action every state has, over the coordination service only;
+both take an optional `key:` argument for a fact other than `<role>_state`.
+
+A **step group** branches a script on such a fact: `when: {key: target_outcome, is:
+partial, among: [partial, clean]}` plus `steps:`. When the group is reached the runner
+waits until the key holds one of `among` and runs the inner steps only if it is `is`,
+otherwise skips them all. `full_transfer` uses one in each role for the second
+migration after a partial outcome: the Target publishes `target_outcome` from the
+results screen, the Source branches on it to click Try Again and pair again.
+
+Reused run ids: the coordination service keeps a run's values until they are deleted,
+so each role deletes the keys it publishes (`<role>_state`, any `publish key:`, and
+the Source's `pairing_code`) before it publishes `started`. The service must be
+running from the current build for that (`DELETE /runs/{run_id}/{key}`, restart it
+after pulling); against an older service the runner warns and falls back to
+stale-value detection only (a value present at start is ignored until it changes).
+Every scenario is validated against the models by `tests/statemachine/test_scenarios.py`;
+`uv run pytest tests/statemachine` needs no hardware.
+
+Status: everything under `orchestration/statemachine/`, `scenarios/`, `utils/environment.py`
+and the 2026-10-19 assertion/locator/component additions is verified against the rebit
+source only, not against the live app. The first live milestone is `full_transfer` on
+real hardware; `validation/` stays a separate manual step, as before.
 
 ## PDF migration-report validation
 

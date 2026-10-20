@@ -31,7 +31,11 @@ is_showing() first.
 
 from components.base_component import BaseComponent, ComponentActionError
 from utils.wait_utils import poll_until
-from locators.target.confirm_accounts_dialog import CONFIRM_ACCOUNTS_CONTINUE_BUTTON_LOCATOR
+from locators.target.confirm_accounts_dialog import (
+    CANCEL_TRANSFER_BUTTON_LOCATOR as CONFIRM_ACCOUNTS_CANCEL_TRANSFER_BUTTON_LOCATOR,
+    CONFIRM_ACCOUNTS_CONTINUE_BUTTON_LOCATOR,
+)
+from locators.target.pairing_code_entry_screen import CANCEL_LINK_LOCATOR as PAIRING_CODE_CANCEL_LINK_LOCATOR
 
 
 class PairingCodeEntryScreen:
@@ -39,6 +43,8 @@ class PairingCodeEntryScreen:
 
     def __init__(self, app_session):
         self._session = app_session
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._cancel_link = BaseComponent(app_session, *PAIRING_CODE_CANCEL_LINK_LOCATOR, "PairingCodeCancelLink")
 
     def enter_code(self, code: str, box_count: int = 6, timeout: float = 10.0) -> None:
         """Types one digit per box into the first `box_count` Edit controls found on the
@@ -58,6 +64,12 @@ class PairingCodeEntryScreen:
         for digit, box in zip(code, boxes):
             box.send_keys(digit)
 
+    def click_cancel(self) -> None:
+        """Clicks the StageCard's top-right Cancel link (EnterCodeStage.tsx onCancel ->
+        Channels.enterCodeCancel). Added 2026-10-19 (verified against rebit source, not
+        live). Callers check is_showing() first; this never re-checks presence."""
+        self._cancel_link.click()
+
 
 class ConfirmAccountsDialog:
     """"Your user account names don't match" (heading corrected 2026-10-19 via a live
@@ -72,6 +84,15 @@ class ConfirmAccountsDialog:
         self._continue_button = BaseComponent(
             app_session, *CONFIRM_ACCOUNTS_CONTINUE_BUTTON_LOCATOR, "ConfirmAccountsContinueButton"
         )
+        # Added 2026-10-19 (verified against rebit source, not live).
+        self._cancel_transfer_button = BaseComponent(
+            app_session, *CONFIRM_ACCOUNTS_CANCEL_TRANSFER_BUTTON_LOCATOR, "ConfirmAccountsCancelTransferButton"
+        )
 
     def click_continue(self) -> None:
         self._continue_button.click()
+
+    def click_cancel_transfer(self) -> None:
+        """Clicks Cancel transfer (AccountMismatchModal.tsx's secondary button). Added
+        2026-10-19 (verified against rebit source, not live)."""
+        self._cancel_transfer_button.click()

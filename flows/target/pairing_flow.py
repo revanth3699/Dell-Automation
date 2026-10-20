@@ -140,12 +140,12 @@ class TargetPairingFlow:
                 return True
             if other_pc_network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.log.error(
-                    "The other PC isn't connected to a network. appeared -- clicking "
+                    "It looks like your network has been disconnected appeared -- clicking "
                     "Cancel transfer and aborting"
                 )
                 self.other_pc_network_disconnected_dialog.cancel_transfer()
                 raise PairingError(
-                    "Pairing failed: The other PC isn't connected to a network. appeared -- "
+                    "Pairing failed: It looks like your network has been disconnected appeared -- "
                     "the Source PC lost network connectivity; clicked Cancel transfer"
                 )
             if regional_settings_not_supported_assertions.is_showing(self.app_session, timeout=1.5):
@@ -161,7 +161,7 @@ class TargetPairingFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network. appeared -- clicked Cancel "
+                    "Connect this PC to a trusted network appeared -- clicked Cancel "
                     "transfer"
                 )
                 self._recover_from_network_disconnected_reset()

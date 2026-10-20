@@ -1,0 +1,60 @@
+name: pairing_code_errors
+description: >
+  Three wrong codes -> locked with a countdown -> unlocks -> the real code pairs. Then
+  Cancel on the choose screen (Stop -> Welcome). Covers the wrong-code / Locked rows of
+  1.8 and the chooseWhatToMove Cancel row of 1.10.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+      - at: enterCode
+        do: type_wrong_code
+        timeout: 900
+      - at: enterCode
+        do: type_wrong_code
+        wait_before: 8
+        note: the app clears the boxes and shows the retry message between attempts
+      - at: enterCode
+        do: type_wrong_code
+        wait_before: 8
+      - at: enterCodeLocked
+        timeout: 60
+      - at: enterCode
+        timeout: 900
+        note: countdown from the engine's RetryDelayInSeconds
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
+        timeout: 900
+      - at: [readyToMove, chooseWhatToMove]
+        timeout: 600
+      - at: chooseWhatToMove
+        do: cancel
+        timeout: 600
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 1500}
+        timeout: 1800
+        note: keeps re-publishing the rotating code through the Target's lockout
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+        done: true

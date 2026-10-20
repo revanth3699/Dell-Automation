@@ -68,24 +68,35 @@ def relaunch(build_path: str, app_arguments: list[str]) -> str:
     return session_id
 
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--build-path", required=True)
-parser.add_argument("--secret", default="my-secret-active")
-parser.add_argument("--cert-path", required=True, help="Path to the GlassFloor test harness cert.pfx -- no default, machine-specific")
-parser.add_argument("--server-address", default="127.0.0.1:8443")
-parser.add_argument("--poll-interval", type=float, default=3.0)
-args = parser.parse_args()
+if __name__ == "__main__":
+    # Bug fixed here, confirmed via this project's own static-verification command
+    # (CLAUDE.md "Verification without live hardware"): everything below used to run at
+    # module scope -- parsing sys.argv and then entering an infinite watch loop -- so a
+    # plain `import utils.keep_app_alive` (e.g. the walk_packages import check, or any
+    # future code that imports utils.* for its helpers) either crashed on missing
+    # required args or, had they been present, hung forever. utils/ is meant to hold
+    # standalone, side-effect-free helpers (see CLAUDE.md's layer table); this script's
+    # own usage docstring already says it's invoked directly (`python
+    # utils/keep_app_alive.py --build-path ...`), so gating it behind __main__ changes
+    # nothing about how it's actually run.
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--build-path", required=True)
+    parser.add_argument("--secret", default="my-secret-active")
+    parser.add_argument("--cert-path", required=True, help="Path to the GlassFloor test harness cert.pfx -- no default, machine-specific")
+    parser.add_argument("--server-address", default="127.0.0.1:8443")
+    parser.add_argument("--poll-interval", type=float, default=3.0)
+    args = parser.parse_args()
 
-app_arguments = [args.secret, args.cert_path, args.server_address]
+    app_arguments = [args.secret, args.cert_path, args.server_address]
 
-P("keep_app_alive: starting watch loop (Ctrl+C to stop)")
-relaunch(args.build_path, app_arguments)
+    P("keep_app_alive: starting watch loop (Ctrl+C to stop)")
+    relaunch(args.build_path, app_arguments)
 
-while True:
-    time.sleep(args.poll_interval)
-    if not is_app_alive() or not is_winappdriver_alive():
-        P("detected app or WinAppDriver down -- recovering")
-        try:
-            relaunch(args.build_path, app_arguments)
-        except Exception as exc:
-            P(f"relaunch attempt failed, will retry next poll: {exc}")
+    while True:
+        time.sleep(args.poll_interval)
+        if not is_app_alive() or not is_winappdriver_alive():
+            P("detected app or WinAppDriver down -- recovering")
+            try:
+                relaunch(args.build_path, app_arguments)
+            except Exception as exc:
+                P(f"relaunch attempt failed, will retry next poll: {exc}")

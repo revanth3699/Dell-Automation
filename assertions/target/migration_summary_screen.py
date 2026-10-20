@@ -11,7 +11,7 @@ which was never actually seen in the supplied screenshot and has been replaced.
 
 from assertions.common import text_exists
 
-HEADING_TEXT = "Here's a summary of your migration results"
+HEADING_TEXT = "Your transfer is complete"
 MIGRATION_SUCCESS_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 

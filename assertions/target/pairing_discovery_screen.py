@@ -9,8 +9,11 @@ built from the common assertions/common.py methods).
 
 from assertions.common import gone, text_exists
 
-HEADING_TEXT = "We're looking for your other PC"
-LOOKING_FOR_OTHER_PC_HEADING = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
+# Updated 2026-10-19 from rebit TargetPc.UI Resources.resx (ConnectOldPc_Title): the real
+# heading is now "We’re searching the network for your other PC" (curly apostrophe), so this
+# matches on an apostrophe-free substring instead of the full text.
+HEADING_CONTAINS_TEXT = "searching the network for your other PC"
+LOOKING_FOR_OTHER_PC_HEADING = ("xpath", f'//*[contains(@Name, "{HEADING_CONTAINS_TEXT}")]')
 
 
 def is_showing(session, timeout: float = 2.0) -> bool:

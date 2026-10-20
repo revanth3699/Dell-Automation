@@ -20,9 +20,38 @@ verified but not yet confirmed live** (the code exists and has been statically c
 but no one has watched it happen against real hardware). Both are called out
 explicitly -- don't read "exists in the code" as "proven to work."
 
-## Scenario framework
+## State-machine scenarios (2026-10-19, not yet confirmed live)
 
-`orchestration/role_runner.py` is the one real entry point:
+A second runner, `orchestration/scenario_runner.py`, drives YAML scenarios from
+`scenarios/` through the transition table in `orchestration/statemachine/` (see
+[TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md) and README "State-machine scenario
+runner"). Every file below is validated against the model by
+`tests/statemachine/test_scenarios.py`; **none has been run on real hardware yet.**
+
+| Scenario | Needs Source PC | Environment setup | Covers |
+|---|---|---|---|
+| `full_transfer` | yes | none | sign-in, trust network, pairing, transfer everything, summary -> details (one Retry round when files were skipped) -> back, Finish, Migration Done (PDF, validator, feedback, Erase your old PC), Back to Home; if the outcome is still partial the Source clicks Try Again and the whole migration runs a second time from Welcome (`when: target_outcome=partial` step groups in both roles) |
+| `welcome_screen` | no | none | Remind me later family, Sign out, sign-in modal Cancel, failed sign-in (wrong OTP) + Retry |
+| `cancel_before_pairing` | no | none | Cancel on prerequisites / searching, Continue re-enters |
+| `pairing_code_errors` | yes | none | 3 wrong codes -> locked -> unlock -> pair; Cancel on the choose screen |
+| `cancel_during_transfer` | yes | none | Cancel prompt: No, continue; then Yes, cancel; summary; Transfer more data |
+| `choose_files_and_retry` | yes | a locked/unreadable file on the Source | tree mode, Select all, drive mapping, Go back, skipped files -> Retry -> Finish |
+| `pre_migration_dialogs` | yes | Notepad running (automatic); optional browser/account setups | Close applications (both variants), install browsers, account mismatch |
+| `network_drop_target` | yes | admin; adapter disabled/enabled mid-run | this PC offline mid-transfer, auto-resume |
+| `network_drop_source` | yes | admin on the Source | other PC offline mid-transfer, auto-resume |
+| `old_pc_cancels` | yes | none | Source cancels before Start (Try again re-pairs) and mid-transfer |
+| `trust_network_public` | no | admin; Public network profile | trust-network Cancel and Trust |
+| `region_not_supported` | no | admin; unsupported Windows region | terminal locale dialog |
+| `not_admin` | no | run as a non-admin user (manual) | Admin access is required |
+| `window_close_during_transfer` | yes | none | window X -> cancel prompt (both answers) -> desktop-shortcut prompt |
+
+Not automated, by design: OS-not-supported (bypassed in the backend), the migrate-reminder
+screens (unreachable), version mismatch (needs an older Source build), erase started on
+the old PC, engine error codes (covered by rebit's C# unit tests), real battery conditions.
+
+## Scenario framework (original `role_runner.py` path)
+
+`orchestration/role_runner.py` is the original entry point:
 ```
 python -m orchestration.role_runner --role {target,source} --run-id <id> --scenario full_transfer
 ```

@@ -32,3 +32,29 @@ MIGRATION_ERROR_HEADING_LOCATOR = ("xpath", f'//*[@Name="{HEADING_TEXT}"]')
 
 def is_showing(session, timeout: float = 0.1) -> bool:
     return text_exists(session, MIGRATION_ERROR_HEADING_LOCATOR, "MigrationErrorHeading", timeout=timeout)
+
+# Added 2026-10-19 (verified against rebit source, not live): FailureModal.tsx renders the
+# same overlay with a native-supplied title for two more shapes -- a dismissible one
+# (EngineError_EraseStartedOnOldPc_Title, Ok button) and a key-driven dead-end
+# (VersionMismatch_UpdateDda_Title / VersionMismatch_UpdateSa_Title, Cancel transfer
+# button). is_showing() above keys on Failure_Title only; is_any_failure_showing() ORs all
+# four so a flow can detect the overlay regardless of which variant the engine routed.
+ERASE_STARTED_ON_OLD_PC_HEADING_TEXT = "Erase is running on your old PC"
+UPDATE_DDA_HEADING_TEXT = "Update Dell Data Assistant to continue"
+UPDATE_SUPPORTASSIST_HEADING_TEXT = "Update SupportAssist to continue"
+
+ERASE_STARTED_ON_OLD_PC_HEADING_LOCATOR = ("xpath", f'//*[@Name="{ERASE_STARTED_ON_OLD_PC_HEADING_TEXT}"]')
+UPDATE_DDA_HEADING_LOCATOR = ("xpath", f'//*[@Name="{UPDATE_DDA_HEADING_TEXT}"]')
+UPDATE_SUPPORTASSIST_HEADING_LOCATOR = ("xpath", f'//*[@Name="{UPDATE_SUPPORTASSIST_HEADING_TEXT}"]')
+
+ANY_FAILURE_HEADING_LOCATOR = (
+    "xpath",
+    f'//*[@Name="{HEADING_TEXT}"'
+    f' or @Name="{ERASE_STARTED_ON_OLD_PC_HEADING_TEXT}"'
+    f' or @Name="{UPDATE_DDA_HEADING_TEXT}"'
+    f' or @Name="{UPDATE_SUPPORTASSIST_HEADING_TEXT}"]',
+)
+
+
+def is_any_failure_showing(session, timeout: float = 0.1) -> bool:
+    return text_exists(session, ANY_FAILURE_HEADING_LOCATOR, "AnyFailureHeading", timeout=timeout)

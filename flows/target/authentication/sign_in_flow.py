@@ -281,7 +281,7 @@ class SignInFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network. appeared while waiting for "
+                    "Connect this PC to a trusted network appeared while waiting for "
                     "Source PC -- clicked Cancel transfer"
                 )
                 self._recover_from_cancel_transfer_reset()
@@ -629,6 +629,35 @@ class SignInFlow:
             raise SignInError("Clicking Retry on the sign-in-failed dialog never opened a new browser window")
         return known_hwnds
 
+    def browser_authenticate(
+        self, known_hwnds: set, step_timeout: float = 20.0, negative_check: bool = False, uac_timeout: float = 180.0
+    ) -> None:
+        """Entry point for the state-machine runner (orchestration/statemachine): runs
+        the browser email/password/OTP sequence ONCE against the new sign-in window and
+        closes the browser. Unlike run()/_run_fresh_auth_with_retry() it does NOT wait
+        for the auth outcome or for pairing-discovery -- the runner observes the app's
+        own screens afterwards and decides what to do (retry on the sign-in-failed
+        overlay, continue on checkPrerequisites). Keeps the browser open across the
+        UAC wait for the same reason _run_fresh_auth_with_retry() does.
+        """
+        browser_session = self.session.attach_browser(known_hwnds, timeout=step_timeout)
+        try:
+            self.log.success("Attached to the sign-in browser window")
+            restore_pages_dialog = RestorePagesDialog(browser_session)
+            if restore_pages_assertions.is_showing(browser_session):
+                restore_pages_dialog.click_close()
+            self._handle_email_step_if_present(browser_session, step_timeout)
+            self._handle_password_step_if_present(browser_session, restore_pages_dialog, step_timeout)
+            self._handle_otp_step(browser_session, restore_pages_dialog, step_timeout, negative_check)
+            self.log.info(
+                "OTP submitted (or deliberately cancelled) -- a UAC prompt may appear now and "
+                "must be approved manually; waiting for it to resolve..."
+            )
+            self._wait_for_uac_prompt_resolution(remaining=uac_timeout)
+        finally:
+            self.session.close_browser()
+        self.log.success("Closed the sign-in browser window")
+
     def _wait_for_new_browser(self, known_hwnds, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -896,7 +925,7 @@ class SignInFlow:
         raises SignInError immediately.
         """
         self.log.info(
-            "Waiting for pairing-discovery ('We're looking for your other PC'), racing "
+            "Waiting for pairing-discovery ('We're searching the network for your other PC'), racing "
             "the 'Connect to a trusted network' dialog and the pairing-code-entry screen "
             "in case either appears first"
         )
@@ -924,7 +953,7 @@ class SignInFlow:
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
                 self.network_disconnected_dialog.cancel_transfer()
                 self.log.warning(
-                    "This PC isn't connected to a network. appeared while waiting for "
+                    "Connect this PC to a trusted network appeared while waiting for "
                     "pairing-discovery -- clicked Cancel transfer"
                 )
                 self._recover_from_cancel_transfer_reset()
@@ -960,6 +989,6 @@ class SignInFlow:
                 trust_network_accepted = True
             time.sleep(0.5)
         raise SignInError(
-            "Did not reach the pairing-discovery screen ('We're looking for your other "
+            "Did not reach the pairing-discovery screen ('We're searching the network for your other "
             "PC') after sign-in -- check for an unexpected error dialog"
         )

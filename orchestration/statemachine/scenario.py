@@ -1,0 +1,418 @@
+"""Scenario files: YAML in, validated dataclasses out.
+
+Shape (see scenarios/*.yaml and scenarios/_common.yaml):
+
+    name: full_transfer
+    description: ...
+    launch: exe                      # optional; Target launch mode (exe|mock|simulator)
+    roles:
+      target:
+        defaults: {step_timeout: 300, tick: 0.5, reclick_after: 10, max_action_attempts: 4, max_rewinds: 2}
+        setup: [open_notepad]        # names from utils/environment.py, run before launch
+        teardown: [close_notepad]
+        policies:
+          base: happy_path           # a named set from scenarios/_common.yaml (per role)
+          noNetwork: {wait_until_gone: 600}      # overrides / additions
+          failure: fail
+          desktopShortcut: {click: no_thanks, max: 3}
+        steps:
+          - at: [welcome, welcomeSignedOut]      # one id or a list: any of them
+            do: continue
+          - at: signIn
+            do: sign_in
+            optional: true           # skipped if ANY later step's target shows up first
+            timeout: 600
+          - at: migrating
+            env: disable_network     # an environment step instead of a model action
+          - at: enterCode
+            do: type_code
+            args: {timeout: 300}
+            wait_before: 5           # seconds to pause once the state is showing
+          - when: {key: target_outcome, is: partial, among: [partial, clean], timeout: 600}
+            note: a step GROUP -- runs only when the coordination service holds key=is
+            steps:
+              - at: welcome
+                do: continue
+          - at: welcome
+            done: true
+
+A step with neither `do` nor `env` only waits until `at` is showing. A mapping with
+`when` + `steps` is a group: when the group is reached the runner waits until the
+coordination key holds one of `among` (published by either role) and runs the inner
+steps only if it equals `is`; otherwise the whole group is skipped. Groups are
+flattened at load time, so every other rule (optional, rewinds, lint) applies to the
+inner steps as usual. `expect` narrows
+the legal next states after the action (defaults to the action's own expect list in
+the model). `done: true` ends the role's script once `at` is reached.
+
+Validation happens against the Model BEFORE anything is launched, so a typo fails in a
+second rather than twenty minutes into a transfer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from orchestration.statemachine.model import Model
+from utils import environment
+
+POLICY_KINDS = ("click", "wait_until_gone", "fail", "ignore")
+COMMON_FILE = "_common.yaml"
+STEP_KEYS = {"at", "do", "env", "args", "expect", "timeout", "done", "note", "optional", "wait_before"}
+GROUP_KEYS = {"when", "steps", "note"}
+WHEN_KEYS = {"key", "is", "among", "timeout"}
+
+
+class ScenarioError(Exception):
+    pass
+
+
+@dataclass
+class Step:
+    at: list[str]
+    do: str | None = None
+    env: str | None = None
+    args: dict[str, Any] = field(default_factory=dict)
+    expect: list[str] | None = None
+    timeout: float | None = None
+    done: bool = False
+    optional: bool = False
+    wait_before: float = 0.0
+    note: str = ""
+    index: int = 0
+    when: dict[str, Any] | None = None   # the enclosing group's condition (None = unconditional)
+    group: str | None = None             # the enclosing group's id, shared by its steps
+
+    def __post_init__(self):
+        if isinstance(self.at, str):
+            self.at = [self.at]
+
+    @property
+    def is_wait(self) -> bool:
+        return self.do is None and self.env is None
+
+    def label(self) -> str:
+        what = f"env:{self.env}" if self.env else ("wait" if self.is_wait else self.do)
+        where = f" [{self.group}]" if self.group else ""
+        return f"step {self.index + 1} (at {'/'.join(self.at)}: {what}){where}"
+
+
+@dataclass
+class Policy:
+    kind: str                      # one of POLICY_KINDS
+    action: str | None = None   # for click
+    cap: float | None = None    # seconds, for wait_until_gone
+    max_times: int | None = None  # for click
+
+    @classmethod
+    def parse(cls, overlay_id: str, raw: Any) -> Policy:
+        if isinstance(raw, str):
+            if raw in ("fail", "ignore"):
+                return cls(kind=raw)
+            raise ScenarioError(f"policy for {overlay_id!r}: unknown shorthand {raw!r} (use fail|ignore or a mapping)")
+        if not isinstance(raw, dict):
+            raise ScenarioError(f"policy for {overlay_id!r} must be a string or mapping, got {type(raw).__name__}")
+        kinds = [k for k in raw if k in POLICY_KINDS]
+        if len(kinds) != 1:
+            raise ScenarioError(f"policy for {overlay_id!r} must have exactly one of {POLICY_KINDS}, got {sorted(raw)}")
+        kind = kinds[0]
+        if kind == "click":
+            return cls(kind="click", action=str(raw["click"]), max_times=raw.get("max"))
+        if kind == "wait_until_gone":
+            cap = raw["wait_until_gone"]
+            return cls(kind="wait_until_gone", cap=float(cap) if cap is not None else None)
+        return cls(kind=kind)
+
+
+@dataclass
+class RoleScript:
+    role: str
+    steps: list[Step]
+    policies: dict[str, Policy] = field(default_factory=dict)
+    setup: list[str] = field(default_factory=list)
+    teardown: list[str] = field(default_factory=list)
+    step_timeout: float = 300.0
+    tick: float = 0.5
+    reclick_after: float = 10.0        # seconds the app may stay put after an action before it is performed again
+    max_action_attempts: int = 4       # total performances of one step's action (1 + up to 3 repeats)
+    max_rewinds: int = 2               # times the script may resume from an earlier step after the app went back
+
+
+@dataclass
+class Scenario:
+    name: str
+    roles: dict[str, RoleScript]
+    description: str = ""
+    launch: str | None = None
+    path: Path | None = None
+
+    def role(self, role: str) -> RoleScript:
+        try:
+            return self.roles[role]
+        except KeyError:
+            raise ScenarioError(f"Scenario {self.name!r} has no script for role {role!r}") from None
+
+
+def _parse_when(label: str, raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ScenarioError(f"{label}: 'when' must be a mapping with key/is/among, got {raw!r}")
+    unknown = set(raw) - WHEN_KEYS
+    if unknown:
+        raise ScenarioError(f"{label}: unknown 'when' keys {sorted(unknown)}")
+    if not raw.get("key") or raw.get("is") is None:
+        raise ScenarioError(f"{label}: 'when' needs 'key' and 'is'")
+    is_value = str(raw["is"])
+    among = raw.get("among", [is_value])
+    among = [str(a) for a in (among if isinstance(among, list) else [among])]
+    if is_value not in among:
+        raise ScenarioError(f"{label}: 'when.is' {is_value!r} must be one of 'when.among' {among}")
+    timeout = float(raw.get("timeout", 600.0))
+    return {"key": str(raw["key"]), "is": is_value, "among": among, "timeout": timeout}
+
+
+def _parse_steps(raw_steps: list, start: int = 0, when: dict[str, Any] | None = None,
+                 group: str | None = None) -> list[Step]:
+    """Flattens step groups: a `{when, steps}` mapping contributes its inner steps, each
+    tagged with the group's condition and id, numbered in document order."""
+    steps: list[Step] = []
+    index = start
+    for raw in raw_steps:
+        if isinstance(raw, dict) and "steps" in raw:
+            label = f"group at step {index + 1}"
+            unknown = set(raw) - GROUP_KEYS
+            if unknown:
+                raise ScenarioError(f"{label}: unknown keys {sorted(unknown)} (a group takes when/steps/note)")
+            if "when" not in raw:
+                raise ScenarioError(f"{label}: a step group needs a 'when' condition")
+            if group is not None:
+                raise ScenarioError(f"{label}: groups cannot be nested")
+            if not isinstance(raw["steps"], list) or not raw["steps"]:
+                raise ScenarioError(f"{label}: 'steps' must be a non-empty list")
+            inner_when = _parse_when(label, raw["when"])
+            inner_id = str(raw.get("note") or "").strip() or f"{inner_when['key']}={inner_when['is']}"
+            inner = _parse_steps(raw["steps"], index, inner_when, inner_id)
+            steps.extend(inner)
+            index += len(inner)
+            continue
+        steps.append(_parse_step(index, raw, when, group))
+        index += 1
+    return steps
+
+
+def _parse_step(index: int, raw: Any, when: dict[str, Any] | None = None, group: str | None = None) -> Step:
+    if not isinstance(raw, dict) or "at" not in raw:
+        raise ScenarioError(f"step {index + 1} must be a mapping with an 'at' key, got {raw!r}")
+    unknown = set(raw) - STEP_KEYS
+    if unknown:
+        raise ScenarioError(f"step {index + 1}: unknown keys {sorted(unknown)}")
+    if raw.get("do") is not None and raw.get("env") is not None:
+        raise ScenarioError(f"step {index + 1}: use either 'do' or 'env', not both")
+    at = raw["at"]
+    at_list = [str(a) for a in at] if isinstance(at, list) else [str(at)]
+    if not at_list:
+        raise ScenarioError(f"step {index + 1}: 'at' must name at least one state")
+    expect = raw.get("expect")
+    if expect is not None and not isinstance(expect, list):
+        expect = [expect]
+    return Step(
+        at=at_list,
+        do=str(raw["do"]) if raw.get("do") is not None else None,
+        env=str(raw["env"]) if raw.get("env") is not None else None,
+        args=dict(raw.get("args") or {}),
+        expect=[str(e) for e in expect] if expect is not None else None,
+        timeout=float(raw["timeout"]) if raw.get("timeout") is not None else None,
+        done=bool(raw.get("done", False)),
+        optional=bool(raw.get("optional", False)),
+        wait_before=float(raw.get("wait_before") or 0.0),
+        note=str(raw.get("note") or ""),
+        index=index,
+        when=when,
+        group=group,
+    )
+
+
+def _resolve_policies(role: str, raw: Any, policy_sets: dict[str, dict[str, Any]]) -> dict[str, Policy]:
+    raw = dict(raw or {})
+    merged: dict[str, Any] = {}
+    base = raw.pop("base", None)
+    if base is not None:
+        role_sets = policy_sets.get(role) or {}
+        if base not in role_sets:
+            raise ScenarioError(
+                f"role {role!r}: policies base {base!r} not found (known for this role: {sorted(role_sets) or 'none'})"
+            )
+        merged.update(role_sets[base])
+    merged.update(raw)
+    return {str(k): Policy.parse(str(k), v) for k, v in merged.items()}
+
+
+def _parse_role(role: str, raw: Any, policy_sets: dict[str, dict[str, Any]]) -> RoleScript:
+    if not isinstance(raw, dict) or not isinstance(raw.get("steps"), list) or not raw["steps"]:
+        raise ScenarioError(f"role {role!r} needs a non-empty 'steps' list")
+    defaults = raw.get("defaults") or {}
+    return RoleScript(
+        role=role,
+        steps=_parse_steps(raw["steps"]),
+        policies=_resolve_policies(role, raw.get("policies"), policy_sets),
+        setup=[str(s) for s in (raw.get("setup") or [])],
+        teardown=[str(s) for s in (raw.get("teardown") or [])],
+        step_timeout=float(defaults.get("step_timeout", 300.0)),
+        tick=float(defaults.get("tick", 0.5)),
+        reclick_after=float(defaults.get("reclick_after", 10.0)),
+        max_action_attempts=int(defaults.get("max_action_attempts", 4)),
+        max_rewinds=int(defaults.get("max_rewinds", 2)),
+    )
+
+
+def _load_policy_sets(data: dict[str, Any], path: Path | None) -> dict[str, dict[str, Any]]:
+    """Named policy sets: from the file's own `policy_sets`, else from _common.yaml next
+    to it."""
+    if isinstance(data.get("policy_sets"), dict):
+        return data["policy_sets"]
+    if path is not None:
+        common = Path(path).parent / COMMON_FILE
+        if common.exists():
+            with common.open("r", encoding="utf-8") as fh:
+                common_data = yaml.safe_load(fh) or {}
+            if isinstance(common_data.get("policy_sets"), dict):
+                return common_data["policy_sets"]
+    return {}
+
+
+def parse_scenario(data: dict[str, Any], path: Path | None = None) -> Scenario:
+    if not isinstance(data, dict) or "name" not in data or not isinstance(data.get("roles"), dict):
+        raise ScenarioError(f"{path or 'scenario'}: top level needs 'name' and a 'roles' mapping")
+    policy_sets = _load_policy_sets(data, path)
+    roles = {str(r): _parse_role(str(r), body, policy_sets) for r, body in data["roles"].items()}
+    return Scenario(
+        name=str(data["name"]),
+        description=str(data.get("description") or ""),
+        launch=data.get("launch"),
+        roles=roles,
+        path=path,
+    )
+
+
+def load_scenario(path) -> Scenario:
+    path = Path(path)
+    with path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    return parse_scenario(data, path)
+
+
+def validate_role_script(script: RoleScript, model: Model) -> list[str]:
+    """Returns a list of problems (empty = valid). Checks every state/action/policy/env
+    name against the model so the run fails before launch rather than mid-transfer."""
+    problems: list[str] = []
+    for step in script.steps:
+        for target in step.at:
+            if not model.has(target):
+                problems.append(f"{step.label()}: unknown state {target!r}")
+                continue
+            state = model.get(target)
+            if step.do is not None and step.do not in state.actions:
+                problems.append(
+                    f"{step.label()}: state {target!r} has no action {step.do!r} (has: {sorted(state.actions) or 'none'})"
+                )
+        if step.env is not None and step.env not in environment.STEPS:
+            problems.append(f"{step.label()}: unknown environment step {step.env!r} (known: {sorted(environment.STEPS)})")
+        for exp in step.expect or []:
+            if not model.has(exp):
+                problems.append(f"{step.label()}: expect names unknown state {exp!r}")
+    last = script.steps[-1]
+    if not last.done:
+        problems.append(f"last step must have done: true (got {last.label()})")
+    if last.optional:
+        problems.append("last step cannot be optional")
+    for name in script.setup + script.teardown:
+        if name not in environment.STEPS:
+            problems.append(f"unknown environment step {name!r} in setup/teardown (known: {sorted(environment.STEPS)})")
+    for overlay_id, policy in script.policies.items():
+        if not model.has(overlay_id):
+            problems.append(f"policy for unknown state {overlay_id!r}")
+            continue
+        state = model.get(overlay_id)
+        if state.layer == "screen":
+            problems.append(f"policy for {overlay_id!r}: policies apply to overlays/close prompts, not screens")
+        if policy.kind == "click" and policy.action not in state.actions:
+            problems.append(
+                f"policy for {overlay_id!r}: no action {policy.action!r} (has: {sorted(state.actions) or 'none'})"
+            )
+    return problems
+
+
+def lint_role_script(script: RoleScript, model: Model) -> list[str]:
+    """Warnings (not errors): a step that waits for one of several outcomes the app can
+    produce, while some other outcome is handled by no later step. Systemic check for the
+    2026-10-19/20 findings (complete vs skippedFiles; migrationComplete vs the partial
+    endings): the scenario named the happy ending only and waited out its timeout on the
+    other. Only 'user'/'terminal' screens count as endings; waiting screens pass by."""
+    warnings: list[str] = []
+    prev_targets: list[str] = []
+    prev_expect: tuple = ()
+    prev_explicit = False
+
+    def endings_from(seeds: set) -> set:
+        """Screens where the app stops (user/peer/terminal) that the engine can reach from
+        `seeds` passing only through engine-driven ('waiting') screens."""
+        frontier, seen, endings = set(seeds), set(), set()
+        while frontier:
+            sid = frontier.pop()
+            if sid in seen or not model.has(sid):
+                continue
+            seen.add(sid)
+            state = model.get(sid)
+            if state.layer != "screen":
+                continue
+            if state.kind == "waiting":
+                frontier.update(state.next)
+            elif state.kind != "peer":    # peer screens need the other machine: the walk stops there
+                endings.add(sid)
+        return endings
+
+    for i, step in enumerate(script.steps):
+        if prev_targets:
+            if prev_explicit or prev_expect:
+                seeds = set(prev_expect)   # the author, or the action performed, said what may follow
+            else:                          # a pure wait: the engine moves on from that screen by itself
+                seeds = {n for t in prev_targets if model.has(t) for n in model.get(t).next}
+            seeds -= set(prev_targets)
+            alternatives = endings_from(seeds) | {s for s in seeds if model.has(s) and model.get(s).kind == "waiting"}
+            endings = {a for a in alternatives if model.get(a).kind != "waiting"}
+            later = {t for s in script.steps[i:] for t in s.at}
+            uncovered = sorted(endings - later)
+            if uncovered and (set(step.at) & (alternatives | seeds)):
+                warnings.append(
+                    f"{step.label()}: after {'/'.join(prev_targets)} the app may instead show {uncovered}, "
+                    f"which no later step handles (add it to an at: list or an optional step)"
+                )
+        prev_targets = list(step.at)
+        prev_explicit = bool(step.expect)
+        if step.expect:
+            prev_expect = tuple(step.expect)
+        elif step.do and not step.is_wait:
+            prev_expect = tuple(e for t in step.at if model.has(t) and step.do in model.get(t).actions
+                                for e in model.get(t).actions[step.do].expect)
+        else:
+            prev_expect = ()
+    return warnings
+
+
+def lint_scenario(scenario: Scenario, models: dict[str, Model]) -> list[str]:
+    return [f"[{role}] {w}" for role, script in scenario.roles.items() if role in models
+            for w in lint_role_script(script, models[role])]
+
+
+def validate_scenario(scenario: Scenario, models: dict[str, Model]) -> None:
+    problems: list[str] = []
+    for role, script in scenario.roles.items():
+        if role not in models:
+            problems.append(f"no model for role {role!r}")
+            continue
+        problems.extend(f"[{role}] {p}" for p in validate_role_script(script, models[role]))
+    if problems:
+        raise ScenarioError(f"Scenario {scenario.name!r} is invalid:\n  " + "\n  ".join(problems))
