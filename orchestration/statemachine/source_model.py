@@ -47,6 +47,8 @@ from components.source.regional_settings_not_supported_dialog import (
 from components.source.transfer_progress_screen import TransferProgressScreen
 from components.source.trust_network_dialog import TrustNetworkDialog
 from components.source.welcome_screen import WelcomeScreen
+from factory.config import SOURCE_PROCESS_NAME
+from factory.session import process_exists
 from flows.source.pairing_flow import CODE_REPUBLISH_INTERVAL_SECONDS
 from orchestration.statemachine.model import Action, Model, State, TextMatch
 from orchestration.statemachine.peer import (
@@ -56,6 +58,8 @@ from orchestration.statemachine.peer import (
     publish,
 )
 from utils.coordination_client import PAIRING_CODE_KEY
+
+CLOSE_APP_TIMEOUT_SECONDS = 90.0   # the app's own close handshake with the engine
 
 
 def _publish_state(ctx, value: str) -> None:
@@ -214,6 +218,36 @@ def build(app_session) -> Model:
                 actions={"no_dont_cancel": click(confirm_cancel.click_no_dont_cancel),
                          "yes_cancel_now": click(confirm_cancel.click_yes_cancel_now, "welcome")}))
 
+    def close_app(ctx, args) -> None:
+        """Closes the app the way a user does and waits for the process to exit: the
+        screen's own Close button where there is one (the ending screens), else the
+        window's top-right close icon. Per explicit user direction (2026-10-20): a
+        finished run must not end in Session.close()'s process kill."""
+        timeout = float(args.get("timeout", CLOSE_APP_TIMEOUT_SECONDS))
+        if not process_exists(SOURCE_PROCESS_NAME):
+            ctx.log.info("app is not running -- nothing to close")
+            return
+        try:
+            progress.click_close()
+        except Exception as exc:  # noqa: BLE001 -- no Close button on this screen: use the window's icon
+            ctx.log.info(f"no Close button here ({type(exc).__name__}) -- clicking the window close icon")
+            try:
+                progress.click_close_icon()
+            except Exception as icon_exc:  # noqa: BLE001 -- the wait below decides
+                ctx.log.warning(f"close icon click failed ({icon_exc}) -- waiting for the app to exit anyway")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not process_exists(SOURCE_PROCESS_NAME):
+                ctx.log.success("app closed")
+                return
+            time.sleep(1.0)
+        raise RuntimeError(f"app still running {timeout:.0f}s after Close")
+
+    close_app_action = Action("close_app", close_app, idempotent=False,
+                              description="Close button or window icon, then wait for the process to exit")
+    for state in m.states.values():
+        if state.layer == "screen":
+            state.actions.setdefault("close_app", close_app_action)
     attach_peer_actions(m, own_key=SOURCE_STATE_KEY, peer_key=TARGET_STATE_KEY)
     m.validate()
     return m

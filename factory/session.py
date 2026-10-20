@@ -39,7 +39,6 @@ import threading
 import time
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 import requests
 from loguru import logger
@@ -58,7 +57,11 @@ from factory.config import (
     TARGET_PROCESS_NAME,
     WINAPPDRIVER_URL,
 )
-from factory.driver_factory import WinAppDriverSession, ensure_winappdriver_running, kill_winappdriver
+from factory.driver_factory import (
+    WinAppDriverSession,
+    ensure_winappdriver_running,
+    kill_winappdriver,
+)
 from utils.wait_utils import poll_until
 
 LAUNCH_ATTEMPT_TIMEOUT = 35.0  # Confirmed necessary via testing: a short client timeout
@@ -123,6 +126,17 @@ def _is_process_running(exe_name: str) -> bool:
     return output == "yes"
 
 
+def process_exists(process_name: str) -> bool:
+    """True while a process with exactly this name runs (Get-Process -Name). Unlike
+    _is_process_running()'s command-line substring match, the launcher
+    StartMyDellExperience.exe does not count as MyDellExperience -- used to wait for the
+    app to really exit after a graceful close, before Session.close() kills anything."""
+    output = _run_powershell(
+        f"if (Get-Process -Name '{process_name}' -ErrorAction SilentlyContinue) {{ 'yes' }}"
+    )
+    return output == "yes"
+
+
 def _kill_existing_instances(exe_name: str) -> None:
     """Kills every process whose command line mentions exe_name -- not just the one with
     a visible window. Confirmed necessary: the app's single-instance lock silently
@@ -156,7 +170,7 @@ def _kill_existing_instances(exe_name: str) -> None:
     time.sleep(1)
 
 
-def _find_main_window_hwnd(process_name: str = TARGET_PROCESS_NAME) -> Optional[str]:
+def _find_main_window_hwnd(process_name: str = TARGET_PROCESS_NAME) -> str | None:
     output = _run_powershell(
         f"$p = Get-Process -Name '{process_name}' -ErrorAction SilentlyContinue | "
         "Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; "
@@ -198,7 +212,7 @@ if ([DdaWindowActivator]::IsIconic($Hwnd)) {
 [DdaWindowActivator]::SetForegroundWindow($Hwnd) | Out-Null
 '''
 
-_activate_window_script_path: Optional[Path] = None
+_activate_window_script_path: Path | None = None
 
 
 def _get_activate_window_script_path() -> Path:
@@ -266,7 +280,7 @@ def _create_winappdriver_session(capabilities: dict, timeout: float = 30.0) -> W
 
 def _launch_then_attach(
     build_path: str,
-    app_arguments: Optional[list] = None,
+    app_arguments: list | None = None,
     exe_name: str = TARGET_EXE_NAME,
     process_name: str = TARGET_PROCESS_NAME,
 ) -> WinAppDriverSession:
@@ -309,7 +323,7 @@ def _launch_then_attach(
 def _launch_via_simulator_then_attach(
     build_path: str,
     simulator_path: str,
-    app_arguments: Optional[list] = None,
+    app_arguments: list | None = None,
     exe_name: str = TARGET_EXE_NAME,
     process_name: str = TARGET_PROCESS_NAME,
 ) -> WinAppDriverSession:
@@ -455,7 +469,7 @@ $ids = (Get-Process -Name $Names -ErrorAction SilentlyContinue).Id
 }
 '''
 
-_enum_windows_script_path: Optional[Path] = None
+_enum_windows_script_path: Path | None = None
 
 
 def _get_enum_windows_script_path() -> Path:
@@ -467,7 +481,7 @@ def _get_enum_windows_script_path() -> Path:
     return _enum_windows_script_path
 
 
-def list_browser_windows_with_titles() -> List[Tuple[str, str]]:
+def list_browser_windows_with_titles() -> list[tuple[str, str]]:
     """Every currently-open top-level window (hwnd_hex, title) pair across all supported
     browser processes, regardless of which one opened it or what it shows.
     """
@@ -501,7 +515,7 @@ def _title_matches_sign_in_page(title: str) -> bool:
     return all(keyword in lowered for keyword in SIGN_IN_WINDOW_TITLE_KEYWORDS)
 
 
-def find_new_browser_window_hwnd(known_hwnds: set) -> Optional[str]:
+def find_new_browser_window_hwnd(known_hwnds: set) -> str | None:
     """Returns the hex hwnd of the sign-in browser window, or None if it hasn't shown up
     yet. Prefers a window not present in known_hwnds (the common case: a genuinely new
     top-level window). Falls back to matching by window/tab title (confirmed "Sign In |
@@ -564,18 +578,18 @@ class Session:
     _lock = threading.RLock()
 
     def __init__(self):
-        self.app: Optional[WinAppDriverSession] = None
-        self.browser: Optional[WinAppDriverSession] = None
+        self.app: WinAppDriverSession | None = None
+        self.browser: WinAppDriverSession | None = None
         self._exe_name: str = TARGET_EXE_NAME
 
     @classmethod
     def get(
         cls,
         role: MachineRole = MachineRole.TARGET,
-        build_path: Optional[str] = None,
-        app_arguments: Optional[list] = None,
+        build_path: str | None = None,
+        app_arguments: list | None = None,
         launch_mode: str = "exe",
-        simulator_path: Optional[str] = None,
+        simulator_path: str | None = None,
     ) -> "Session":
         """launch_mode/simulator_path only matter for role=TARGET: "exe" and "mock"
         both launch the Target PC UI app directly (today's one existing behavior --
@@ -686,4 +700,3 @@ class Session:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if exc_type is not None:
             self.close()
-        return None

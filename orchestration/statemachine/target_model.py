@@ -101,7 +101,8 @@ from components.target.transfer_receive_screen import TransferReceiveScreen
 from components.target.welcome_deferral_error_screen import WelcomeDeferralErrorScreen
 from components.target.welcome_deferral_screen import WelcomeDeferralScreen
 from components.target.welcome_links import WelcomeLinks
-from factory.session import find_new_browser_window_hwnd
+from factory.config import TARGET_PROCESS_NAME
+from factory.session import find_new_browser_window_hwnd, process_exists
 from flows.target.authentication.sign_in_flow import SignInFlow
 from orchestration.statemachine.model import Action, Model, State, TextMatch
 from orchestration.statemachine.peer import (
@@ -180,6 +181,7 @@ def _wait_while_locked(ctx, deadline: float) -> None:
 
 BROWSER_OPEN_TIMEOUT_SECONDS = 45.0
 PDF_OPEN_WAIT_SECONDS = 5.0
+CLOSE_APP_TIMEOUT_SECONDS = 90.0   # the close handshake waits for the engine's Migration.Stop ack
 WRONG_PAIRING_CODE = "000000"
 
 
@@ -343,6 +345,35 @@ def build(app_session) -> Model:
 
     def select_reminder(ctx, args) -> None:
         deferral.select_option(str(args.get("option", "tonight")))
+
+    def close_app(ctx, args) -> None:
+        """Closes the app the way a user does -- the window's own caption Close button --
+        and waits for the process to exit, answering the desktop-shortcut offer with
+        No thanks if it appears (AppCloseCoordinator: no prompt while nothing is
+        migrating, except that offer when no shortcut exists yet). Per explicit user
+        direction (2026-10-20): a finished run must not end in Session.close()'s
+        process kill, which looks like a crash."""
+        timeout = float(args.get("timeout", CLOSE_APP_TIMEOUT_SECONDS))
+        if not process_exists(TARGET_PROCESS_NAME):
+            ctx.log.info("app is not running -- nothing to close")
+            return
+        try:
+            app_window.click_close()
+        except Exception as exc:  # noqa: BLE001 -- the window may already be hiding; the wait below decides
+            ctx.log.warning(f"caption Close click failed ({exc}) -- waiting for the app to exit anyway")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not process_exists(TARGET_PROCESS_NAME):
+                ctx.log.success("app closed")
+                return
+            try:
+                if desktop_shortcut_dialog.is_showing(ctx.app, timeout=0.5):
+                    shortcut.click_no_thanks()
+                    ctx.log.info("desktop shortcut offer appeared on close -- clicked No thanks")
+            except Exception as exc:  # noqa: BLE001 -- the window is going away; UIA calls may fail
+                ctx.log.debug(f"UIA check while closing failed ({type(exc).__name__}) -- window going away")
+            time.sleep(1.0)
+        raise RuntimeError(f"app still running {timeout:.0f}s after Close")
 
     m = Model(role="target")
 
@@ -730,6 +761,11 @@ def build(app_session) -> Model:
                  "no_thanks": click(shortcut.click_no_thanks, name="no_thanks")},
     ))
 
+    close_app_action = Action("close_app", close_app, idempotent=False,
+                              description="caption Close, answer the shortcut offer, wait for the process to exit")
+    for state in m.states.values():
+        if state.layer == "screen":
+            state.actions.setdefault("close_app", close_app_action)
     attach_peer_actions(m, own_key=TARGET_STATE_KEY, peer_key=SOURCE_STATE_KEY)
     m.validate()
     return m

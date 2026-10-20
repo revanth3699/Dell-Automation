@@ -368,6 +368,13 @@ not know the Target rewound, so a Target rewind past pairing only works where th
 script is written to pair again (the cancel scenarios); in `full_transfer` it covers
 resets after pairing.
 
+A run that PASSES closes the app the way a user does before teardown: the Target's
+caption Close button (answering the desktop-shortcut offer with No thanks), the
+Source's Close button or window icon, then a wait for the process to exit, so
+`Session.close()`'s process kill finds nothing to kill. A failed run keeps the
+immediate kill. Both models expose this as a `close_app` action on every screen, so a
+scenario can also close explicitly (the Source scripts end with it).
+
 Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
 documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,

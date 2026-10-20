@@ -142,6 +142,7 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
         Runner(model, script, ctx, observer, reporter=reporter).run()
         outcome = "finished"
         log.success(f"Scenario {scenario.name!r} ({role_name}) PASSED")
+        _close_app_gracefully(model, ctx)
     finally:
         # tell the other machine how this side ended (per explicit user direction,
         # 2026-10-20: the Source must not close until the Target is done)
@@ -151,6 +152,22 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
         finally:
             session.close()
             build_report()
+
+
+def _close_app_gracefully(model: Model, ctx: RunContext) -> None:
+    """After a PASSED run, close the app the way a user does (the model's close_app
+    action: caption Close / Close button, prompts answered, process exit awaited) so
+    Session.close()'s process kill finds nothing left to kill. A failed run keeps the
+    old all-or-nothing kill: the app may be mid-transfer, and the close prompts there
+    are a finding, not cleanup. Failures here are logged, never fatal."""
+    action = next((s.actions["close_app"] for s in model.states.values() if "close_app" in s.actions), None)
+    if action is None:
+        return
+    try:
+        ctx.log.info("run passed -- closing the app gracefully")
+        action.perform(ctx, {})
+    except Exception as exc:  # noqa: BLE001 -- Session.close() below still stops everything
+        ctx.log.warning(f"graceful close failed ({exc}) -- Session.close() will stop the process")
 
 
 def coordination_keys(script) -> tuple[set, set]:

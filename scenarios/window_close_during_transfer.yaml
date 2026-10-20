@@ -72,6 +72,6 @@ roles:
         timeout: 7260
         note: keep the Source app open until the Target script has ended
       - at: [cancelledByOtherPc, migrationError, migrationPartialTryAgain, migrationPartialSummary, migrationComplete]
-        do: close
+        do: close_app
         timeout: 1800
         done: true
