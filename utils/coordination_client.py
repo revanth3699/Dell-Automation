@@ -8,7 +8,6 @@ similar signal -- e.g. "source ready to transfer") -- via the Coordination Servi
 for later hand-offs rather than inventing a second mechanism.
 """
 
-from typing import Optional
 
 import requests
 from loguru import logger
@@ -32,7 +31,18 @@ class CoordinationClient:
         resp = requests.put(url, json={"value": value}, timeout=timeout)
         resp.raise_for_status()
 
-    def _try_get(self, run_id: str, key: str, timeout: float) -> Optional[str]:
+    def clear(self, run_id: str, key: str, timeout: float = 10.0) -> bool:
+        """Deletes one key of a run. Returns False (without raising) against a service
+        that predates DELETE (404/405), so callers can fall back to stale-value detection."""
+        url = f"{self.base_url}/runs/{run_id}/{key}"
+        logger.debug(f"CoordinationClient: DELETE {url}")
+        resp = requests.delete(url, timeout=timeout)
+        if resp.status_code in (404, 405):
+            return False
+        resp.raise_for_status()
+        return True
+
+    def _try_get(self, run_id: str, key: str, timeout: float) -> str | None:
         url = f"{self.base_url}/runs/{run_id}/{key}"
         logger.debug(f"CoordinationClient: GET {url}")
         resp = requests.get(url, timeout=timeout)

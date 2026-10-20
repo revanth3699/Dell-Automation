@@ -70,6 +70,28 @@ def publish(ctx, key: str, value: str) -> None:
         ctx.log.warning(f"could not publish {key}={value}: {exc}")
 
 
+def clear_own_keys(ctx, keys) -> bool:
+    """Deletes this role's own keys on the coordination service before anything is
+    published, so a reused run id starts clean for the other side. Each role only
+    deletes what it publishes, so the two sides cannot race. Returns False when the
+    service is an older build without DELETE; the stale-value snapshot then remains
+    the only protection."""
+    supported = True
+    for key in keys:
+        try:
+            if not ctx.coordination.clear(ctx.run_id, key):
+                supported = False
+        except requests.exceptions.RequestException as exc:
+            ctx.log.warning(f"could not clear {key} on the coordination service: {exc}")
+            supported = False
+    if supported:
+        ctx.log.info(f"cleared own coordination keys for run {ctx.run_id}: {', '.join(keys)}")
+    else:
+        ctx.log.warning("coordination service does not support DELETE (restart it from the current build) -- "
+                        "relying on stale-value detection only")
+    return supported
+
+
 def snapshot_stale_value(ctx, key: str) -> None:
     """Records the value `key` already holds when this run starts, so wait_for_peer_state()
     will not accept it until it has changed. Systemic fix for reused run ids (2026-10-20:

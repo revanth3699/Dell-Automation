@@ -128,12 +128,14 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
                      coordination=CoordinationClient(), log=log, env=env, scenario_name=scenario.name)
     peer_role = "source" if role_name == "target" else "target"
     waited_keys, published_keys = coordination_keys(script)
+    own_keys = [f"{role_name}_state", *sorted(published_keys)] + ([PAIRING_CODE_KEY] if role_name == "source" else [])
+    peer.clear_own_keys(ctx, own_keys)               # a reused run id starts clean for the other side
     for key in [f"{peer_role}_state", PAIRING_CODE_KEY, *sorted(waited_keys)]:
-        peer.snapshot_stale_value(ctx, key)          # values left over from an earlier run with this id
+        peer.snapshot_stale_value(ctx, key)          # whatever the peer left behind before IT clears its keys
     if role_name == "target":
         target_model.snapshot_stale_pairing_code(ctx)
     for key in [f"{role_name}_state", *sorted(published_keys)]:
-        peer.publish(ctx, key, "started")            # overwrites our own leftover values at once
+        peer.publish(ctx, key, "started")
     ctx.scratch["app_process_name"] = SOURCE_PROCESS_NAME if role is MachineRole.SOURCE else TARGET_PROCESS_NAME
     model = MODEL_BUILDERS[role_name](session.app)
     observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}

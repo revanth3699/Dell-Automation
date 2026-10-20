@@ -394,9 +394,14 @@ partial, among: [partial, clean]}` plus `steps:`. When the group is reached the 
 waits until the key holds one of `among` and runs the inner steps only if it is `is`,
 otherwise skips them all. `full_transfer` uses one in each role for the second
 migration after a partial outcome: the Target publishes `target_outcome` from the
-results screen, the Source branches on it to click Try Again and pair again. Custom
-keys get the same stale-value protection as `<role>_state` (a value left over from an
-earlier run with the same id is ignored until it changes).
+results screen, the Source branches on it to click Try Again and pair again.
+
+Reused run ids: the coordination service keeps a run's values until they are deleted,
+so each role deletes the keys it publishes (`<role>_state`, any `publish key:`, and
+the Source's `pairing_code`) before it publishes `started`. The service must be
+running from the current build for that (`DELETE /runs/{run_id}/{key}`, restart it
+after pulling); against an older service the runner warns and falls back to
+stale-value detection only (a value present at start is ignored until it changes).
 Every scenario is validated against the models by `tests/statemachine/test_scenarios.py`;
 `uv run pytest tests/statemachine` needs no hardware.
 
