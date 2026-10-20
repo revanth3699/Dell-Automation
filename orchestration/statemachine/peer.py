@@ -6,6 +6,7 @@ waits for the other side's value. attach_peer_actions() gives every State in a M
 generic actions so any scenario step can sync from anywhere:
 
     - do: publish        args: {value: migrating}            # "I am here"
+    - do: publish        args: {key: target_outcome, value: partial}   # any other key
     - do: wait_for_peer  args: {state: migrating, timeout: 600, key: target_state}
     - do: wait_for_peer  args: {state: [finished, failed]}   # either value
 
@@ -53,9 +54,15 @@ def snapshot_stale_value(ctx, key: str) -> None:
 
 
 def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
-    """Polls until key == wanted (or is one of `wanted`, when a list is given). CoordinationClient.wait_for() returns the first value
-    present (not necessarily the wanted one), so it is called repeatedly with short
-    timeouts until the value matches."""
+    """Polls until key == wanted (or is one of `wanted`, when a list is given)."""
+    wait_for_state_value(ctx, key, wanted, timeout)
+
+
+def wait_for_state_value(ctx, key: str, wanted, timeout: float) -> str:
+    """Polls until `key` holds one of `wanted` and returns that value.
+    CoordinationClient.wait_for() returns the first value present (not necessarily a
+    wanted one), so it is called repeatedly with short timeouts until the value
+    matches. A value recorded as stale at run start is ignored until it changes."""
     wanted_set = {str(w) for w in (wanted if isinstance(wanted, (list, tuple, set)) else [wanted])}
     stale = ctx.scratch.get("stale_values", {}).get(key)
     changed = False
@@ -69,10 +76,18 @@ def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
         if value is not None and str(value) != stale:
             changed = True
         if value in wanted_set and (changed or stale is None):
-            ctx.log.success(f"peer reported {key}={value}")
-            return
+            ctx.log.success(f"coordination service reports {key}={value}")
+            return str(value)
         time.sleep(2.0)
-    raise TimeoutError(f"peer never reported {key} in {sorted(wanted_set)} within {timeout:.0f}s")
+    raise TimeoutError(f"{key} never became one of {sorted(wanted_set)} within {timeout:.0f}s")
+
+
+def resolve_condition(ctx, when: dict) -> tuple[bool, str]:
+    """A step group's `when:` clause -- waits until `key` holds one of `among`, then
+    tells whether it is the value `is`. Both roles can branch on the same published
+    fact (e.g. the Target's migration outcome) without any other channel."""
+    value = wait_for_state_value(ctx, str(when["key"]), when["among"], float(when.get("timeout", 600.0)))
+    return value == str(when["is"]), value
 
 
 def attach_peer_actions(model: Model, own_key: str, peer_key: str) -> None:
@@ -80,7 +95,7 @@ def attach_peer_actions(model: Model, own_key: str, peer_key: str) -> None:
     own action of the same name)."""
 
     def do_publish(ctx, args) -> None:
-        publish(ctx, own_key, str(args.get("value", "")))
+        publish(ctx, str(args.get("key", own_key)), str(args.get("value", "")))
 
     def do_wait(ctx, args) -> None:
         wait_for_peer_state(ctx, str(args.get("key", peer_key)), args["state"], float(args.get("timeout", 600.0)))

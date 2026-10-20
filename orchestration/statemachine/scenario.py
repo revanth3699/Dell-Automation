@@ -28,10 +28,20 @@ Shape (see scenarios/*.yaml and scenarios/_common.yaml):
             do: type_code
             args: {timeout: 300}
             wait_before: 5           # seconds to pause once the state is showing
+          - when: {key: target_outcome, is: partial, among: [partial, clean], timeout: 600}
+            note: a step GROUP -- runs only when the coordination service holds key=is
+            steps:
+              - at: welcome
+                do: continue
           - at: welcome
             done: true
 
-A step with neither `do` nor `env` only waits until `at` is showing. `expect` narrows
+A step with neither `do` nor `env` only waits until `at` is showing. A mapping with
+`when` + `steps` is a group: when the group is reached the runner waits until the
+coordination key holds one of `among` (published by either role) and runs the inner
+steps only if it equals `is`; otherwise the whole group is skipped. Groups are
+flattened at load time, so every other rule (optional, rewinds, lint) applies to the
+inner steps as usual. `expect` narrows
 the legal next states after the action (defaults to the action's own expect list in
 the model). `done: true` ends the role's script once `at` is reached.
 
@@ -53,6 +63,8 @@ from utils import environment
 POLICY_KINDS = ("click", "wait_until_gone", "fail", "ignore")
 COMMON_FILE = "_common.yaml"
 STEP_KEYS = {"at", "do", "env", "args", "expect", "timeout", "done", "note", "optional", "wait_before"}
+GROUP_KEYS = {"when", "steps", "note"}
+WHEN_KEYS = {"key", "is", "among", "timeout"}
 
 
 class ScenarioError(Exception):
@@ -72,6 +84,8 @@ class Step:
     wait_before: float = 0.0
     note: str = ""
     index: int = 0
+    when: dict[str, Any] | None = None   # the enclosing group's condition (None = unconditional)
+    group: str | None = None             # the enclosing group's id, shared by its steps
 
     def __post_init__(self):
         if isinstance(self.at, str):
@@ -83,7 +97,8 @@ class Step:
 
     def label(self) -> str:
         what = f"env:{self.env}" if self.env else ("wait" if self.is_wait else self.do)
-        return f"step {self.index + 1} (at {'/'.join(self.at)}: {what})"
+        where = f" [{self.group}]" if self.group else ""
+        return f"step {self.index + 1} (at {'/'.join(self.at)}: {what}){where}"
 
 
 @dataclass
@@ -142,7 +157,53 @@ class Scenario:
             raise ScenarioError(f"Scenario {self.name!r} has no script for role {role!r}") from None
 
 
-def _parse_step(index: int, raw: Any) -> Step:
+def _parse_when(label: str, raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ScenarioError(f"{label}: 'when' must be a mapping with key/is/among, got {raw!r}")
+    unknown = set(raw) - WHEN_KEYS
+    if unknown:
+        raise ScenarioError(f"{label}: unknown 'when' keys {sorted(unknown)}")
+    if not raw.get("key") or raw.get("is") is None:
+        raise ScenarioError(f"{label}: 'when' needs 'key' and 'is'")
+    is_value = str(raw["is"])
+    among = raw.get("among", [is_value])
+    among = [str(a) for a in (among if isinstance(among, list) else [among])]
+    if is_value not in among:
+        raise ScenarioError(f"{label}: 'when.is' {is_value!r} must be one of 'when.among' {among}")
+    timeout = float(raw.get("timeout", 600.0))
+    return {"key": str(raw["key"]), "is": is_value, "among": among, "timeout": timeout}
+
+
+def _parse_steps(raw_steps: list, start: int = 0, when: dict[str, Any] | None = None,
+                 group: str | None = None) -> list[Step]:
+    """Flattens step groups: a `{when, steps}` mapping contributes its inner steps, each
+    tagged with the group's condition and id, numbered in document order."""
+    steps: list[Step] = []
+    index = start
+    for raw in raw_steps:
+        if isinstance(raw, dict) and "steps" in raw:
+            label = f"group at step {index + 1}"
+            unknown = set(raw) - GROUP_KEYS
+            if unknown:
+                raise ScenarioError(f"{label}: unknown keys {sorted(unknown)} (a group takes when/steps/note)")
+            if "when" not in raw:
+                raise ScenarioError(f"{label}: a step group needs a 'when' condition")
+            if group is not None:
+                raise ScenarioError(f"{label}: groups cannot be nested")
+            if not isinstance(raw["steps"], list) or not raw["steps"]:
+                raise ScenarioError(f"{label}: 'steps' must be a non-empty list")
+            inner_when = _parse_when(label, raw["when"])
+            inner_id = str(raw.get("note") or "").strip() or f"{inner_when['key']}={inner_when['is']}"
+            inner = _parse_steps(raw["steps"], index, inner_when, inner_id)
+            steps.extend(inner)
+            index += len(inner)
+            continue
+        steps.append(_parse_step(index, raw, when, group))
+        index += 1
+    return steps
+
+
+def _parse_step(index: int, raw: Any, when: dict[str, Any] | None = None, group: str | None = None) -> Step:
     if not isinstance(raw, dict) or "at" not in raw:
         raise ScenarioError(f"step {index + 1} must be a mapping with an 'at' key, got {raw!r}")
     unknown = set(raw) - STEP_KEYS
@@ -169,6 +230,8 @@ def _parse_step(index: int, raw: Any) -> Step:
         wait_before=float(raw.get("wait_before") or 0.0),
         note=str(raw.get("note") or ""),
         index=index,
+        when=when,
+        group=group,
     )
 
 
@@ -193,7 +256,7 @@ def _parse_role(role: str, raw: Any, policy_sets: dict[str, dict[str, Any]]) -> 
     defaults = raw.get("defaults") or {}
     return RoleScript(
         role=role,
-        steps=[_parse_step(i, s) for i, s in enumerate(raw["steps"])],
+        steps=_parse_steps(raw["steps"]),
         policies=_resolve_policies(role, raw.get("policies"), policy_sets),
         setup=[str(s) for s in (raw.get("setup") or [])],
         teardown=[str(s) for s in (raw.get("teardown") or [])],

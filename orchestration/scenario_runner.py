@@ -126,11 +126,13 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
     ctx = RunContext(role=role_name, run_id=run_id, session=session, app=session.app,
                      coordination=CoordinationClient(), log=log, env=env, scenario_name=scenario.name)
     peer_role = "source" if role_name == "target" else "target"
-    for key in (f"{peer_role}_state", PAIRING_CODE_KEY):
+    waited_keys, published_keys = coordination_keys(script)
+    for key in [f"{peer_role}_state", PAIRING_CODE_KEY, *sorted(waited_keys)]:
         peer.snapshot_stale_value(ctx, key)          # values left over from an earlier run with this id
     if role_name == "target":
         target_model.snapshot_stale_pairing_code(ctx)
-    peer.publish(ctx, f"{role_name}_state", "started")  # overwrites our own leftover value at once
+    for key in [f"{role_name}_state", *sorted(published_keys)]:
+        peer.publish(ctx, key, "started")            # overwrites our own leftover values at once
     model = MODEL_BUILDERS[role_name](session.app)
     observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}
     observer = observers[observer_kind](model)
@@ -149,6 +151,23 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
         finally:
             session.close()
             build_report()
+
+
+def coordination_keys(script) -> tuple[set, set]:
+    """Custom coordination keys a role script reads (wait_for_peer key: / when: key:)
+    and publishes (publish key:), so stale values from an earlier run with the same id
+    are ignored and our own leftovers are overwritten before any step runs -- the same
+    protection <role>_state and pairing_code already have."""
+    waited, published = set(), set()
+    for step in script.steps:
+        if step.when is not None:
+            waited.add(str(step.when["key"]))
+        key = step.args.get("key")
+        if key and step.do == "wait_for_peer":
+            waited.add(str(key))
+        if key and step.do == "publish":
+            published.add(str(key))
+    return waited, published
 
 
 def main(argv=None) -> int:

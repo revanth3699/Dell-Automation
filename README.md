@@ -372,7 +372,17 @@ Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step 
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
 documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,
 `teardown:`, a step's `env:`) come from `utils/environment.py`. Peer sync is the
-`publish` / `wait_for_peer` action every state has, over the coordination service only.
+`publish` / `wait_for_peer` action every state has, over the coordination service only;
+both take an optional `key:` argument for a fact other than `<role>_state`.
+
+A **step group** branches a script on such a fact: `when: {key: target_outcome, is:
+partial, among: [partial, clean]}` plus `steps:`. When the group is reached the runner
+waits until the key holds one of `among` and runs the inner steps only if it is `is`,
+otherwise skips them all. `full_transfer` uses one in each role for the second
+migration after a partial outcome: the Target publishes `target_outcome` from the
+results screen, the Source branches on it to click Try Again and pair again. Custom
+keys get the same stale-value protection as `<role>_state` (a value left over from an
+earlier run with the same id is ignored until it changes).
 Every scenario is validated against the models by `tests/statemachine/test_scenarios.py`;
 `uv run pytest tests/statemachine` needs no hardware.
 

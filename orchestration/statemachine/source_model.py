@@ -161,7 +161,9 @@ def build(app_session) -> Model:
                 text=TextMatch(all=(transfer_progress_screen.MIGRATION_PARTIAL_TRY_AGAIN_HEADING_TEXT,)),
                 probe=transfer_progress_screen.is_migration_partial_try_again_confirmed,
                 actions={"announce": announce("migrationPartialTryAgain"),
-                         "try_again": click(progress.click_try_again, "searching", "pairingCode"),
+                         # Try Again restarts the engine: the restart page shows the searching heading
+                         # for ~30 s, then the app lands on Welcome (MainWindowViewModel TerminateCDMRecv)
+                         "try_again": click(progress.click_try_again, "searching", "welcome", "pairingCode"),
                          "close": click(progress.click_close)}))
     m.add(State("migrationPartialSummary", "screen", "user",
                 text=TextMatch(all=(transfer_progress_screen.MIGRATION_PARTIAL_SUMMARY_HEADING_TEXT,)),
@@ -173,7 +175,9 @@ def build(app_session) -> Model:
                 text=TextMatch(all=(transfer_progress_screen.MIGRATION_ERROR_HEADING_TEXT,)),
                 probe=transfer_progress_screen.is_migration_error_confirmed,
                 actions={"announce": announce("migrationError"),
-                         "try_again": click(progress.click_try_again, "searching", "pairingCode"),
+                         # Try Again restarts the engine: the restart page shows the searching heading
+                         # for ~30 s, then the app lands on Welcome (MainWindowViewModel TerminateCDMRecv)
+                         "try_again": click(progress.click_try_again, "searching", "welcome", "pairingCode"),
                          "close": click(progress.click_close)}))
     # resx CancelMigrationHeader "You've canceled migration on your {0}" -- shown when the
     # OTHER PC cancels. Text-only; no assertions module exists yet (snapshot observer only).

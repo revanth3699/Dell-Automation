@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from orchestration.statemachine import peer
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model, State
 from orchestration.statemachine.observer import Observation, Observer
@@ -106,6 +107,7 @@ class Runner:
         self._previous_action = None          # the last model Action performed (None after a wait/env step)
         self._previous_action_args: dict = {}
         self._action_attempts = 0
+        self._group_decisions: dict[str, bool] = {}   # step group id -> its `when` condition held
 
     # ------------------------------------------------------------------ public
 
@@ -115,6 +117,9 @@ class Runner:
         i, rewinds = 0, 0
         while i < len(steps):
             step = steps[i]
+            if step.when is not None and not self._group_allowed(step):
+                i += 1
+                continue
             try:
                 self._run_step(step, steps[i + 1:])
             except UnexpectedState as exc:
@@ -139,6 +144,24 @@ class Runner:
                 return
             i += 1
         self.log.success("Scenario script complete")
+
+    def _group_allowed(self, step: Step) -> bool:
+        """Evaluates a step group's `when` once (the first time one of its steps comes
+        up) by reading the coordination service; every step of the group shares the
+        answer. A group whose condition is false is skipped step by step, so rewinds
+        and the optional-step skip keep working on the flat step list."""
+        group = step.group or f"step{step.index}"
+        if group not in self._group_decisions:
+            when = step.when
+            try:
+                holds, value = peer.resolve_condition(self.ctx, when)
+            except TimeoutError as exc:
+                raise RunnerError(f"group {group}: {exc}", self._last, step) from exc
+            self._group_decisions[group] = holds
+            verdict = "running its steps" if holds else "skipping its steps"
+            self.log.info(f"group {group}: {when['key']}={value} -- {verdict}")
+            self._record("StateMachine", f"group {group}: {when['key']}={value} ({verdict})", "pass", 0.0)
+        return self._group_decisions[group]
 
     def _rewind_index(self, observation: Observation | None, current: int) -> int | None:
         """The latest earlier step whose target is the screen the app is on now."""

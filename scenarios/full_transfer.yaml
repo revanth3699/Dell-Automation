@@ -2,8 +2,10 @@ name: full_transfer
 description: >
   Sign in, pair, transfer everything, then walk the whole results family: summary ->
   details -> (one Retry round when files were skipped) -> back -> Finish -> Migration
-  Done (PDF, validator, feedback, Erase your old PC) -> Back to Home. Covers
-  TARGET_STATE_MACHINE.md screens 1.2, 1.4, 1.6-1.16.
+  Done (PDF, validator, feedback, Erase your old PC) -> Back to Home. When the outcome
+  is still partial, the Source clicks Try Again and the whole migration runs a second
+  time from Welcome, ending the same way. Covers TARGET_STATE_MACHINE.md screens 1.2,
+  1.4, 1.6-1.16.
 launch: exe
 roles:
   target:
@@ -66,6 +68,15 @@ roles:
         optional: true
         timeout: 120
         note: the retry round's outcome -- whatever is still skipped is reported, not retried again
+      - at: skippedFiles
+        do: publish
+        args: {key: target_outcome, value: partial}
+        optional: true
+        note: the outcome both role scripts branch on below (skipped on the complete branch)
+      - at: complete
+        do: publish
+        args: {key: target_outcome, value: clean}
+        optional: true
       - at: complete
         do: open_pdf
         optional: true
@@ -96,6 +107,71 @@ roles:
         do: erase_old_pc
       - at: learnAboutErase
         do: back_to_home
+        note: >
+          Back to Home sends Migration.Stop (MigrationDonePageViewModel.GoHome) -- that is what switches the
+          Source to its final screen, the one with Try Again after a partial run
+      - at: welcome
+        timeout: 180
+      - when: {key: target_outcome, is: partial, among: [partial, clean]}
+        note: second migration after a partial outcome
+        steps:
+          - at: [welcome, welcomeSignedOut]
+            do: continue
+            timeout: 120
+            note: the Source clicks Try Again and comes back to its Welcome; the whole migration runs again from here
+          - at: signIn
+            do: sign_in
+            optional: true
+            timeout: 300
+          - at: connectOldPc
+            do: publish
+            args: {value: connectOldPc}
+            optional: true
+            timeout: 900
+          - at: enterCode
+            do: type_code
+            args: {timeout: 900, attempts: 5, confirm_timeout: 30}
+            timeout: 1200
+            note: the Source needs ~30 s for its engine restart, then Let's get started, before it publishes a code
+          - at: chooseWhatToMove
+            do: migrate_now
+            timeout: 600
+          - at: migrating
+            do: publish
+            args: {value: migrating}
+            timeout: 180
+          - at: resultsSummary
+            timeout: 7200
+          - at: resultsSummary
+            do: view_details
+          - at: [complete, skippedFiles]
+            timeout: 120
+            note: no further retry -- whatever is still skipped after the second migration is reported
+          - at: complete
+            do: open_pdf
+            optional: true
+          - at: complete
+            do: back_to_summary
+            optional: true
+          - at: resultsSummary
+            do: finish
+            optional: true
+          - at: skippedFiles
+            do: go_to_summary
+            optional: true
+          - at: migrationDone
+            do: download_pdf
+          - at: migrationDone
+            env: validate_migration_report
+          - at: migrationDone
+            do: tell_us_how_we_did
+          - at: feedbackModal
+            do: submit
+            args: {rating: 5, comment: Automated full_transfer run (second migration)}
+          - at: migrationDone
+            do: erase_old_pc
+          - at: learnAboutErase
+            do: back_to_home
       - at: welcome
         timeout: 180
         done: true
@@ -121,13 +197,36 @@ roles:
         note: any ending (confirmed live 2026-10-19 -- a partial migration lands on migrationPartialSummary)
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
-        args: {state: [retrying, finished, failed], timeout: 7200}
+        args: {key: target_outcome, state: [partial, clean], timeout: 7200}
         timeout: 7260
-        note: the Target retries skipped files once (target_state=retrying) -- that restarts the transfer on this side
-      - at: migrating
-        optional: true
-        timeout: 600
-        note: the retry round; skipped when the Target had nothing to retry
+        note: >
+          the Target's outcome after its one Retry round (the retry restarts the transfer on this side
+          meanwhile: summary -> migrating -> summary); partial means the Source will be asked to Try Again
+      - when: {key: target_outcome, is: partial, among: [partial, clean]}
+        note: second migration after a partial outcome
+        steps:
+          - at: migrationPartialTryAgain
+            do: try_again
+            timeout: 3600
+            note: >
+              "Your migration is now complete." with Try Again appears once the Target goes Home at the end
+              of its results walk (Migration.Stop); Try Again restarts the engine (~30 s, searching heading)
+              and lands on Welcome
+          - at: welcome
+            do: lets_get_started
+            timeout: 300
+          - at: pairingCode
+            do: publish_code
+            args: {timeout: 900}
+            timeout: 1200
+          - at: [linkedSuccess, readyToMigrate]
+            timeout: 300
+          - at: migrating
+            do: announce
+            timeout: 1800
+          - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+            do: announce
+            timeout: 7200
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
         args: {state: [finished, failed], timeout: 7200}
