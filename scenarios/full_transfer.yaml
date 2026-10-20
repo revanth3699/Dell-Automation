@@ -209,12 +209,15 @@ roles:
             do: try_again
             timeout: 3600
             note: >
-              "Your migration is now complete." with Try Again appears once the Target goes Home at the end
-              of its results walk (Migration.Stop); Try Again restarts the engine (~30 s, searching heading)
-              and lands on Welcome
+              the screen reads Close until the Target has finished its retried migration, then Try Again
+              (confirmed live 2026-10-20). Try Again restarts the engine and goes to "We're searching for
+              your new PC"; the pairing code appears once the Target has clicked the blue arrow on its home
+              screen and reached the code screen
           - at: welcome
             do: lets_get_started
+            optional: true
             timeout: 300
+            note: only if the restart lands on Welcome instead (the code path allows it); skipped when the searching / code screen shows
           - at: pairingCode
             do: publish_code
             args: {timeout: 900}
