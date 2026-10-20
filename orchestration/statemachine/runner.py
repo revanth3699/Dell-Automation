@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from factory.session import process_exists
 from orchestration.statemachine import peer
 from orchestration.statemachine.context import RunContext
 from orchestration.statemachine.model import Model, State
@@ -65,6 +66,16 @@ class PolicyExhausted(RunnerError):
     pass
 
 
+class PeerFailed(RunnerError):
+    """The other machine's script reported failed -- per explicit user direction
+    (2026-10-20): when one side crashes, both must close."""
+
+
+class AppGone(RunnerError):
+    """The app process exited, or neither observer could see it for
+    OBSERVE_ERROR_LIMIT_SECONDS: WinAppDriver or the app itself died."""
+
+
 @dataclass
 class _OverlayTracking:
     first_seen: float
@@ -75,6 +86,8 @@ class _OverlayTracking:
 
 
 MAX_FAILED_POLICY_CLICKS = 2   # a click that fails because the dialog has just gone is not a finding; two in a row are
+PEER_CHECK_SECONDS = 10.0            # how often a waiting step asks whether the other machine's script failed
+OBSERVE_ERROR_LIMIT_SECONDS = 60.0   # unobservable for this long (app or WinAppDriver gone) = the run is over
 
 
 class Runner:
@@ -108,6 +121,8 @@ class Runner:
         self._previous_action_args: dict = {}
         self._action_attempts = 0
         self._group_decisions: dict[str, bool] = {}   # step group id -> its `when` condition held
+        self._last_peer_check: float | None = None
+        self._unobservable_since: float | None = None
 
     # ------------------------------------------------------------------ public
 
@@ -190,14 +205,17 @@ class Runner:
         self.log.info(f"{step.label()} -- waiting up to {timeout:.0f}s" + (f" ({step.note})" if step.note else ""))
 
         while True:
+            self._check_peer(step)
             obs = self.observer.observe(self.ctx.app)
             self._note(obs)
 
             if obs.error:
+                self._check_observable(obs, step)
                 if self._clock() >= deadline:
                     raise StepTimeout(f"could not observe the app: {obs.error}", obs, step)
                 self._sleep(self.script.tick)
                 continue
+            self._unobservable_since = None
 
             matched = self._at_target(obs, step)
             if matched is not None and not step.is_wait and self.model.get(matched).layer != "screen" \
@@ -239,6 +257,33 @@ class Runner:
             if self._clock() >= deadline:
                 raise StepTimeout(f"{'/'.join(step.at)} did not appear within {timeout:.0f}s", obs, step)
             self._sleep(self.script.tick)
+
+    def _check_peer(self, step: Step) -> None:
+        """Every PEER_CHECK_SECONDS: if the other machine's script reported failed, stop
+        here too (the entry point then closes this side's app)."""
+        if self.ctx.coordination is None:
+            return
+        now = self._clock()
+        if self._last_peer_check is not None and now - self._last_peer_check < PEER_CHECK_SECONDS:
+            return
+        self._last_peer_check = now
+        try:
+            peer.raise_if_peer_failed(self.ctx)
+        except peer.PeerFailed as exc:
+            raise PeerFailed(str(exc), self._last, step) from exc
+
+    def _check_observable(self, obs: Observation, step: Step) -> None:
+        """An observation error means neither /source nor the probes could see the app.
+        If its process is gone, or this has lasted OBSERVE_ERROR_LIMIT_SECONDS, the run
+        is over -- do not sit out a two-hour transfer timeout on a dead app."""
+        process_name = self.ctx.scratch.get("app_process_name")
+        if process_name and not process_exists(process_name):
+            raise AppGone(f"the {process_name} process has exited ({obs.error})", obs, step)
+        now = self._clock()
+        if self._unobservable_since is None:
+            self._unobservable_since = now
+        elif now - self._unobservable_since >= OBSERVE_ERROR_LIMIT_SECONDS:
+            raise AppGone(f"could not observe the app for {OBSERVE_ERROR_LIMIT_SECONDS:.0f}s: {obs.error}", obs, step)
 
     def _maybe_perform_again(self, obs: Observation) -> bool:
         """The WebView2 "click reported success but nothing happened" guard (CLAUDE.md

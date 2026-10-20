@@ -17,6 +17,8 @@ class FakeCoordination:
         self.values = list(values)  # successive answers to wait_for; None = not published yet
 
     def wait_for(self, run_id, key, timeout):
+        if key != "pairing_code":
+            raise TimeoutError(key)   # the peer-failed check reads source_state: nothing published here
         value = self.values.pop(0) if self.values else (self.values and self.values[-1])
         if value is None:
             raise TimeoutError("not published")

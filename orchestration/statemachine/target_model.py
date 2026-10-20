@@ -109,6 +109,7 @@ from orchestration.statemachine.peer import (
     SOURCE_STATE_KEY,
     TARGET_STATE_KEY,
     attach_peer_actions,
+    raise_if_peer_failed,
     wait_for_peer_state,
 )
 from orchestration.statemachine.peer import (
@@ -140,6 +141,7 @@ def snapshot_stale_pairing_code(ctx) -> None:
 def _fresh_pairing_code(ctx, exclude: set, deadline: float) -> str:
     """The next published code that is not in `exclude` (stale or already rejected)."""
     while True:
+        raise_if_peer_failed(ctx)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError(f"no new pairing code appeared (excluding {sorted(exclude)})")

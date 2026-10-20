@@ -29,6 +29,7 @@ import os
 import sys
 from pathlib import Path
 
+from factory.config import SOURCE_PROCESS_NAME, TARGET_PROCESS_NAME
 from factory.logger_factory import LoggerFactory
 from factory.session import MachineRole, Session
 from orchestration.statemachine import peer, source_model, target_model
@@ -39,7 +40,7 @@ from orchestration.statemachine.observer import (
     ProbeObserver,
     SnapshotObserver,
 )
-from orchestration.statemachine.runner import Runner, RunnerError
+from orchestration.statemachine.runner import PeerFailed, Runner, RunnerError
 from orchestration.statemachine.scenario import (
     Scenario,
     ScenarioError,
@@ -133,13 +134,21 @@ def run(role_name: str, run_id: str, scenario: Scenario, launch_mode: str, obser
         target_model.snapshot_stale_pairing_code(ctx)
     for key in [f"{role_name}_state", *sorted(published_keys)]:
         peer.publish(ctx, key, "started")            # overwrites our own leftover values at once
+    ctx.scratch["app_process_name"] = SOURCE_PROCESS_NAME if role is MachineRole.SOURCE else TARGET_PROCESS_NAME
     model = MODEL_BUILDERS[role_name](session.app)
     observers = {"hybrid": HybridObserver, "snapshot": SnapshotObserver, "probe": ProbeObserver}
     observer = observers[observer_kind](model)
     outcome = "failed"
     try:
         _run_environment_steps(script.setup, ctx, "setup")
-        Runner(model, script, ctx, observer, reporter=reporter).run()
+        try:
+            Runner(model, script, ctx, observer, reporter=reporter).run()
+        except (PeerFailed, peer.PeerFailed) as exc:
+            # the OTHER machine failed; this app is healthy and merely waiting, so it
+            # can still be closed the way a user would before the all-or-nothing kill
+            log.error(f"Scenario {scenario.name!r} ({role_name}) stopped: {exc}")
+            _close_app_gracefully(model, ctx)
+            raise
         outcome = "finished"
         log.success(f"Scenario {scenario.name!r} ({role_name}) PASSED")
         _close_app_gracefully(model, ctx)

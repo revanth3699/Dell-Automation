@@ -375,6 +375,13 @@ Source's Close button or window icon, then a wait for the process to exit, so
 immediate kill. Both models expose this as a `close_app` action on every screen, so a
 scenario can also close explicitly (the Source scripts end with it).
 
+When one side fails, both stop: the failing role publishes `<role>_state=failed` and
+kills its app; every wait on the other side (step waits every 10 s, `wait_for_peer`,
+the pairing-code loops) checks for that and ends with `PeerFailed`, after which that
+side closes its app gracefully and tears down. An app or WinAppDriver crash is caught
+on the side it happens: a step whose app cannot be observed for 60 s, or whose process
+is gone, fails with `AppGone` at once instead of waiting out its timeout.
+
 Scenario files: `scenarios/_common.yaml` holds the shared policy sets; the step keys
 (`at`, `do`, `env`, `args`, `optional`, `wait_before`, `expect`, `timeout`, `done`) are
 documented in `orchestration/statemachine/scenario.py`. Environment steps (`setup:`,

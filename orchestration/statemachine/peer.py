@@ -27,6 +27,38 @@ from orchestration.statemachine.model import Action, Model
 
 TARGET_STATE_KEY = "target_state"
 SOURCE_STATE_KEY = "source_state"
+FAILED = "failed"
+
+
+class PeerFailed(Exception):
+    """The other machine's script ended with <peer>_state=failed: there is nothing left
+    to wait for on this side."""
+
+
+def peer_state_key(ctx) -> str:
+    return SOURCE_STATE_KEY if ctx.role == "target" else TARGET_STATE_KEY
+
+
+def peer_failed(ctx) -> bool:
+    """Non-blocking read of the peer's state: True once it reports failed in THIS run.
+    A `failed` left over from an earlier run with the same id (the stale snapshot) does
+    not count until some other value has been seen, which the peer's own
+    <role>_state=started publish guarantees early in its run."""
+    key = peer_state_key(ctx)
+    try:
+        value = ctx.coordination.wait_for(ctx.run_id, key, timeout=1.0)
+    except (TimeoutError, requests.exceptions.RequestException):
+        return False
+    stale = ctx.scratch.get("stale_values", {}).get(key)
+    seen_change = ctx.scratch.setdefault("peer_state_changed", False)
+    if value is not None and str(value) != stale:
+        ctx.scratch["peer_state_changed"] = seen_change = True
+    return str(value) == FAILED and (seen_change or stale is None)
+
+
+def raise_if_peer_failed(ctx) -> None:
+    if peer_failed(ctx):
+        raise PeerFailed(f"the {'source' if ctx.role == 'target' else 'target'} script reported failed")
 
 
 def publish(ctx, key: str, value: str) -> None:
@@ -67,7 +99,10 @@ def wait_for_state_value(ctx, key: str, wanted, timeout: float) -> str:
     stale = ctx.scratch.get("stale_values", {}).get(key)
     changed = False
     deadline = time.monotonic() + timeout
+    watch_peer = key != peer_state_key(ctx)   # waiting for the peer's own state handles `failed` itself
     while time.monotonic() < deadline:
+        if watch_peer:
+            raise_if_peer_failed(ctx)
         remaining = deadline - time.monotonic()
         try:
             value = ctx.coordination.wait_for(ctx.run_id, key, timeout=min(10.0, max(1.0, remaining)))

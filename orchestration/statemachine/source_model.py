@@ -56,6 +56,7 @@ from orchestration.statemachine.peer import (
     TARGET_STATE_KEY,
     attach_peer_actions,
     publish,
+    raise_if_peer_failed,
 )
 from utils.coordination_client import PAIRING_CODE_KEY
 
@@ -92,6 +93,7 @@ def build(app_session) -> Model:
         last = None
         _publish_state(ctx, "pairingCode")
         while time.monotonic() < deadline:
+            raise_if_peer_failed(ctx)
             if not pairing_code_screen.is_showing(ctx.app, timeout=1.0):
                 ctx.log.success("pairing-code screen gone -- Target has paired")
                 return
