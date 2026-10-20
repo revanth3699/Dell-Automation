@@ -173,7 +173,7 @@ def _close_app_gracefully(model: Model, ctx: RunContext) -> None:
     if action is None:
         return
     try:
-        ctx.log.info("run passed -- closing the app gracefully")
+        ctx.log.info("closing the app gracefully")
         action.perform(ctx, {})
     except Exception as exc:  # noqa: BLE001 -- Session.close() below still stops everything
         ctx.log.warning(f"graceful close failed ({exc}) -- Session.close() will stop the process")

@@ -50,10 +50,10 @@ def peer_failed(ctx) -> bool:
     except (TimeoutError, requests.exceptions.RequestException):
         return False
     stale = ctx.scratch.get("stale_values", {}).get(key)
-    seen_change = ctx.scratch.setdefault("peer_state_changed", False)
     if value is not None and str(value) != stale:
-        ctx.scratch["peer_state_changed"] = seen_change = True
-    return str(value) == FAILED and (seen_change or stale is None)
+        _stale_cleared(ctx, key)
+        stale = None
+    return str(value) == FAILED and stale is None
 
 
 def raise_if_peer_failed(ctx) -> None:
@@ -85,6 +85,12 @@ def snapshot_stale_value(ctx, key: str) -> None:
                     "ignoring it until the peer publishes something new")
 
 
+def _stale_cleared(ctx, key: str) -> None:
+    """The peer has published something new under `key` this run: from now on any
+    value is current, in every later wait and check."""
+    ctx.scratch.get("stale_values", {}).pop(key, None)
+
+
 def wait_for_peer_state(ctx, key: str, wanted, timeout: float) -> None:
     """Polls until key == wanted (or is one of `wanted`, when a list is given)."""
     wait_for_state_value(ctx, key, wanted, timeout)
@@ -96,8 +102,6 @@ def wait_for_state_value(ctx, key: str, wanted, timeout: float) -> str:
     wanted one), so it is called repeatedly with short timeouts until the value
     matches. A value recorded as stale at run start is ignored until it changes."""
     wanted_set = {str(w) for w in (wanted if isinstance(wanted, (list, tuple, set)) else [wanted])}
-    stale = ctx.scratch.get("stale_values", {}).get(key)
-    changed = False
     deadline = time.monotonic() + timeout
     watch_peer = key != peer_state_key(ctx)   # waiting for the peer's own state handles `failed` itself
     while time.monotonic() < deadline:
@@ -108,9 +112,15 @@ def wait_for_state_value(ctx, key: str, wanted, timeout: float) -> str:
             value = ctx.coordination.wait_for(ctx.run_id, key, timeout=min(10.0, max(1.0, remaining)))
         except (TimeoutError, requests.exceptions.RequestException):
             value = None
+        # Confirmed live (2026-10-20, run 651 reused): the "stale value has changed" fact
+        # must outlive this call. The Source's first wait saw started -> partial and
+        # accepted; the group condition's second wait saw only partial, equal to the
+        # previous run's stale value, and hung. Once a key has changed it stays cleared.
+        stale = ctx.scratch.get("stale_values", {}).get(key)
         if value is not None and str(value) != stale:
-            changed = True
-        if value in wanted_set and (changed or stale is None):
+            _stale_cleared(ctx, key)
+            stale = None
+        if value in wanted_set and stale is None:
             ctx.log.success(f"coordination service reports {key}={value}")
             return str(value)
         time.sleep(2.0)

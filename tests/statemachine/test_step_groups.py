@@ -199,3 +199,21 @@ def test_a_conditional_groups_steps_do_not_skip_optional_steps_outside_it():
 
     Runner(model, script, ctx, observer, sleep=sleep, clock=lambda: clock["now"]).run()
     assert performed == ["go", "finish"]
+
+
+def test_a_changed_stale_value_stays_accepted_in_later_waits(monkeypatch):
+    """Run 651 reused (2026-10-20): the previous run left target_outcome=partial; this run
+    went started -> partial. The first wait accepted; the group condition's own wait saw
+    only partial == stale and hung. The change must be remembered across calls."""
+    monkeypatch.setattr(peer.time, "sleep", lambda s: None)
+    coordination = FakeCoordination({"target_outcome": "partial"})
+    ctx = RunContext(role="source", run_id="r", session=None, app=object(), coordination=coordination, log=logger)
+    peer.snapshot_stale_value(ctx, "target_outcome")
+    coordination.values["target_outcome"] = "started"
+    with pytest.raises(TimeoutError):
+        peer.wait_for_state_value(ctx, "target_outcome", ["partial", "clean"], timeout=0.01)   # saw the change
+    coordination.values["target_outcome"] = "partial"
+    assert peer.wait_for_state_value(ctx, "target_outcome", ["partial", "clean"], timeout=1) == "partial"
+    holds, value = peer.resolve_condition(ctx, {"key": "target_outcome", "is": "partial",
+                                                "among": ["partial", "clean"], "timeout": 1})
+    assert (holds, value) == (True, "partial")
