@@ -299,11 +299,11 @@ flowchart TD
     Ready -->|"no"| AccountCheck{"Account-mismatch confirm<br/>showing? (only checked once)"}
     AccountCheck -->|"yes, not yet confirmed"| ClickAccounts["click Continue"] --> CloseAppsOuter
     AccountCheck -->|"no / already confirmed"| CloseAppsOuter{"'We need to close all<br/>other applications' showing?"}
-    CloseAppsOuter -->|"yes"| ClickCloseOuter["click Close Application"] --> Outer
+    CloseAppsOuter -->|"yes"| ClickCloseOuter["click Close applications"] --> Outer
     CloseAppsOuter -->|"no"| Outer
     Outer -.->|"screen_deadline exceeded"| FatalScreenTimeout(["raise TransferFlowError"])
 
-    Ready -->|"yes"| CloseAppsPre["while 'close other apps' showing:<br/>click Close Application"]
+    Ready -->|"yes"| CloseAppsPre["while 'close other apps' showing:<br/>click Close applications"]
     CloseAppsPre --> ClickMigrate["click 'Bring everything over for me'"]
     ClickMigrate --> Inner(["inner loop while time < progress_deadline"])
     Inner --> ME2["_raise_if_migration_error()"]
@@ -319,7 +319,7 @@ flowchart TD
     Browsers -->|"no"| Moving{"'We're moving your files<br/>and settings' showing? (0.5s)"}
     Moving -->|"yes"| SuccessStart(["return -- transfer confirmed started"])
     Moving -->|"no"| CloseAppsInner{"'close other apps' showing?"}
-    CloseAppsInner -->|"yes"| ClickCloseInner["click Close Application"] --> Inner
+    CloseAppsInner -->|"yes"| ClickCloseInner["click Close applications"] --> Inner
     CloseAppsInner -->|"no"| Reclick{"time since last click<br/>>= 3s (RECLICK_INTERVAL)?"}
     Reclick -->|"yes"| RecheckMoving{"re-check 'moving files'<br/>(0.3s, right before re-clicking)"}
     RecheckMoving -->|"showing"| SuccessStart
