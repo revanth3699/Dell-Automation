@@ -346,10 +346,12 @@ dialog that may interrupt them.
 5. **Watch for a UAC prompt** on the Target after the browser sign-in -- automation
    cannot see or click it; approve it by hand.
 6. **Validation**: `full_transfer` runs the PDF migration-report validator (see the
-   next section) as a step on the Target after each Download PDF; a missing file or a
-   registry mismatch fails the run, and the HTML comparison lands in
-   `validation/output/`. Any scenario can do the same with
-   `env: validate_migration_report`.
+   next section) as a step on the Target against every report the run produces: the
+   first transfer's report before the Retry click, the "(Retry - 1)" report after the
+   retry round's Download PDF, and the second migration's report after its Download PDF
+   (one report, checked once, on a clean run). A missing file or a registry mismatch
+   fails the run, and the HTML comparison lands in `validation/output/`. Any scenario
+   can do the same with `env: validate_migration_report`.
 7. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` (the app is
    then closed the way a user does, see below) or `SCENARIO FAILED: <reason> during step
    N [screen=... overlay=...]` (exit code 1; 2 for an invalid scenario file). The HTML
@@ -455,8 +457,8 @@ scenarios, and the network/region environment steps.
 ## PDF migration-report validation
 
 A standalone tool (`validation/`) that can also run as a scenario step
-(`env: validate_migration_report`; `full_transfer` runs it on the Target after each
-Download PDF and fails the run on a mismatch). Run it manually, ON the Target PC, any
+(`env: validate_migration_report`; `full_transfer` runs it on the Target against every
+report the run produces and fails the run on a mismatch). Run it manually, ON the Target PC, any
 time after a migration finishes. It cross-checks
 a Dell Migrate `MigrationReport-*.pdf`'s own claims (which files and settings
 categories it says it copied) against what's **actually** on this PC: files checked for
