@@ -175,7 +175,8 @@ class Runner:
             self._group_decisions[group] = holds
             verdict = "running its steps" if holds else "skipping its steps"
             self.log.info(f"group {group}: {when['key']}={value} -- {verdict}")
-            self._record("StateMachine", f"group {group}: {when['key']}={value} ({verdict})", "pass", 0.0)
+            self._record("StateMachine", f"group {group}: {when['key']}={value} ({verdict})", "pass", 0.0,
+                         screenshot=True)
         return self._group_decisions[group]
 
     def _rewind_index(self, observation: Observation | None, current: int) -> int | None:
