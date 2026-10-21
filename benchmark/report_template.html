@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Benchmark</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#6b7280; --line:#e4e7eb;
+    --blue:#4e79a7; --orange:#f28e2b; --green:#59a14f; --purple:#b07aa1;
+    --teal:#76b7b2; --red:#e15759; --grid:#eceef1; --accent:#4e79a7;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#15181c; --card:#1e2228; --ink:#e8eaed; --muted:#9aa3ad; --line:#2c323a; --grid:#262b32;
+  }}
+  :root[data-theme=dark]{--bg:#15181c;--card:#1e2228;--ink:#e8eaed;--muted:#9aa3ad;--line:#2c323a;--grid:#262b32;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 16px}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 18px;font-size:13px}
+  code{background:var(--grid);padding:1px 5px;border-radius:4px;font-size:13px}
+
+  /* episode selector, banners */
+  .episodes{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+  .episodes .lbl{color:var(--muted);font-size:12px;margin-right:4px}
+  .ep{background:transparent;border:1px solid var(--line);color:var(--muted);padding:5px 10px;border-radius:999px;font:inherit;font-size:12px;cursor:pointer}
+  .ep:hover{color:var(--ink)}
+  .ep.active{border-color:var(--accent);color:var(--accent);font-weight:600}
+  .banner{border-left:3px solid var(--orange);background:rgba(242,142,43,.08);padding:8px 12px;border-radius:0 8px 8px 0;margin:0 0 8px;font-size:13px}
+  .empty{color:var(--muted);padding:18px 4px;font-style:italic}
+
+  /* tabs */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+  .tab{background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 12px;border-radius:8px;font:inherit;font-size:13px;cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+
+  .panel{display:none}
+  .panel.on{display:block}
+  h2{font-size:17px;margin:0 0 10px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  canvas{max-height:300px}
+
+  /* explanation box */
+  .explain{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:16px}
+  .explain p{margin:6px 0}
+  .explain b{color:var(--ink)}
+
+  /* worded legend */
+  .legend2{list-style:none;margin:14px 0 0;padding:0;font-size:13px}
+  .legend2 li{display:flex;gap:9px;align-items:flex-start;padding:5px 0}
+  .legend2 .dot{width:12px;height:12px;border-radius:3px;flex:none;margin-top:3px}
+  .legend2 b{color:var(--ink)}
+  .legend2 span.t{color:var(--muted)}
+
+  /* overview tiles, busy bars, tables */
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+  .tile .l{color:var(--muted);font-size:12px}.tile .v{font-size:24px;font-weight:700;margin-top:3px}.tile .d{font-size:12px;color:var(--muted);margin-top:2px}
+  .callout{border-left:3px solid var(--orange);background:rgba(242,142,43,.08);padding:12px 14px;border-radius:0 8px 8px 0;margin-top:16px}
+  .busy{margin-top:16px}
+  .busy .row{display:grid;grid-template-columns:110px 1fr 230px;gap:10px;align-items:center;padding:4px 0;font-size:13px}
+  .busy .bar{height:10px;background:var(--grid);border-radius:5px;overflow:hidden}
+  .busy .bar i{display:block;height:100%;background:var(--blue)}
+  .busy .m{color:var(--muted);font-size:12px}
+  @media (max-width:560px){.busy .row{grid-template-columns:90px 1fr}.busy .m{grid-column:1/-1}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600} td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Migration Performance Benchmark</h1>
+  <p class="sub" id="sub"></p>
+  <div id="banners"></div>
+  <div class="episodes" id="episodes"><span class="lbl">Episode</span></div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="thr">Throughput &amp; ETA</button>
+    <button class="tab" data-tab="cpu">CPU usage</button>
+    <button class="tab" data-tab="mem">Memory</button>
+    <button class="tab" data-tab="disk">Disk I/O</button>
+    <button class="tab" data-tab="net">Network</button>
+    <button class="tab" data-tab="phase">Phase durations</button>
+    <button class="tab" data-tab="drive">Data per drive</button>
+    <button class="tab" data-tab="files">File outcomes</button>
+    <button class="tab" data-tab="skip">Skip reasons</button>
+    <button class="tab" data-tab="knobs">Transfer settings</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <section class="panel" data-tab="overview">
+    <h2>Overview</h2>
+    <div class="explain"><p>The headline results for the selected episode (or the whole run). A run can contain up to three migrations: the primary one, an in-app Retry round, and a Try Again migration. Each tab after this one explains a single graph in detail.</p></div>
+    <div class="grid" id="tiles"></div>
+    <div class="card busy" id="busy"></div>
+    <div class="callout" id="verdict"></div>
+  </section>
+
+  <!-- THROUGHPUT -->
+  <section class="panel" data-tab="thr">
+    <h2>Transfer throughput &amp; ETA</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how fast data is being copied from the old PC to the new PC, plus the copy engine's own estimate of time remaining.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = copy speed in MB/s. Right = ETA in minutes.</p>
+      <p><b>How to read:</b> a higher blue line means faster copying. Dips show moments the transfer slowed down. The red ETA line should slope down toward zero; if it climbs, the transfer is struggling.</p>
+    </div>
+    <div class="empty" id="e_thr" hidden></div>
+    <div class="card" id="k_thr"><canvas id="c_thr"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Instant speed</b> <span class="t">- how fast data is moving (rclone progress line, every 5 seconds).</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Average speed</b> <span class="t">- the running average of the instant speed.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>ETA (minutes left)</b> <span class="t">- the engine's estimate; read it on the right-hand axis.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- CPU -->
+  <section class="panel" data-tab="cpu">
+    <h2>CPU usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much of the whole machine's processor each migration program is using, tick by tick.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = processor used, as a percentage of the whole PC (0-100%).</p>
+      <p><b>How to read:</b> a line sitting near 100% means the CPU is the bottleneck. "Everything" usually spikes at the start (while it scans files) then drops off.</p>
+    </div>
+    <div class="empty" id="e_cpu" hidden></div>
+    <div class="card" id="k_cpu"><canvas id="c_cpu"></canvas></div>
+    <ul class="legend2" id="leg_proc"></ul>
+  </section>
+
+  <!-- MEMORY -->
+  <section class="panel" data-tab="mem">
+    <h2>Memory usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much RAM (resident memory) each program is holding.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = memory in megabytes (MB).</p>
+      <p><b>How to read:</b> stable or gently rising-and-falling lines are healthy. A line that keeps climbing and never comes back down can signal a memory leak.</p>
+    </div>
+    <div class="empty" id="e_mem" hidden></div>
+    <div class="card" id="k_mem"><canvas id="c_mem"></canvas></div>
+    <ul class="legend2" id="leg_proc2"></ul>
+  </section>
+
+  <!-- DISK -->
+  <section class="panel" data-tab="disk">
+    <h2>Disk I/O</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data each program reads from and writes to disk each second, plus the system-wide total.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = disk throughput in MB/s (read + write).</p>
+      <p><b>How to read:</b> if the system line is high and flat (maxed out) while the Throughput graph is low, the disk is the bottleneck.</p>
+    </div>
+    <div class="empty" id="e_disk" hidden></div>
+    <div class="card" id="k_disk"><canvas id="c_disk"></canvas></div>
+    <ul class="legend2" id="leg_disk"></ul>
+  </section>
+
+  <!-- NETWORK -->
+  <section class="panel" data-tab="net">
+    <h2>Network throughput</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data is received and sent over the network (system-wide) each second.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = network throughput in MB/s.</p>
+      <p><b>How to read:</b> compare with the Disk I/O tab. Network low while disk is maxed means the disk is the limit; network maxed while disk is not means the connection is.</p>
+    </div>
+    <div class="empty" id="e_net" hidden></div>
+    <div class="card" id="k_net"><canvas id="c_net"></canvas></div>
+    <ul class="legend2" id="leg_net"></ul>
+  </section>
+
+  <!-- PHASES -->
+  <section class="panel" data-tab="phase">
+    <h2>Phase durations</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how long each stage of the migration took, from the engine's own audit timestamps.</p>
+      <p><b>Axes:</b> bottom = duration in seconds. Each row (top to bottom) is one stage in the order it ran.</p>
+      <p><b>How to read:</b> the longest bar is where most of the time went. Time the audit trail does not cover is shown in grey as an estimate.</p>
+    </div>
+    <div class="empty" id="e_phase" hidden></div>
+    <div class="card" id="k_phase"><canvas id="c_phase" style="max-height:320px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--orange)"></span><div><b>File transfer</b> <span class="t">- the actual file copy; usually the dominant stage.</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Measured stage</b> <span class="t">- duration taken directly from the app's own timestamps.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Estimated stage</b> <span class="t">- not timed by the app, so the value is approximate.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- DRIVE -->
+  <section class="panel" data-tab="drive">
+    <h2>Data per drive</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data came from each drive on the old PC, split by what happened to it.</p>
+      <p><b>Axes:</b> bottom = one bar per drive. Left = data in gigabytes (GB). Each bar is stacked into segments.</p>
+      <p><b>How to read:</b> taller bar = more data on that drive; the segments show copied versus already present.</p>
+    </div>
+    <div class="empty" id="e_drive" hidden></div>
+    <div class="card" id="k_drive"><canvas id="c_drive"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Copied</b> <span class="t">- new data transferred to the new PC.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- data already on the new PC, so it was skipped.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Remaining / skipped</b> <span class="t">- data not copied (deselected or failed).</span></div></li>
+    </ul>
+  </section>
+
+  <!-- FILES -->
+  <section class="panel" data-tab="files">
+    <h2>File outcomes</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> the number of files by what happened to each one (count, not size).</p>
+      <p><b>How to read:</b> each slice of the ring is one outcome. A large red slice means many files could not be copied; see the Skip reasons tab.</p>
+    </div>
+    <div class="empty" id="e_files" hidden></div>
+    <div class="card" id="k_files"><canvas id="c_files" style="max-height:260px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--green)"></span><div><b>Copied</b> <span class="t">- successfully transferred.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- identical file already on the new PC.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Skipped</b> <span class="t">- could not be copied.</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Backed up</b> <span class="t">- an existing new-PC file was moved aside before copying.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- SKIP -->
+  <section class="panel" data-tab="skip">
+    <h2>Skip reasons</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> for skipped files, the reason, grouped into categories.</p>
+      <p><b>Axes:</b> bottom = number of files. Each row is one reason, largest at the top.</p>
+      <p><b>How to read:</b> the top bar is the biggest cause of skipped files.</p>
+    </div>
+    <div class="empty" id="e_skip" hidden></div>
+    <div class="card" id="k_skip"><canvas id="c_skip" style="max-height:240px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Files skipped</b> <span class="t">- count of files that could not be migrated, per reason.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- KNOBS -->
+  <section class="panel" data-tab="knobs">
+    <h2>Transfer settings used</h2>
+    <div class="explain">
+      <p><b>What it shows:</b> the settings the copy engine ran with. They control how files are copied and are the knobs to change to speed things up.</p>
+      <p><b>Where they live:</b> the engine's deployed <code>.exe.config</code>, read by <code>DellDataManager</code>.</p>
+    </div>
+    <div class="empty" id="knob_note"></div>
+    <div class="card" style="padding:4px 4px 0">
+      <table><thead><tr><th>Setting (rclone flag)</th><th>What it does</th><th class="n">This run</th></tr></thead><tbody id="t_knobs"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<script id="bench-data">/*__BENCHMARK_DATA__*/</script>
+<script>
+const B = window.__BENCHMARK__ || {rollup:null, episodes:[], banners:[], tuning:{rows:[]}, sub:''};
+const views = B.rollup ? [B.rollup].concat(B.episodes) : [];
+let V = views[0] || null, charts = [], made = {}, activeTab = 'overview';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const cs=getComputedStyle(document.documentElement), C=n=>cs.getPropertyValue(n).trim();
+const PAL=['--blue','--orange','--green','--purple','--teal','--red'];
+const procColor=i=>C(PAL[i%PAL.length]);
+if(window.Chart){Chart.defaults.color=C('--muted'); Chart.defaults.borderColor=C('--grid'); Chart.defaults.font.family='system-ui'; Chart.defaults.maintainAspectRatio=false;}
+
+function wordLegend(el,list){document.getElementById(el).innerHTML=list.map(p=>
+  `<li><span class="dot" style="background:${p[1]}"></span><div><b>${esc(p[2])}</b> <span class="t">- ${esc(p[3])}</span></div></li>`).join('');}
+const procLegend=()=>V.procs.map((p,i)=>[p.name,procColor(i),p.label,p.desc]);
+
+const d=(label,data,color,fill=false,dash=false)=>({label,data,borderColor:color,backgroundColor:fill?color+'22':color,fill,spanGaps:true,borderDash:dash?[5,4]:[]});
+function mk(id,cfg){charts.push(new Chart(document.getElementById(id),cfg));}
+const line=(id,ds,o={})=>mk(id,{type:'line',data:{labels:V.labels,datasets:ds},options:{responsive:true,interaction:{mode:'index',intersect:false},elements:{point:{radius:0},line:{tension:.3,borderWidth:2}},plugins:{legend:{display:false}},scales:Object.assign({x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:C('--grid')}}},o)}});
+const xAxis={x:{grid:{display:false},title:{display:true,text:'minutes from start of window'}}};
+const procSets=group=>V.procs.filter(p=>group.procs[p.name]).map(p=>d(p.label,group.procs[p.name],procColor(V.procs.indexOf(p))));
+
+// shows the panel's message and returns true when there is nothing to draw
+function blocked(tab){
+  const msg=V.empty[tab], e=document.getElementById('e_'+tab), k=document.getElementById('k_'+tab);
+  e.hidden=!msg; e.textContent=msg||''; k.style.display=msg?'none':'';
+  return !!msg;
+}
+const inits = {
+  thr:()=>{ if(blocked('thr'))return; line('c_thr',[d('Instant',V.thr.instant,C('--blue'),true),d('Avg',V.thr.avg,C('--teal')),Object.assign(d('ETA',V.thr.eta,C('--red')),{yAxisID:'y1'})],Object.assign({y:{title:{display:true,text:'MB/s'}},y1:{position:'right',beginAtZero:true,grid:{display:false},title:{display:true,text:'min'}}},xAxis)); },
+  cpu:()=>{ if(blocked('cpu'))return; line('c_cpu',procSets(V.res.cpu).concat([d('System',V.res.cpu.system,C('--muted'),false,true)]),Object.assign({y:{max:100,title:{display:true,text:'% of whole machine'}}},xAxis)); wordLegend('leg_proc',procLegend().concat([['system',C('--muted'),'System total','all processes on the PC (dashed).']])); },
+  mem:()=>{ if(blocked('mem'))return; line('c_mem',procSets(V.res.mem),Object.assign({y:{title:{display:true,text:'MB'}}},xAxis)); wordLegend('leg_proc2',procLegend()); },
+  disk:()=>{ if(blocked('disk'))return; line('c_disk',procSets(V.res.disk).concat([d('System',V.res.disk.system,C('--muted'),false,true)]),Object.assign({y:{title:{display:true,text:'MB/s (read + write)'}}},xAxis)); wordLegend('leg_disk',procLegend().concat([['system',C('--muted'),'System total','all disk activity on the PC (dashed).']])); },
+  net:()=>{ if(blocked('net'))return; line('c_net',[d('Received',V.res.net.recv,C('--blue'),true),d('Sent',V.res.net.sent,C('--orange'))],Object.assign({y:{title:{display:true,text:'MB/s'}}},xAxis)); wordLegend('leg_net',[['recv',C('--blue'),'Received','data arriving over the network link (system-wide; Windows has no per-process network counter).'],['sent',C('--orange'),'Sent','data leaving the PC.']]); },
+  phase:()=>{ if(blocked('phase'))return; mk('c_phase',{type:'bar',data:{labels:V.phases.map(p=>p[0]),datasets:[{data:V.phases.map(p=>p[1]),backgroundColor:V.phases.map(p=>p[2]==='x'?C('--orange'):p[2]==='e'?C('--grid'):C('--blue'))}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' s'}}},scales:{x:{title:{display:true,text:'seconds'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}}); },
+  drive:()=>{ if(blocked('drive'))return; mk('c_drive',{type:'bar',data:{labels:V.drives.labels,datasets:[{label:'Copied',data:V.drives.copied,backgroundColor:C('--blue')},{label:'Already existed',data:V.drives.existed,backgroundColor:C('--teal')},{label:'Remaining',data:V.drives.rem,backgroundColor:C('--grid')}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw+' GB'}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,title:{display:true,text:'GB'},grid:{color:C('--grid')}}}}}); },
+  files:()=>{ if(blocked('files'))return; mk('c_files',{type:'doughnut',data:{labels:V.files.labels,datasets:[{data:V.files.values,backgroundColor:[C('--green'),C('--teal'),C('--red'),C('--blue')],borderWidth:0}]},options:{cutout:'60%',plugins:{legend:{display:false}}}}); },
+  skip:()=>{ if(blocked('skip'))return; mk('c_skip',{type:'bar',data:{labels:V.skips.labels,datasets:[{data:V.skips.v,backgroundColor:C('--red')}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' files'}}},scales:{x:{title:{display:true,text:'files'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}}); }
+};
+
+function renderOverview(){
+  document.getElementById('tiles').innerHTML=V.tiles.map(t=>`<div class="card tile"><div class="l">${esc(t.l)}</div><div class="v">${esc(t.v)}</div><div class="d">${esc(t.d)}</div></div>`).join('');
+  document.getElementById('busy').innerHTML=V.busy.length?'<b>Resource busy % during file transfer</b>'+V.busy.map(b=>`<div class="row"><span>${esc(b.label)}</span><div class="bar"><i style="width:${b.avg}%"></i></div><span class="m">avg ${b.avg}% / peak ${b.peak}% - ${esc(b.mode)}</span></div>`).join(''):'<span class="m">No resource profile for this window.</span>';
+  const v=V.verdict; document.getElementById('verdict').innerHTML=v?`<strong>Bottleneck:</strong> ${esc(v.text)}`:'';
+}
+function renderKnobs(){
+  const t=B.tuning||{rows:[]};
+  document.getElementById('knob_note').textContent=t.from_defaults?'Engine config not read: values below are defaults, not confirmed for this run.':'Read from '+t.source;
+  document.getElementById('t_knobs').innerHTML=t.rows.map(k=>`<tr><td><code>${esc(k[0])}</code></td><td>${esc(k[1])}${k[3]?'<br><span style="color:var(--muted);font-size:12px">'+esc(k[3])+'</span>':''}</td><td class="n">${esc(k[2])}</td></tr>`).join('');
+}
+
+function show(id){
+  activeTab=id;
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.dataset.tab===id));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+  if(V && inits[id] && !made[id] && window.Chart){ inits[id](); made[id]=true; }
+}
+function selectView(i){
+  V=views[i]; charts.forEach(c=>c.destroy()); charts=[]; made={};
+  document.querySelectorAll('.ep').forEach((b,j)=>b.classList.toggle('active',j===i));
+  renderOverview(); show(activeTab);
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>show(t.dataset.tab)));
+document.getElementById('sub').textContent=B.sub||'';
+document.getElementById('banners').innerHTML=(B.banners||[]).map(b=>`<div class="banner">${esc(b)}</div>`).join('');
+const sel=document.getElementById('episodes');
+views.forEach((v,i)=>{const b=document.createElement('button');b.className='ep';b.textContent=i===0?'Whole run':v.label;b.addEventListener('click',()=>selectView(i));sel.appendChild(b);});
+renderKnobs();
+if(V){ selectView(0); } else { show('overview'); }
+</script>
+</body>
+</html>
