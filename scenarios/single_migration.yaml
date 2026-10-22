@@ -1,0 +1,110 @@
+name: single_migration
+description: >
+  Sign in, pair, transfer everything once, then finish straight through to Migration Done and
+  Back to Home -- no in-app Retry round and no second (Try Again) migration, regardless of
+  whether the transfer outcome comes back clean or partial. A trimmed-down full_transfer.yaml:
+  that scenario's retry/try-again branches can produce two or three MigrationIds in one run,
+  which makes it hard to tell whether a benchmark/ report is correctly scoped to "this run" or
+  is bleeding in a neighboring migration. This scenario exists so a benchmark run can be verified
+  against exactly one, unambiguous CDM.db migration_id.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    setup: [start_benchmark]
+    teardown: [stop_benchmark_report]
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+        note: skipped when a cached login takes the app straight to checkPrerequisites; UAC must be approved by hand
+      - at: connectOldPc
+        do: publish
+        args: {value: connectOldPc}
+        optional: true
+        timeout: 900
+        note: skipped when the Source is already searching and the app jumps straight to enterCode
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
+        timeout: 900
+        note: waits for the Source script to publish the code
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: view_details
+      - at: [complete, skippedFiles]
+        timeout: 120
+        note: >
+          no in-app Retry round by design -- whatever the outcome (nothing skipped, or some
+          files skipped), it is reported as final, keeping this run to exactly one migration_id
+      - at: complete
+        do: open_pdf
+        optional: true
+      - at: complete
+        do: back_to_summary
+        optional: true
+      - at: resultsSummary
+        do: finish
+        optional: true
+      - at: skippedFiles
+        do: go_to_summary
+        optional: true
+        note: skipped items are reported, not retried -- goes straight to Migration Done
+      - at: migrationDone
+        do: download_pdf
+      - at: migrationDone
+        env: validate_migration_report
+        note: validation/validate_migration.py against the newest MigrationReport PDF -- fails the run on a mismatch
+      - at: migrationDone
+        do: tell_us_how_we_did
+      - at: feedbackModal
+        do: submit
+        args: {rating: 5, comment: Automated single_migration run}
+      - at: migrationDone
+        do: erase_old_pc
+      - at: learnAboutErase
+        do: back_to_home
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    steps:
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: announce
+        timeout: 7200
+        note: any ending -- no Try Again round here by design, regardless of a partial outcome
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: close_app
+        done: true
