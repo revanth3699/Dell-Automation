@@ -4,7 +4,7 @@ Sample / Episode factories."""
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from benchmark.models import Episode, PhaseSpan, Sample, Segment, ThroughputPoint
@@ -37,7 +37,7 @@ def iso_utc(dt: datetime, sep: str = " ") -> str:
     parse_ts's assume_utc docstring). dt.astimezone(timezone.utc) treats a naive dt as THIS
     machine's own local time, so parsing the result back with assume_utc=True reproduces dt
     exactly, regardless of which timezone the test machine runs in."""
-    return iso(dt.astimezone(timezone.utc).replace(tzinfo=None), sep)
+    return iso(dt.astimezone(UTC).replace(tzinfo=None), sep)
 
 
 def new_db(path: Path) -> sqlite3.Connection:

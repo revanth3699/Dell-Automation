@@ -11,7 +11,7 @@ from benchmark.tests.helpers import T0, make_episode, proc_sample, steady_sample
 
 
 def payload_of(html: str) -> dict:
-    m = re.search(r"window\.__BENCHMARK__ = (\{.*?\});\n?</script>", html, re.S)
+    m = re.search(r"window\.__BENCHMARK__ = (\{.*?\});\n?</script>", html, re.DOTALL)
     assert m, "payload not found"
     return json.loads(m.group(1).replace("<\\/", "</"))
 
@@ -155,6 +155,21 @@ def test_drive_remaining_is_not_reduced_by_already_existing():
     assert v["drives"]["copied"] == [10.0]
     assert v["drives"]["existed"] == [200.0]
     assert v["drives"]["rem"] == [5.0]                    # 15 - 10, NOT clamped to 0 by the 200 GB existing
+
+
+def test_reconciled_run_seconds():
+    # no runTime at all -- always the window
+    assert report.reconciled_run_seconds(None, 2242.0) == 2242.0
+    assert report.reconciled_run_seconds("garbage", 2242.0) == 2242.0
+    # runTime agrees closely (within 10%/60s tolerance) -- use it
+    assert report.reconciled_run_seconds("00:37:25", 2242.0) == 2245.0
+    # runTime wildly disagrees (confirmed live via a 40GB-scale stress test, 2026-10-22: a real
+    # migration with a parseable "02:14:00" runTime against a real 37-minute window) -- the tile
+    # must not show a value that contradicts its own window description, so fall back to it
+    assert report.reconciled_run_seconds("02:14:00", 2242.0) == 2242.0
+    # a short window: 60s floor still applies even though 10% of it is tiny
+    assert report.reconciled_run_seconds("00:00:50", 30.0) == 50.0
+    assert report.reconciled_run_seconds("00:05:00", 30.0) == 30.0
 
 
 def test_fmt_duration():

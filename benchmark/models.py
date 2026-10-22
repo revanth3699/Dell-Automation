@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -26,7 +26,7 @@ class Sample:
     net_recv_mbps: float | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], parse_ts) -> "Sample | None":
+    def from_dict(cls, data: dict[str, Any], parse_ts) -> Sample | None:
         ts = parse_ts(data.get("ts_wall"))
         if ts is None or data.get("scope") not in ("process", "system"):
             return None

@@ -168,10 +168,10 @@ def test_loop_duration_and_should_stop_and_bad_tick(tmp_path):
         raise RuntimeError("counter failure")
 
     path = rs.run_sampler(tmp_path, "target", "r2", 1.0, None, ["x"], duration=2.5, clock=lambda: clock["t"],
-                          sleep=sleep, now=lambda: WALL, process_iter=lambda: [], system_counters=boom, ncpu=1)
+                          sleep=sleep, now=lambda: WALL, process_iter=list, system_counters=boom, ncpu=1)
     assert len(Path(path).read_text().splitlines()) == 1          # meta only; ticks failed but did not crash
     path = rs.run_sampler(tmp_path, "source", "r3", 1.0, None, ["x"], should_stop=lambda: True,
-                          process_iter=lambda: [], ncpu=1)
+                          process_iter=list, ncpu=1)
     assert len(Path(path).read_text().splitlines()) == 1
 
 

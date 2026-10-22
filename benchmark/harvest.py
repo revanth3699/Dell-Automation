@@ -27,8 +27,17 @@ from typing import Any
 from loguru import logger
 
 from benchmark import paths
-from benchmark.models import (Episode, FileCounts, PhaseSpan, RunReport, Sample, Segment,
-                              ThroughputPoint, Tuning, TuningRow)
+from benchmark.models import (
+    Episode,
+    FileCounts,
+    PhaseSpan,
+    RunReport,
+    Sample,
+    Segment,
+    ThroughputPoint,
+    Tuning,
+    TuningRow,
+)
 
 RCLONE_MARKER = ", <|ETA|> "
 MIGRATION_STARTED = "MigrationStarted"

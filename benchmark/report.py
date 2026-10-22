@@ -31,10 +31,27 @@ PROC_INFO = {
 PROC_ORDER = ["DellDataManager", "DellFileTransferUtil", "MyDellExperience", "Everything"]
 
 
+def reconciled_run_seconds(run_time: str | None, window_seconds: float) -> float:
+    """MigrationStatus.runTime, parsed, but ONLY when it roughly agrees with the episode's own
+    [start, end] window -- otherwise the "Total migration time" tile's headline value could
+    contradict the window shown right below it in the same tile's description. Confirmed via a
+    synthetic 40GB-scale stress test (2026-10-22): every real runTime seen this session has been
+    an unparseable bare integer (no colons), so this path has never actually fired against real
+    data -- a validly-formatted but wildly different runTime (e.g. "02:14:00" against a real
+    37-minute window) rendered as a visibly self-contradictory tile. Tolerance is the larger of
+    60s or 10% of the window, to allow for rounding without masking a genuine mismatch."""
+    parsed = parse_runtime(run_time)
+    if parsed is None:
+        return window_seconds
+    if window_seconds > 0 and abs(parsed - window_seconds) <= max(60.0, 0.1 * window_seconds):
+        return parsed
+    return window_seconds
+
+
 def fmt_duration(seconds: float | None) -> str:
     if seconds is None:
         return "n/a"
-    s = int(round(seconds))
+    s = round(seconds)
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
     return f"{h}h {m:02d}m {sec:02d}s" if h else (f"{m}m {sec:02d}s" if m else f"{sec}s")
@@ -172,7 +189,7 @@ def build_view(ep: Episode, report: RunReport) -> dict[str, Any]:
 
     # overview
     prof = ep.profile
-    run_seconds = parse_runtime(ep.run_time) or ep.seconds
+    run_seconds = reconciled_run_seconds(ep.run_time, ep.seconds)
     peak_speed = max((v for _, v in inst), default=None)
     avg_speed = prof.effective_mbps if prof and prof.effective_mbps else None
     tiles = [

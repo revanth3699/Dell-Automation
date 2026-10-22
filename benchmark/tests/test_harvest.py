@@ -66,7 +66,7 @@ def test_retry_same_id_two_segments(tmp_path):
     windows = harvest.expand_segments(eps)
     assert [(w.index, w.kind) for w in windows] == [(1, "primary"), (2, "retry")]
     assert windows[1].label == "Episode 2 - In-app Retry"
-    retry_transfer = [p for p in windows[1].phases if p.is_transfer][0]
+    retry_transfer = next(p for p in windows[1].phases if p.is_transfer)
     assert retry_transfer.seconds == 90
 
 
@@ -166,7 +166,7 @@ def test_missing_table_gives_empty(tmp_path):
 def test_parse_rclone_log_series():
     pts = harvest.parse_rclone_log(h.RCLONE_LOG.splitlines())
     assert len(pts) == 4                                  # malformed + marker-less lines skipped
-    first, second, third, last = pts
+    first, _second, third, last = pts
     assert (first.transferred, first.total, first.percent) == (100, 1000, 10.0)
     assert first.speed_bps == 52428800.5 and first.eta_s == 90 and (first.xfr_n, first.xfr_m) == (1, 10)
     assert first.ts == datetime(2026, 10, 22, 12, 1, 25) and first.errors == 0

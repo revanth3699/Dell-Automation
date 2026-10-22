@@ -48,7 +48,7 @@ def compute_rate(prev_bytes: float | None, cur_bytes: float, elapsed_s: float) -
 
 def _canonical(name: str) -> str:
     name = name.lower()
-    return name[:-4] if name.endswith(".exe") else name
+    return name.removesuffix(".exe")
 
 
 def _proc_name(proc: Any) -> str | None:

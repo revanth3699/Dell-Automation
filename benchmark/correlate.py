@@ -11,8 +11,16 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime
 
-from benchmark.models import (Episode, FileCounts, PhaseSpan, ResourceBusy, ResourceProfile,
-                              RunReport, Sample, Verdict)
+from benchmark.models import (
+    Episode,
+    FileCounts,
+    PhaseSpan,
+    ResourceBusy,
+    ResourceProfile,
+    RunReport,
+    Sample,
+    Verdict,
+)
 
 MIN_SAMPLES = 3            # system samples needed in the transfer window
 SUSTAINED_BUSY_PCT = 70.0  # a resource must average at least this busy to be called the bottleneck
@@ -85,10 +93,14 @@ def resource_profile(episode: Episode, *, link_mbps: float | None = None, disk_m
     for key, values in series.items():
         ceiling, mode, label = ceilings[key]
         avg, peak = sum(values) / len(values), max(values)
-        pct = (lambda v: min(100.0, v / ceiling * 100.0) if ceiling > 0 else 0.0)
-        busy[key] = ResourceBusy(round(pct(avg), 1), round(pct(peak), 1), round(avg, 2), round(peak, 2),
+        busy[key] = ResourceBusy(round(_pct(avg, ceiling), 1), round(_pct(peak, ceiling), 1),
+                                 round(avg, 2), round(peak, 2),
                                  "%" if key == "cpu" else "MB/s", mode, ceiling, label)
     return ResourceProfile(True, "", count, seconds, busy, effective)
+
+
+def _pct(value: float, ceiling: float) -> float:
+    return min(100.0, value / ceiling * 100.0) if ceiling > 0 else 0.0
 
 
 def bottleneck_verdict(profile: ResourceProfile) -> Verdict:
