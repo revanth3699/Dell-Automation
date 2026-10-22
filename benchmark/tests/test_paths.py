@@ -45,6 +45,22 @@ def test_rclone_log_override_missing_and_search(tmp_path, monkeypatch):
     assert paths.find_rclone_log({}) is None
 
 
+def test_find_rclone_logs_returns_every_rotated_file(tmp_path, monkeypatch):
+    """Confirmed live (2026-10-22): a run's real transfer-log lines can be split across rotated
+    files (.log, .log.1, .log.2, ...) with the single newest holding none of them -- find_rclone_logs
+    must return all of them, not just the one find_rclone_log would pick."""
+    a, b, c = tmp_path / "FileTransfer1.log.2", tmp_path / "FileTransfer1.log.1", tmp_path / "FileTransfer1.log"
+    for p, age in ((a, 200), (b, 100), (c, 0)):
+        p.write_text(p.name)
+        os.utime(p, (time.time() - age, time.time() - age))
+    monkeypatch.setattr(paths, "DEFAULT_LOG_DIRS", [tmp_path])
+    assert paths.find_rclone_logs({}) == [a, b, c]           # oldest first
+    assert paths.find_rclone_logs({"DDA_RCLONE_LOG_PATH": str(b)}) == [b]   # override still pins one file
+    assert paths.find_rclone_logs({"DDA_RCLONE_LOG_PATH": str(tmp_path / "none.log")}) == []
+    monkeypatch.setattr(paths, "DEFAULT_LOG_DIRS", [tmp_path / "missing"])
+    assert paths.find_rclone_logs({}) == []
+
+
 def test_engine_config(tmp_path, monkeypatch):
     cfg = tmp_path / "e.config"
     cfg.write_text("<x/>")
@@ -74,6 +90,7 @@ def test_access_denied_paths_do_not_raise(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DEFAULT_CDM_DB", tmp_path / "CDM.db")
 
     assert paths.find_rclone_log({}) is None          # no raise
+    assert paths.find_rclone_logs({}) == []           # no raise
     assert paths.find_engine_config({}) is None        # no raise
     with pytest.raises(paths.CdmDbNotFound):           # treated as "not found", not a crash
         paths.find_cdm_db({})

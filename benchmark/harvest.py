@@ -32,6 +32,7 @@ from benchmark.models import (Episode, FileCounts, PhaseSpan, RunReport, Sample,
 
 RCLONE_MARKER = ", <|ETA|> "
 MIGRATION_STARTED = "MigrationStarted"
+_DOTNET_MIN_DATETIME = datetime(1, 1, 1)  # .NET's DateTime.MinValue, written as "0001-01-01 00:00:00"
 
 
 class CdmDbError(Exception):
@@ -43,10 +44,19 @@ class CdmDbError(Exception):
 _FRAC = re.compile(r"(\.\d{6})\d+")
 
 
-def parse_ts(value: Any) -> datetime | None:
+def parse_ts(value: Any, *, assume_utc: bool = False) -> datetime | None:
     """Parse a CDM.db / JSONL timestamp into a naive local datetime. Accepts 'T' or space
     separators, up to 7 fractional digits (EF/.NET ticks) and a trailing Z/offset (converted
-    to local time). Returns None for anything unparseable."""
+    to local time). Returns None for anything unparseable.
+
+    assume_utc: treat a string with NO trailing Z/offset as UTC anyway, instead of already-local.
+    Needed specifically for MigrationStatus.timeCreated and MigrationStatusAudit.timeCreated:
+    confirmed live (2026-10-22) by cross-referencing 4 separate benchmark runs against CDM.db --
+    those two columns store a UTC moment with no timezone marker at all, while
+    MigrationStartTime/MigrationEndTime are naive but already local, and timeUpdated is UTC WITH
+    an explicit trailing Z. Applying this blindly to every timestamp would wrongly re-shift the
+    columns that are already correct (and the sampler's own already-local ts_wall) -- it must stay
+    opt-in, per column, not a global default."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -57,6 +67,8 @@ def parse_ts(value: Any) -> datetime | None:
     text = _FRAC.sub(r"\1", text)
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
+    elif assume_utc:
+        text += "+00:00"
     try:
         dt = datetime.fromisoformat(text)
     except ValueError:
@@ -147,7 +159,12 @@ def _rows(db_path: Path, sql: str, params: tuple = (), *, retries: int = 5, dela
 PHASE_DEFS: list[tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...]]] = [
     # name, start statuses/prefixes, end statuses/prefixes (last match wins), fallback ends
     ("Compatibility", ("LocaleCompatibility", "Compatibility"), ("LocaleCompatibility", "Compatibility"), ()),
-    ("Pre-check / migration info", ("MigrationInfo",), ("MigrationInfo",), ()),
+    # Named "Migration info", not "Pre-check / migration info" -- it only matches MigrationInfo*
+    # prefixes. PreCheck*/Pairing* statuses match no phase at all and fall into "Unmeasured /
+    # other" (confirmed live 2026-10-22: that bucket is consistently the largest segment in every
+    # phase chart checked, partly because of this). The old name implied PreCheck coverage that
+    # was never actually there.
+    ("Migration info", ("MigrationInfo",), ("MigrationInfo",), ()),
     ("Time estimate", ("MigrationEstimatedTime",), ("MigrationEstimatedTime",), ()),
     ("Settings migration", ("SettingMigrationStarted",), ("SettingMigrationEnded",), ()),
     ("File transfer", ("FileMigrationStarted",), ("FileCopyCompleted",), ("FileMigrationEnded",)),
@@ -188,7 +205,7 @@ def read_episodes(db_path: Path) -> list[Episode]:
                                 "ORDER BY timeCreated, id")
     audits: dict[int, list[tuple[str, datetime]]] = {}
     for r in audit_rows:
-        ts = parse_ts(r["timeCreated"])
+        ts = parse_ts(r["timeCreated"], assume_utc=True)
         if ts is not None:
             audits.setdefault(int(r["migrationId"]), []).append((str(r["status"]), ts))
 
@@ -200,9 +217,27 @@ def read_episodes(db_path: Path) -> list[Episode]:
     episodes: list[Episode] = []
     for mid in sorted(set(statuses) | set(audits)):
         row, trail = statuses.get(mid), audits.get(mid, [])
+        if not trail and parse_ts(col(row, "MigrationStartTime")) is None \
+                and parse_ts(col(row, "MigrationEndTime")) is None:
+            updated = parse_ts(col(row, "timeUpdated"))
+            if updated is None or updated == _DOTNET_MIN_DATETIME:
+                continue  # a bare stub row the app created and abandoned -- no real migration ever
+                          # happened under this id. Confirmed live (2026-10-22): the real CDM.db
+                          # creates one of these (migrationState 'Init', zero audit rows, no
+                          # start/end, timeUpdated left at .NET's DateTime.MinValue) right before
+                          # the actual migration gets a fresh id -- keeping it around as an
+                          # "episode" pushed the real, only migration into the "Try Again" label
+                          # purely by list position, even though nothing was ever retried.
+        # MigrationStartTime/MigrationEndTime are naive-but-already-local; the audit trail's own
+        # timestamps are naive-but-actually-UTC (parsed above with assume_utc=True, so they're
+        # correctly in local time here too) -- once both sides are parsed correctly they agree
+        # within about a minute of each other, so max()/min() across both is a safe way to pick
+        # whichever signal is most complete. (An earlier version of this trusted the trail alone
+        # because the two looked ~5.5h apart -- that was this exact timezone bug, not corruption;
+        # see parse_ts's assume_utc docstring.)
         starts = [t for t in (parse_ts(col(row, "MigrationStartTime")), trail[0][1] if trail else None) if t]
         ends = [t for t in (parse_ts(col(row, "MigrationEndTime")), trail[-1][1] if trail else None) if t]
-        starts = starts or [t for t in [parse_ts(col(row, "timeCreated"))] if t]
+        starts = starts or [t for t in [parse_ts(col(row, "timeCreated"), assume_utc=True)] if t]
         ends = ends or [t for t in [parse_ts(col(row, "timeUpdated"))] if t]
         if not starts:
             continue
@@ -221,6 +256,29 @@ def read_episodes(db_path: Path) -> list[Episode]:
             segments=segments, audits=trail, phases=compute_phases(trail, start, end)))
     episodes.sort(key=lambda e: (e.start, e.migration_id or 0))
     return episodes
+
+
+def scope_to_run(episodes: list[Episode], run_start: datetime | None, run_end: datetime | None) -> list[Episode]:
+    """Keep only migrations that overlap [run_start, run_end] -- the sampler's own observed
+    window (its meta start_wall through its last sample's ts_wall). CDM.db is a persistent store
+    the real app keeps appending to across every migration ever attempted on the machine, not a
+    per-run file -- without this, an unrelated migration from a prior day/week shows up as an
+    "episode" of today's run (and inflates the rollup's total time to match). With accurate
+    start/end times (see parse_ts's assume_utc docstring -- a prior version of this file had the
+    timezone handling wrong, making every migration look ~5.5h later/longer than it really was,
+    which both motivated and then obscured testing of this function) a real migration's window is
+    normally just minutes long and maps to exactly one run, so BOTH bounds matter equally: a lower
+    bound alone would still let a migration from hours earlier leak in if nothing capped how far
+    back "still relevant" reaches, and an upper bound alone would do the same looking forward.
+
+    Both bounds come from THIS run's own resources_<role>.jsonl (meta.start_wall, and the latest
+    sample's ts_wall) rather than datetime.now() at harvest time, so a later re-harvest of an older
+    run doesn't shift its window to match whenever harvest_run happens to be re-invoked. Missing
+    either bound (no sampler meta, or zero samples) disables the filter entirely rather than
+    guess."""
+    if run_start is None or run_end is None:
+        return episodes
+    return [e for e in episodes if e.start <= run_end and e.end >= run_start]
 
 
 _KIND_LABEL = {"primary": "Primary migration", "retry": "In-app Retry", "try_again": "Try Again migration"}
@@ -307,13 +365,17 @@ def read_drive_stats(db_path: Path) -> list[ThroughputPoint]:
         for (mid, drive), r in sorted(latest.items())]
 
 
-def read_throughput(db_path: Path | None, log_path: Path | None) -> list[ThroughputPoint]:
-    """rclone speed series from the log (empty when there is no log) followed by the per-drive
-    rows from CDM.db (skipped when db_path is None)."""
+def read_throughput(db_path: Path | None, log_path: Path | Iterable[Path] | None) -> list[ThroughputPoint]:
+    """rclone speed series from the log(s) (empty when there are none) followed by the per-drive
+    rows from CDM.db (skipped when db_path is None). log_path accepts one path or several -- a
+    run's transfer log can rotate mid-run (or by the time of a later re-harvest), splitting its
+    real lines across more than one *FileTransfer*.log* file; see paths.find_rclone_logs."""
     points: list[ThroughputPoint] = []
-    if log_path is not None and Path(log_path).is_file():
-        with Path(log_path).open(encoding="utf-8", errors="replace") as fh:
-            points += parse_rclone_log(fh)
+    paths_ = [log_path] if isinstance(log_path, (str, Path)) else list(log_path or [])
+    for p in paths_:
+        if p is not None and Path(p).is_file():
+            with Path(p).open(encoding="utf-8", errors="replace") as fh:
+                points += parse_rclone_log(fh)
     if db_path is not None:
         points += read_drive_stats(db_path)
     return points
@@ -423,7 +485,9 @@ def harvest_run(run_id: str, role: str, out_dir: Path, env: Mapping[str, str] | 
     counts: dict[int, FileCounts] = {}
     try:
         db = db_path or paths.find_cdm_db(env)
-        windows = expand_segments(read_episodes(db))
+        run_start = parse_ts(meta.get("start_wall"))
+        run_end = max((s.ts_wall for s in samples), default=None)
+        windows = expand_segments(scope_to_run(read_episodes(db), run_start, run_end))
         drive_points = read_drive_stats(db)
         counts = read_file_counts(db)
         report.has_db = True
@@ -432,8 +496,8 @@ def harvest_run(run_id: str, role: str, out_dir: Path, env: Mapping[str, str] | 
         logger.warning(f"benchmark: {exc}")
 
     try:
-        log = log_path if log_path is not None else paths.find_rclone_log(env)
-        if log is not None:
+        log = log_path if log_path is not None else paths.find_rclone_logs(env)
+        if log:
             report.rclone = read_throughput(None, log)
             report.has_rclone_log = bool(report.rclone)
     except OSError as exc:  # a protected/unreadable log dir must not sink the whole report

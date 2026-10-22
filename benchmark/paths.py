@@ -10,7 +10,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 DEFAULT_CDM_DB = Path(r"C:\ProgramData\Dell\SupportAssist\CDM\CDM.db")
-DEFAULT_LOG_DIRS = [Path(r"C:\ProgramData\Dell\SupportAssist\CDM\Logs"), Path(r"C:\ProgramData\Dell\SupportAssist\CDM")]
+DEFAULT_LOG_DIRS = [Path(r"C:\ProgramData\Dell\SupportAssist\CDM\LocalLogs"),
+                    Path(r"C:\ProgramData\Dell\SupportAssist\CDM\Logs"),
+                    Path(r"C:\ProgramData\Dell\SupportAssist\CDM")]
 DEFAULT_CONFIG_CANDIDATES = [
     Path(r"C:\Program Files\Dell\SupportAssist\CDM\DellDataManager.exe.config"),
     Path(r"C:\Program Files (x86)\Dell\SupportAssist\CDM\DellDataManager.exe.config"),
@@ -56,6 +58,13 @@ def find_cdm_db(env: Mapping[str, str] | None = None) -> Path:
     return path
 
 
+def _mtime(p: Path) -> float:
+    try:
+        return p.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def find_rclone_log(env: Mapping[str, str] | None = None) -> Path | None:
     override = _env(env).get("DDA_RCLONE_LOG_PATH")
     if override:
@@ -68,12 +77,31 @@ def find_rclone_log(env: Mapping[str, str] | None = None) -> Path | None:
                 candidates += [p for p in directory.glob("*FileTransfer*.log*") if _is_file(p)]
             except OSError:
                 continue
-    def _mtime(p: Path) -> float:
-        try:
-            return p.stat().st_mtime
-        except OSError:
-            return 0.0
     return max(candidates, key=_mtime) if candidates else None
+
+
+def find_rclone_logs(env: Mapping[str, str] | None = None) -> list[Path]:
+    """Every matching *FileTransfer*.log* file across the candidate dirs, oldest first -- NOT
+    just the single newest one that find_rclone_log returns. These logs rotate (.log, .log.1,
+    .log.2, ...), and a run's own transfer lines can land split across a rotation boundary:
+    confirmed live (2026-10-22) one run's real throughput data was split 9/10 across two rotated
+    files, while the file that happened to be newest at harvest time held zero of them -- reading
+    only the newest file silently drops part or all of a run's throughput. The DDA_RCLONE_LOG_PATH
+    override still pins exactly one file, same as find_rclone_log."""
+    override = _env(env).get("DDA_RCLONE_LOG_PATH")
+    if override:
+        path = Path(override)
+        return [path] if _is_file(path) else []
+    candidates: dict[Path, Path] = {}
+    for directory in DEFAULT_LOG_DIRS:
+        if _is_dir(directory):
+            try:
+                for p in directory.glob("*FileTransfer*.log*"):
+                    if _is_file(p):
+                        candidates[p.resolve()] = p  # de-dup if a dir appears twice
+            except OSError:
+                continue
+    return sorted(candidates.values(), key=_mtime)
 
 
 def find_engine_config(env: Mapping[str, str] | None = None) -> Path | None:

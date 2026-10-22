@@ -143,8 +143,14 @@ def build_rollup(report: RunReport) -> Episode:
                 reasons[reason] = reasons.get(reason, 0) + n
     if counts:
         counts.skip_reasons = sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0]))
+    # rclone points, like drives/counts/phases above, come from the episodes' own already
+    # time-scoped lists -- NOT report.rclone (the whole rclone log file, unfiltered). Confirmed
+    # live (2026-10-22): using report.rclone directly let stale transfer-log lines from unrelated
+    # migrations earlier the same day leak into the rollup's throughput chart and "peak" tile even
+    # when zero episodes (and so zero real activity) fell inside this run's own window.
+    rclone = [p for e in eps for p in e.rclone]
     return Episode(index=0, kind="rollup", label="Whole run", migration_id=None, start=start, end=end,
-                   phases=phases, samples=list(report.samples), rclone=list(report.rclone),
+                   phases=phases, samples=list(report.samples), rclone=rclone,
                    drive_stats=drives, file_counts=counts)
 
 

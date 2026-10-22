@@ -192,15 +192,15 @@
     <h2>Data per drive</h2>
     <div class="explain">
       <p><b>What it tracks:</b> how much data came from each drive on the old PC, split by what happened to it.</p>
-      <p><b>Axes:</b> bottom = one bar per drive. Left = data in gigabytes (GB). Each bar is stacked into segments.</p>
-      <p><b>How to read:</b> taller bar = more data on that drive; the segments show copied versus already present.</p>
+      <p><b>Axes:</b> bottom = one bar per drive. Left = data in gigabytes (GB).</p>
+      <p><b>How to read:</b> the left segment (Copied + Failed/incomplete) is this session's own transfer attempt -- the two stack to its own total. "Already existed" is shown as a separate bar, not stacked with the others: CDM.db tracks it as a running total for this destination drive, not as part of what this specific migration selected, so it is not arithmetically part of the same whole.</p>
     </div>
     <div class="empty" id="e_drive" hidden></div>
     <div class="card" id="k_drive"><canvas id="c_drive"></canvas></div>
     <ul class="legend2">
-      <li><span class="dot" style="background:var(--blue)"></span><div><b>Copied</b> <span class="t">- new data transferred to the new PC.</span></div></li>
-      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- data already on the new PC, so it was skipped.</span></div></li>
-      <li><span class="dot" style="background:var(--grid)"></span><div><b>Remaining / skipped</b> <span class="t">- data not copied (deselected or failed).</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Copied</b> <span class="t">- new data transferred to the new PC this session.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Failed / incomplete</b> <span class="t">- selected for this session's transfer but not completed.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- matching data already on the new PC (a separate, cumulative figure for this drive -- not part of this session's own total).</span></div></li>
     </ul>
   </section>
 
@@ -284,10 +284,14 @@ const inits = {
   mem:()=>{ if(blocked('mem'))return; line('c_mem',procSets(V.res.mem),Object.assign({y:{title:{display:true,text:'MB'}}},xAxis)); wordLegend('leg_proc2',procLegend()); },
   disk:()=>{ if(blocked('disk'))return; line('c_disk',procSets(V.res.disk).concat([d('System',V.res.disk.system,C('--muted'),false,true)]),Object.assign({y:{title:{display:true,text:'MB/s (read + write)'}}},xAxis)); wordLegend('leg_disk',procLegend().concat([['system',C('--muted'),'System total','all disk activity on the PC (dashed).']])); },
   net:()=>{ if(blocked('net'))return; line('c_net',[d('Received',V.res.net.recv,C('--blue'),true),d('Sent',V.res.net.sent,C('--orange'))],Object.assign({y:{title:{display:true,text:'MB/s'}}},xAxis)); wordLegend('leg_net',[['recv',C('--blue'),'Received','data arriving over the network link (system-wide; Windows has no per-process network counter).'],['sent',C('--orange'),'Sent','data leaving the PC.']]); },
-  phase:()=>{ if(blocked('phase'))return; mk('c_phase',{type:'bar',data:{labels:V.phases.map(p=>p[0]),datasets:[{data:V.phases.map(p=>p[1]),backgroundColor:V.phases.map(p=>p[2]==='x'?C('--orange'):p[2]==='e'?C('--grid'):C('--blue'))}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' s'}}},scales:{x:{title:{display:true,text:'seconds'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}}); },
-  drive:()=>{ if(blocked('drive'))return; mk('c_drive',{type:'bar',data:{labels:V.drives.labels,datasets:[{label:'Copied',data:V.drives.copied,backgroundColor:C('--blue')},{label:'Already existed',data:V.drives.existed,backgroundColor:C('--teal')},{label:'Remaining',data:V.drives.rem,backgroundColor:C('--grid')}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw+' GB'}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,title:{display:true,text:'GB'},grid:{color:C('--grid')}}}}}); },
+  phase:()=>{ if(blocked('phase'))return; mk('c_phase',{type:'bar',data:{labels:V.phases.map(p=>p[0]),datasets:[{data:V.phases.map(p=>p[1]),backgroundColor:V.phases.map(p=>p[2]==='x'?C('--orange'):p[2]==='e'?C('--grid'):C('--blue'))}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' s'}}},scales:{x:{title:{display:true,text:'seconds'},grid:{color:C('--grid')}},y:{grid:{display:false},ticks:{autoSkip:false}}}}}); },
+  drive:()=>{ if(blocked('drive'))return; mk('c_drive',{type:'bar',data:{labels:V.drives.labels,datasets:[
+    {label:'Copied',data:V.drives.copied,backgroundColor:C('--blue'),stack:'session'},
+    {label:'Failed / incomplete',data:V.drives.rem,backgroundColor:C('--grid'),stack:'session'},
+    {label:'Already existed',data:V.drives.existed,backgroundColor:C('--teal'),stack:'existing'}
+  ]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw+' GB'}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,title:{display:true,text:'GB'},grid:{color:C('--grid')}}}}}); },
   files:()=>{ if(blocked('files'))return; mk('c_files',{type:'doughnut',data:{labels:V.files.labels,datasets:[{data:V.files.values,backgroundColor:[C('--green'),C('--teal'),C('--red'),C('--blue')],borderWidth:0}]},options:{cutout:'60%',plugins:{legend:{display:false}}}}); },
-  skip:()=>{ if(blocked('skip'))return; mk('c_skip',{type:'bar',data:{labels:V.skips.labels,datasets:[{data:V.skips.v,backgroundColor:C('--red')}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' files'}}},scales:{x:{title:{display:true,text:'files'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}}); }
+  skip:()=>{ if(blocked('skip'))return; mk('c_skip',{type:'bar',data:{labels:V.skips.labels,datasets:[{data:V.skips.v,backgroundColor:C('--red')}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' files'}}},scales:{x:{title:{display:true,text:'files'},grid:{color:C('--grid')}},y:{grid:{display:false},ticks:{autoSkip:false}}}}}); }
 };
 
 function renderOverview(){

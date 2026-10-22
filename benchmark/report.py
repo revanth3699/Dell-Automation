@@ -142,11 +142,25 @@ def build_view(ep: Episode, report: RunReport) -> dict[str, Any]:
 
     # phases / drives / files / skips
     phases = _phases_for(ep, report)
-    empty["phase"] = None if phases else "No phase timing available (CDM.db not read)."
+    if phases:
+        empty["phase"] = None
+    elif not report.has_db:
+        empty["phase"] = "No phase timing available (CDM.db not read)."
+    else:
+        # has_db is True -- CDM.db was read fine, there's just no migration overlapping this
+        # window. The old message always blamed "CDM.db not read" regardless of which was true,
+        # which actively misleads someone debugging an empty phase tab on an otherwise-working run.
+        empty["phase"] = "No phase timing available for this window (no migration recorded here)."
+    # already_existing is NOT part of `total` -- confirmed live (2026-10-22): already_existing is
+    # consistently 10-20x larger than total across every migration checked (it's a cumulative
+    # figure for this destination drive, not this session's selected set), so `total -
+    # transferred - already_existing` was always a large negative number silently clamped to 0.
+    # `total` instead behaves like "bytes this session attempted" (roughly completed + failed),
+    # so remaining/failed is `total - transferred` alone.
     drives = {"labels": [d.drive for d in ep.drive_stats],
               "copied": [round(d.transferred / GB, 2) for d in ep.drive_stats],
               "existed": [round(d.already_existing / GB, 2) for d in ep.drive_stats],
-              "rem": [round(max(0, d.total - d.transferred - d.already_existing) / GB, 2) for d in ep.drive_stats]}
+              "rem": [round(max(0, d.total - d.transferred) / GB, 2) for d in ep.drive_stats]}
     empty["drive"] = None if ep.drive_stats else "No per-drive statistics (RealTimeTransferStatistics is empty)."
     fc = ep.file_counts
     files = {"labels": ["Copied", "Already existed", "Skipped", "Backed up"],
@@ -165,7 +179,12 @@ def build_view(ep: Episode, report: RunReport) -> dict[str, Any]:
         {"l": "Total migration time", "v": fmt_duration(run_seconds),
          "d": f"{ep.start:%d %b %H:%M:%S} to {ep.end:%H:%M:%S}"},
         {"l": "Data moved", "v": f"{ep.bytes_moved / GB:.1f} GB" if ep.drive_stats else "n/a",
-         "d": f"of {ep.bytes_selected / GB:.1f} GB selected" if ep.drive_stats else "no drive statistics"},
+         # total can be smaller than transferred for a small fraction of real migrations (confirmed
+         # live 2026-10-22: 4 of 173 drive rows checked, one by 672 MB) -- clamp the shown
+         # denominator so the tile never reads as "moved more than attempted", which is impossible
+         # to make sense of regardless of what `total` actually means.
+         "d": f"of {max(ep.bytes_selected, ep.bytes_moved) / GB:.1f} GB attempted this session"
+              if ep.drive_stats else "no drive statistics"},
         {"l": "Avg throughput", "v": f"{avg_speed:.1f} MB/s" if avg_speed else "n/a",
          "d": f"peak {peak_speed:.1f} MB/s" if peak_speed else "no transfer log"},
         {"l": "Files copied", "v": f"{fc.success:,}" if fc else "n/a", "d": f"{fc.skipped:,} skipped" if fc else ""},

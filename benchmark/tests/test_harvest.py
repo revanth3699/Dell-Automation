@@ -19,6 +19,17 @@ def test_parse_ts_variants():
     assert harvest.parse_ts(None) is None and harvest.parse_ts("") is None and harvest.parse_ts("nope") is None
 
 
+def test_parse_ts_assume_utc():
+    # a string with an explicit Z is already handled the normal way -- assume_utc changes nothing
+    normal = harvest.parse_ts("2026-10-22T12:00:00Z")
+    assert harvest.parse_ts("2026-10-22T12:00:00Z", assume_utc=True) == normal
+    # no marker at all: default behaviour treats it as already-local (no shift)...
+    assert harvest.parse_ts("2026-10-22T12:00:00") == T0
+    # ...assume_utc=True treats the SAME string as UTC needing conversion instead
+    assert harvest.parse_ts("2026-10-22T12:00:00", assume_utc=True) == normal
+    assert harvest.parse_ts(None, assume_utc=True) is None and harvest.parse_ts("", assume_utc=True) is None
+
+
 def test_parse_runtime_and_eta():
     assert harvest.parse_runtime("01:02:03.5") == 3723
     assert harvest.parse_runtime("1.00:00:10") == 86410
@@ -40,6 +51,9 @@ def test_clean_migration_one_episode(tmp_path):
     assert names["File transfer"].is_transfer and names["File transfer"].seconds == 300
     assert names["Settings migration"].seconds == 30
     assert "Unmeasured / other" in names and names["Unmeasured / other"].estimated
+    # named "Migration info", not "Pre-check / migration info" -- it only ever matched
+    # MigrationInfo* statuses, never PreCheck*/Pairing* ones (confirmed live 2026-10-22)
+    assert "Migration info" in names and "Pre-check / migration info" not in names
 
 
 def test_retry_same_id_two_segments(tmp_path):
@@ -70,18 +84,59 @@ def test_three_episodes(tmp_path):
     assert [w.index for w in windows] == [1, 2, 3]
 
 
+def test_scope_to_run(tmp_path):
+    # migration 1: start T0, end T0+620. migration 2: start T0+1000, end T0+1410.
+    eps = harvest.read_episodes(h.make_three_episode_db(tmp_path / "d2.db"))
+    far_end = T0 + timedelta(seconds=2000)
+    assert harvest.scope_to_run(eps, None, None) == eps                      # no sampler meta -- no filtering
+    assert harvest.scope_to_run(eps, T0, far_end) == eps                     # window covers everything
+    # a run_start after migration 1 concluded but before migration 2 began should drop 1 (fully in
+    # the past) and keep 2 (still ahead) -- end-based, not start-based (see scope_to_run's docstring).
+    scoped = harvest.scope_to_run(eps, T0 + timedelta(seconds=700), far_end)
+    assert [e.migration_id for e in scoped] == [2]
+    # a migration that started long before this run but only concluded after it attached (the
+    # real case the lower bound exists for) must still be kept.
+    long_running = harvest.scope_to_run(eps, T0 + timedelta(seconds=615), far_end)
+    assert [e.migration_id for e in long_running] == [1, 2]
+    # upper bound: a migration that only starts AFTER this run's own window already ended must be
+    # excluded even though its end is >= run_start -- otherwise re-harvesting an older run after a
+    # later run's migration lands in CDM.db duplicates that migration into the older run's report
+    # (confirmed live 2026-10-22: run 671 re-harvested after run 672 absorbed run 672's migration).
+    before_mig2_starts = T0 + timedelta(seconds=900)
+    bounded = harvest.scope_to_run(eps, T0, before_mig2_starts)
+    assert [e.migration_id for e in bounded] == [1]
+
+
 def test_status_without_audit_and_audit_without_status(tmp_path):
     conn = h.new_db(tmp_path / "e.db")
     conn.execute("INSERT INTO MigrationStatus (id, timeCreated, timeUpdated) VALUES (1, ?, ?)",
-                 (h.iso(T0), h.iso(T0 + timedelta(seconds=60))))
+                 (h.iso_utc(T0), h.iso(T0 + timedelta(seconds=60))))
     conn.execute("INSERT INTO MigrationStatusAudit (migrationId, status, timeCreated) VALUES (9, 'MigrationStarted', ?)",
-                 (h.iso(T0 + timedelta(seconds=5)),))
+                 (h.iso_utc(T0 + timedelta(seconds=5)),))
     conn.execute("INSERT INTO MigrationStatus (id) VALUES (3)")      # no usable timestamps: dropped
     conn.commit()
     conn.close()
     eps = harvest.read_episodes(tmp_path / "e.db")
     assert [e.migration_id for e in eps] == [1, 9]
     assert eps[0].end == T0 + timedelta(seconds=60) and eps[1].start == T0 + timedelta(seconds=5)
+
+
+def test_abandoned_stub_migration_is_dropped(tmp_path):
+    """Confirmed live (2026-10-22): the real CDM.db creates a bare MigrationStatus row --
+    migrationState 'Init', no audit trail, no start/end, timeUpdated left at .NET's
+    DateTime.MinValue -- then abandons it and starts the real migration under a fresh id. Keeping
+    it as an episode pushed the one real migration into the "Try Again" label by list position,
+    even though nothing was ever retried."""
+    conn = h.new_db(tmp_path / "f.db")
+    conn.execute("INSERT INTO MigrationStatus (id, role, migrationState, timeCreated, timeUpdated)"
+                 " VALUES (363, 'NewPC', 'Init', ?, '0001-01-01 00:00:00')", (h.iso_utc(T0),))
+    h.add_migration(conn, 364, T0 + timedelta(seconds=1))   # the real migration, right after
+    conn.commit()
+    conn.close()
+    eps = harvest.read_episodes(tmp_path / "f.db")
+    assert [e.migration_id for e in eps] == [364]
+    windows = harvest.expand_segments(eps)
+    assert windows[0].kind == "primary"              # not "try_again" -- the stub no longer counts
 
 
 def test_db_missing_and_locked_raise_typed_error(tmp_path):
@@ -133,6 +188,18 @@ def test_read_throughput_no_log_and_with_log(tmp_path):
     db = h.make_three_episode_db(tmp_path / "t.db")
     pts = harvest.read_throughput(db, log)
     assert [p.kind for p in pts].count("rclone") == 4 and [p.kind for p in pts].count("drive") == 1
+
+
+def test_read_throughput_combines_multiple_log_files(tmp_path):
+    """log_path accepts several paths at once -- a run's real lines can be split across rotated
+    files (confirmed live 2026-10-22), so every matching file must be read, not just one."""
+    log_a, log_b = tmp_path / "a.log", tmp_path / "b.log.1"
+    log_a.write_text(h.RCLONE_LOG)
+    log_b.write_text(h.RCLONE_LOG)
+    pts = harvest.read_throughput(None, [log_a, log_b])
+    assert [p.kind for p in pts].count("rclone") == 8          # 4 valid points x 2 files
+    assert harvest.read_throughput(None, [log_a, tmp_path / "missing.log"]) == \
+           harvest.read_throughput(None, log_a)                 # a missing path in the list is just skipped
 
 
 def test_drive_stats_latest_row_wins(tmp_path):
@@ -243,6 +310,34 @@ def test_harvest_run_full(tmp_path):
     assert len(r.episodes[0].samples) == 10 and r.episodes[0].file_counts.success == 100
     assert len(r.episodes[0].rclone) == 4 and r.episodes[1].file_counts.success == 100   # same id shares totals
     assert r.episodes[2].file_counts is None and r.episodes[2].drive_stats == []
+
+
+def test_harvest_run_scopes_episodes_to_sampler_window(tmp_path):
+    """CDM.db is persistent/cumulative across every migration ever run on the machine -- without
+    scoping to the sampler's own [start_wall, last sample] window, an unrelated older migration
+    (e.g. migration 1 here) would show up as an episode of this run too."""
+    out = tmp_path / "out"
+    out.mkdir()
+    meta = {"scope": "meta", "start_wall": (T0 + timedelta(seconds=700)).isoformat()}
+    last_sample = {"ts_wall": (T0 + timedelta(seconds=2000)).isoformat(), "ts_mono": 0, "scope": "system"}
+    (out / "resources_target.jsonl").write_text(json.dumps(meta) + "\n" + json.dumps(last_sample))
+    r = harvest.harvest_run("r3", "target", out, {}, db_path=h.make_three_episode_db(tmp_path / "t2.db"))
+    assert [e.migration_id for e in r.episodes] == [2]
+
+
+def test_harvest_run_combines_rotated_log_files(tmp_path, monkeypatch):
+    """harvest_run's own log_path override, like paths.find_rclone_logs, must accept several
+    files and combine them -- not just the one a caller happens to pass."""
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "resources_target.jsonl").write_text(json.dumps({"scope": "meta"}))
+    log_a, log_b = tmp_path / "a.log", tmp_path / "b.log.1"
+    log_a.write_text(h.RCLONE_LOG)
+    log_b.write_text(h.RCLONE_LOG)
+    monkeypatch.setattr(paths, "DEFAULT_CONFIG_CANDIDATES", [])
+    r = harvest.harvest_run("r4", "target", out, {}, db_path=h.make_three_episode_db(tmp_path / "t3.db"),
+                            log_path=[log_a, log_b])
+    assert r.has_rclone_log and [p.kind for p in r.rclone].count("rclone") == 8
 
 
 def test_harvest_run_degrades_without_anything(tmp_path, monkeypatch):

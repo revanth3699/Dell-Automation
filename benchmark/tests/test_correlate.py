@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 
 from benchmark import correlate
-from benchmark.models import FileCounts, ResourceProfile, RunReport
+from benchmark.models import FileCounts, ResourceProfile, RunReport, ThroughputPoint
 from benchmark.tests.helpers import T0, make_episode, steady_samples, sys_sample
 
 MB = 1024 * 1024
@@ -136,6 +136,19 @@ def test_build_rollup_and_annotate():
     assert roll.file_counts.skip_reasons == [("A", 3), ("B", 1)]
     assert len(roll.phases) == 3 and roll.verdict.bottleneck == "cpu"
     assert ep2.verdict.bottleneck == "insufficient" and ep1.verdict.bottleneck == "cpu"
+
+
+def test_build_rollup_rclone_scoped_to_episodes_not_whole_log():
+    """rclone, like drives/counts/phases, must come from the episodes' own already time-scoped
+    lists -- not report.rclone (the whole parsed log file). Confirmed live (2026-10-22): using
+    report.rclone directly let a stale transfer-log line from an unrelated migration hours outside
+    this run's window leak into the rollup's throughput chart and "peak" tile."""
+    ep = make_episode()
+    ep.rclone = [ThroughputPoint(kind="rclone", ts=T0 + timedelta(seconds=50), speed_bps=10.0)]
+    stale = ThroughputPoint(kind="rclone", ts=T0 + timedelta(seconds=99999), speed_bps=999.0)
+    report = RunReport("r", "target", T0, episodes=[ep], samples=[], rclone=[*ep.rclone, stale])
+    roll = correlate.build_rollup(report)
+    assert roll.rclone == ep.rclone
 
 
 def test_build_rollup_empty_run():

@@ -152,6 +152,10 @@ class Episode:
 
     @property
     def bytes_selected(self) -> int:
+        """Despite the name (kept for compatibility with existing call sites), this is NOT "the
+        whole dataset the user selected" -- it's closer to "bytes this session attempted to move"
+        (confirmed live 2026-10-22: already_existing is consistently 10-20x larger than this sum
+        across every migration checked, so total can't be an inclusive grand total)."""
         return sum(d.total for d in self.drive_stats)
 
 

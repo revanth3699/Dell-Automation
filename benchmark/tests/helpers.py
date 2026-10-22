@@ -4,7 +4,7 @@ Sample / Episode factories."""
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from benchmark.models import Episode, PhaseSpan, Sample, Segment, ThroughputPoint
@@ -31,6 +31,15 @@ def iso(dt: datetime, sep: str = " ") -> str:
     return dt.isoformat(sep=sep, timespec="microseconds") + "0"   # 7 fractional digits like .NET
 
 
+def iso_utc(dt: datetime, sep: str = " ") -> str:
+    """Like iso(), but stores dt's UTC-equivalent clock time with no timezone marker -- matching
+    how the real CDM.db writes MigrationStatus.timeCreated / MigrationStatusAudit.timeCreated (see
+    parse_ts's assume_utc docstring). dt.astimezone(timezone.utc) treats a naive dt as THIS
+    machine's own local time, so parsing the result back with assume_utc=True reproduces dt
+    exactly, regardless of which timezone the test machine runs in."""
+    return iso(dt.astimezone(timezone.utc).replace(tzinfo=None), sep)
+
+
 def new_db(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
@@ -50,11 +59,11 @@ def add_migration(conn: sqlite3.Connection, mid: int, start: datetime, trail=CLE
                   run_time: str = "00:06:50") -> None:
     conn.execute("INSERT INTO MigrationStatus (id, role, migrationState, migratedFrom, runTime, timeCreated, timeUpdated,"
                  " MigrationStartTime, MigrationEndTime, MigratedTo, Network) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                 (mid, "NewPC", "Completed", "OLD-PC", run_time, iso(start), iso(start), iso(start),
+                 (mid, "NewPC", "Completed", "OLD-PC", run_time, iso_utc(start), iso(start), iso(start),
                   iso(start + timedelta(seconds=end_offset)), "NEW-PC", "OFFICE-5G"))
     for off, status in trail:
         conn.execute("INSERT INTO MigrationStatusAudit (migrationId, status, timeCreated) VALUES (?,?,?)",
-                     (mid, status, iso(start + timedelta(seconds=off), "T")))
+                     (mid, status, iso_utc(start + timedelta(seconds=off), "T")))
 
 
 def make_clean_db(path: Path) -> Path:

@@ -76,6 +76,20 @@ def test_missing_planes_show_banners_and_messages(tmp_path):
     assert roll["empty"]["cpu"] is None and roll["verdict"]["kind"] in ("insufficient", "none", "cpu", "disk", "network")
 
 
+def test_phase_empty_message_distinguishes_db_read_from_no_migration(tmp_path):
+    """The old message always said "CDM.db not read" whenever phases was empty, even when CDM.db
+    was read fine and there's simply no migration in this window (e.g. a run with zero episodes,
+    confirmed live 2026-10-22) -- actively misleading for debugging."""
+    no_db = RunReport("r3", "target", T0, has_db=False, samples=steady_samples(n=5))
+    p1 = payload_of(report.render(no_db, tmp_path / "a.html").read_text(encoding="utf-8"))
+    assert "CDM.db not read" in p1["rollup"]["empty"]["phase"]
+
+    db_but_empty = RunReport("r4", "target", T0, has_db=True, samples=steady_samples(n=5))
+    p2 = payload_of(report.render(db_but_empty, tmp_path / "b.html").read_text(encoding="utf-8"))
+    assert "CDM.db not read" not in p2["rollup"]["empty"]["phase"]
+    assert "no migration recorded" in p2["rollup"]["empty"]["phase"]
+
+
 def test_no_samples_at_all(tmp_path):
     p = payload_of(report.render(RunReport("r", "target", T0), tmp_path / "r.html").read_text(encoding="utf-8"))
     assert "No resource samples" in p["rollup"]["empty"]["cpu"]
@@ -112,6 +126,35 @@ def test_end_to_end_from_seeded_db(tmp_path):
     assert len(p["episodes"]) == 3
     assert [e["kind"] for e in p["episodes"]] == ["primary", "retry", "try_again"]
     assert p["episodes"][0]["thr"]["instant"] != [] and p["rollup"]["drives"]["labels"] == ["C:\\"]
+
+
+def test_data_moved_tile_never_exceeds_its_own_denominator():
+    """`total` can be smaller than `transferred` for a real minority of migrations (confirmed live
+    2026-10-22: 4 of 173 drive rows checked, one by 672 MB) -- the tile must never read as "moved
+    more than attempted", which can't be made sense of regardless of what `total` means here."""
+    ep = make_episode(samples=[])
+    ep.drive_stats = [ThroughputPoint(kind="drive", migration_id=1, drive="C:\\",
+                                      transferred=10 * report.GB, total=4 * report.GB)]
+    v = report.build_view(ep, RunReport("r", "target", T0, episodes=[ep]))
+    moved_tile = next(t for t in v["tiles"] if t["l"] == "Data moved")
+    assert moved_tile["v"] == "10.0 GB"
+    assert "10.0 GB attempted" in moved_tile["d"]              # clamped up to bytes_moved, not 4.0
+
+
+def test_drive_remaining_is_not_reduced_by_already_existing():
+    """already_existing is NOT part of `total` (confirmed live 2026-10-22: it's consistently
+    10-20x larger than total across every real migration checked -- a separate, cumulative figure
+    for the destination drive, not part of what this session selected). `rem` must come from
+    total - transferred alone, not total - transferred - already_existing (which would always be
+    a large negative number, silently clamped to 0 and hiding a real failed/incomplete amount)."""
+    ep = make_episode(samples=[])
+    ep.drive_stats = [ThroughputPoint(kind="drive", migration_id=1, drive="C:\\",
+                                      transferred=10 * report.GB, total=15 * report.GB,
+                                      already_existing=200 * report.GB)]
+    v = report.build_view(ep, RunReport("r", "target", T0, episodes=[ep]))
+    assert v["drives"]["copied"] == [10.0]
+    assert v["drives"]["existed"] == [200.0]
+    assert v["drives"]["rem"] == [5.0]                    # 15 - 10, NOT clamped to 0 by the 200 GB existing
 
 
 def test_fmt_duration():
