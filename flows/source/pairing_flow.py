@@ -198,10 +198,10 @@ class SourcePairingFlow:
                     deadline += time.monotonic() - iteration_start
                     continue
                 if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
-                    self.network_disconnected_dialog.click_check_again()
                     self.log.warning(
                         "This PC isn't connected to a network appeared mid-discovery-wait "
-                        "-- waited and clicked Check again"
+                        "-- the Source dialog has no Check again button; it clears itself and "
+                        "re-runs the precheck when the network returns, so waiting it out"
                     )
                     deadline += time.monotonic() - iteration_start
                     continue
@@ -255,10 +255,10 @@ class SourcePairingFlow:
                 deadline += time.monotonic() - iteration_start
                 continue
             if network_disconnected_assertions.is_showing(self.app_session, timeout=1.5):
-                self.network_disconnected_dialog.click_check_again()
                 self.log.warning(
                     "This PC isn't connected to a network appeared mid-publish-loop "
-                    "-- waited and clicked Check again"
+                    "-- the Source dialog has no Check again button; it clears itself and "
+                    "re-runs the precheck when the network returns, so waiting it out"
                 )
                 deadline += time.monotonic() - iteration_start
                 continue

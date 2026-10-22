@@ -6,35 +6,27 @@ of your PCs to the same network to continue") is explicitly about both PCs, not
 specific to one side's screen.
 
 Per explicit user direction (2026-10-14): the existence check (is_showing()) moved out
-to assertions/source/network_disconnected_dialog.py, called directly from flows/ -- this
-class now holds only the click_check_again() action (previously accept(), which
-checked AND clicked in one call).
+to assertions/source/network_disconnected_dialog.py, called directly from flows/.
+
+Cancel is the dialog's only button. There is no "Check again" button on the Source side
+(verified against MigrateToDell.UI source, 2026-10-19 -- see
+locators/source/network_disconnected_dialog.py): the dialog clears itself and re-runs
+the precheck when the network returns, so flows wait it out rather than clicking any
+retry. The former click_check_again() action was removed on 2026-10-22 once that was
+confirmed on both roles (the Target's RecoverablePrecheckModel likewise dropped its
+Check again button).
 """
 
-import time
-
 from components.base_component import BaseComponent
-from locators.source.network_disconnected_dialog import CANCEL_BUTTON_LOCATOR, CHECK_AGAIN_BUTTON_LOCATOR
+from locators.source.network_disconnected_dialog import CANCEL_BUTTON_LOCATOR
 
 
 class NetworkDisconnectedDialog:
-    """Per explicit user direction: waits CHECK_AGAIN_DELAY_SECONDS before clicking
-    Check again (rather than immediately), since the underlying network condition is
-    likely transient -- an instant re-check would probably just hit the same failure
-    again."""
-
-    CHECK_AGAIN_DELAY_SECONDS = 10.0
-
     def __init__(self, app_session):
-        self._check_again_button = BaseComponent(app_session, *CHECK_AGAIN_BUTTON_LOCATOR, "CheckAgainButton")
         self._cancel_button = BaseComponent(app_session, *CANCEL_BUTTON_LOCATOR, "NetworkDisconnectedCancelButton")
 
-    def click_check_again(self) -> None:
-        time.sleep(self.CHECK_AGAIN_DELAY_SECONDS)
-        self._check_again_button.click(timeout=2.0)
-
     def click_cancel(self) -> None:
-        """The dialog's only real button (2026-10-19, verified against MigrateToDell.UI
+        """The dialog's only button (2026-10-19, verified against MigrateToDell.UI
         source, not live -- see locators/source/network_disconnected_dialog.py). Opens
         the Are you sure you want to cancel? prompt."""
         self._cancel_button.click(timeout=2.0)
