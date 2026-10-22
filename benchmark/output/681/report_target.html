@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Benchmark</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#6b7280; --line:#e4e7eb;
+    --blue:#4e79a7; --orange:#f28e2b; --green:#59a14f; --purple:#b07aa1;
+    --teal:#76b7b2; --red:#e15759; --grid:#eceef1; --accent:#4e79a7;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#15181c; --card:#1e2228; --ink:#e8eaed; --muted:#9aa3ad; --line:#2c323a; --grid:#262b32;
+  }}
+  :root[data-theme=dark]{--bg:#15181c;--card:#1e2228;--ink:#e8eaed;--muted:#9aa3ad;--line:#2c323a;--grid:#262b32;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 16px}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 18px;font-size:13px}
+  code{background:var(--grid);padding:1px 5px;border-radius:4px;font-size:13px}
+
+  /* episode selector, banners */
+  .episodes{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px;align-items:center}
+  .episodes .lbl{color:var(--muted);font-size:12px;margin-right:4px}
+  .ep{background:transparent;border:1px solid var(--line);color:var(--muted);padding:5px 10px;border-radius:999px;font:inherit;font-size:12px;cursor:pointer}
+  .ep:hover{color:var(--ink)}
+  .ep.active{border-color:var(--accent);color:var(--accent);font-weight:600}
+  .banner{border-left:3px solid var(--orange);background:rgba(242,142,43,.08);padding:8px 12px;border-radius:0 8px 8px 0;margin:0 0 8px;font-size:13px}
+  .empty{color:var(--muted);padding:18px 4px;font-style:italic}
+
+  /* tabs */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+  .tab{background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 12px;border-radius:8px;font:inherit;font-size:13px;cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+
+  .panel{display:none}
+  .panel.on{display:block}
+  h2{font-size:17px;margin:0 0 10px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  canvas{max-height:300px}
+
+  /* explanation box */
+  .explain{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:16px}
+  .explain p{margin:6px 0}
+  .explain b{color:var(--ink)}
+
+  /* worded legend */
+  .legend2{list-style:none;margin:14px 0 0;padding:0;font-size:13px}
+  .legend2 li{display:flex;gap:9px;align-items:flex-start;padding:5px 0}
+  .legend2 .dot{width:12px;height:12px;border-radius:3px;flex:none;margin-top:3px}
+  .legend2 b{color:var(--ink)}
+  .legend2 span.t{color:var(--muted)}
+
+  /* overview tiles, busy bars, tables */
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+  .tile .l{color:var(--muted);font-size:12px}.tile .v{font-size:24px;font-weight:700;margin-top:3px}.tile .d{font-size:12px;color:var(--muted);margin-top:2px}
+  .callout{border-left:3px solid var(--orange);background:rgba(242,142,43,.08);padding:12px 14px;border-radius:0 8px 8px 0;margin-top:16px}
+  .busy{margin-top:16px}
+  .busy .row{display:grid;grid-template-columns:110px 1fr 230px;gap:10px;align-items:center;padding:4px 0;font-size:13px}
+  .busy .bar{height:10px;background:var(--grid);border-radius:5px;overflow:hidden}
+  .busy .bar i{display:block;height:100%;background:var(--blue)}
+  .busy .m{color:var(--muted);font-size:12px}
+  @media (max-width:560px){.busy .row{grid-template-columns:90px 1fr}.busy .m{grid-column:1/-1}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600} td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Migration Performance Benchmark</h1>
+  <p class="sub" id="sub"></p>
+  <div id="banners"></div>
+  <div class="episodes" id="episodes"><span class="lbl">Episode</span></div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="thr">Throughput &amp; ETA</button>
+    <button class="tab" data-tab="cpu">CPU usage</button>
+    <button class="tab" data-tab="mem">Memory</button>
+    <button class="tab" data-tab="disk">Disk I/O</button>
+    <button class="tab" data-tab="net">Network</button>
+    <button class="tab" data-tab="phase">Phase durations</button>
+    <button class="tab" data-tab="drive">Data per drive</button>
+    <button class="tab" data-tab="files">File outcomes</button>
+    <button class="tab" data-tab="skip">Skip reasons</button>
+    <button class="tab" data-tab="knobs">Transfer settings</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <section class="panel" data-tab="overview">
+    <h2>Overview</h2>
+    <div class="explain"><p>The headline results for the selected episode (or the whole run). A run can contain up to three migrations: the primary one, an in-app Retry round, and a Try Again migration. Each tab after this one explains a single graph in detail.</p></div>
+    <div class="grid" id="tiles"></div>
+    <div class="card busy" id="busy"></div>
+    <div class="callout" id="verdict"></div>
+  </section>
+
+  <!-- THROUGHPUT -->
+  <section class="panel" data-tab="thr">
+    <h2>Transfer throughput &amp; ETA</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how fast data is being copied from the old PC to the new PC, plus the copy engine's own estimate of time remaining.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = copy speed in MB/s. Right = ETA in minutes.</p>
+      <p><b>How to read:</b> a higher blue line means faster copying. Dips show moments the transfer slowed down. The red ETA line should slope down toward zero; if it climbs, the transfer is struggling.</p>
+    </div>
+    <div class="empty" id="e_thr" hidden></div>
+    <div class="card" id="k_thr"><canvas id="c_thr"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Instant speed</b> <span class="t">- how fast data is moving (rclone progress line, every 5 seconds).</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Average speed</b> <span class="t">- the running average of the instant speed.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>ETA (minutes left)</b> <span class="t">- the engine's estimate; read it on the right-hand axis.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- CPU -->
+  <section class="panel" data-tab="cpu">
+    <h2>CPU usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much of the whole machine's processor each migration program is using, tick by tick.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = processor used, as a percentage of the whole PC (0-100%).</p>
+      <p><b>How to read:</b> a line sitting near 100% means the CPU is the bottleneck. "Everything" usually spikes at the start (while it scans files) then drops off.</p>
+    </div>
+    <div class="empty" id="e_cpu" hidden></div>
+    <div class="card" id="k_cpu"><canvas id="c_cpu"></canvas></div>
+    <ul class="legend2" id="leg_proc"></ul>
+  </section>
+
+  <!-- MEMORY -->
+  <section class="panel" data-tab="mem">
+    <h2>Memory usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much RAM (resident memory) each program is holding.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = memory in megabytes (MB).</p>
+      <p><b>How to read:</b> stable or gently rising-and-falling lines are healthy. A line that keeps climbing and never comes back down can signal a memory leak.</p>
+    </div>
+    <div class="empty" id="e_mem" hidden></div>
+    <div class="card" id="k_mem"><canvas id="c_mem"></canvas></div>
+    <ul class="legend2" id="leg_proc2"></ul>
+  </section>
+
+  <!-- DISK -->
+  <section class="panel" data-tab="disk">
+    <h2>Disk I/O</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data each program reads from and writes to disk each second, plus the system-wide total.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = disk throughput in MB/s (read + write).</p>
+      <p><b>How to read:</b> if the system line is high and flat (maxed out) while the Throughput graph is low, the disk is the bottleneck.</p>
+    </div>
+    <div class="empty" id="e_disk" hidden></div>
+    <div class="card" id="k_disk"><canvas id="c_disk"></canvas></div>
+    <ul class="legend2" id="leg_disk"></ul>
+  </section>
+
+  <!-- NETWORK -->
+  <section class="panel" data-tab="net">
+    <h2>Network throughput</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data is received and sent over the network (system-wide) each second.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = network throughput in MB/s.</p>
+      <p><b>How to read:</b> compare with the Disk I/O tab. Network low while disk is maxed means the disk is the limit; network maxed while disk is not means the connection is.</p>
+    </div>
+    <div class="empty" id="e_net" hidden></div>
+    <div class="card" id="k_net"><canvas id="c_net"></canvas></div>
+    <ul class="legend2" id="leg_net"></ul>
+  </section>
+
+  <!-- PHASES -->
+  <section class="panel" data-tab="phase">
+    <h2>Phase durations</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how long each stage of the migration took, from the engine's own audit timestamps.</p>
+      <p><b>Axes:</b> bottom = duration in seconds. Each row (top to bottom) is one stage in the order it ran.</p>
+      <p><b>How to read:</b> the longest bar is where most of the time went. Time the audit trail does not cover is shown in grey as an estimate.</p>
+    </div>
+    <div class="empty" id="e_phase" hidden></div>
+    <div class="card" id="k_phase"><canvas id="c_phase" style="max-height:320px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--orange)"></span><div><b>File transfer</b> <span class="t">- the actual file copy; usually the dominant stage.</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Measured stage</b> <span class="t">- duration taken directly from the app's own timestamps.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Estimated stage</b> <span class="t">- not timed by the app, so the value is approximate.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- DRIVE -->
+  <section class="panel" data-tab="drive">
+    <h2>Data per drive</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data came from each drive on the old PC, split by what happened to it.</p>
+      <p><b>Axes:</b> bottom = one bar per drive. Left = data in gigabytes (GB).</p>
+      <p><b>How to read:</b> the left segment (Copied + Failed/incomplete) is this session's own transfer attempt -- the two stack to its own total. "Already existed" is shown as a separate bar, not stacked with the others: CDM.db tracks it as a running total for this destination drive, not as part of what this specific migration selected, so it is not arithmetically part of the same whole.</p>
+    </div>
+    <div class="empty" id="e_drive" hidden></div>
+    <div class="card" id="k_drive"><canvas id="c_drive"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Copied</b> <span class="t">- new data transferred to the new PC this session.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Failed / incomplete</b> <span class="t">- selected for this session's transfer but not completed.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- matching data already on the new PC (a separate, cumulative figure for this drive -- not part of this session's own total).</span></div></li>
+    </ul>
+  </section>
+
+  <!-- FILES -->
+  <section class="panel" data-tab="files">
+    <h2>File outcomes</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> the number of files by what happened to each one (count, not size).</p>
+      <p><b>How to read:</b> each slice of the ring is one outcome. A large red slice means many files could not be copied; see the Skip reasons tab.</p>
+    </div>
+    <div class="empty" id="e_files" hidden></div>
+    <div class="card" id="k_files"><canvas id="c_files" style="max-height:260px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--green)"></span><div><b>Copied</b> <span class="t">- successfully transferred.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">- identical file already on the new PC.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Skipped</b> <span class="t">- could not be copied.</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Backed up</b> <span class="t">- an existing new-PC file was moved aside before copying.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- SKIP -->
+  <section class="panel" data-tab="skip">
+    <h2>Skip reasons</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> for skipped files, the reason, grouped into categories.</p>
+      <p><b>Axes:</b> bottom = number of files. Each row is one reason, largest at the top.</p>
+      <p><b>How to read:</b> the top bar is the biggest cause of skipped files.</p>
+    </div>
+    <div class="empty" id="e_skip" hidden></div>
+    <div class="card" id="k_skip"><canvas id="c_skip" style="max-height:240px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Files skipped</b> <span class="t">- count of files that could not be migrated, per reason.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- KNOBS -->
+  <section class="panel" data-tab="knobs">
+    <h2>Transfer settings used</h2>
+    <div class="explain">
+      <p><b>What it shows:</b> the settings the copy engine ran with. They control how files are copied and are the knobs to change to speed things up.</p>
+      <p><b>Where they live:</b> the engine's deployed <code>.exe.config</code>, read by <code>DellDataManager</code>.</p>
+    </div>
+    <div class="empty" id="knob_note"></div>
+    <div class="card" style="padding:4px 4px 0">
+      <table><thead><tr><th>Setting (rclone flag)</th><th>What it does</th><th class="n">This run</th></tr></thead><tbody id="t_knobs"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<script id="bench-data">window.__BENCHMARK__ = {"run_id":"681","role":"target","sub":"Run 681 | role target | Latitude 5410 to Latitude 5455 | network Diwakar-2.4G | 22 Oct 2026","banners":[],"rollup":{"id":0,"label":"Whole run","kind":"rollup","migration_id":null,"window":{"start":"2026-10-22T17:08:24","end":"2026-10-22T19:42:12"},"tiles":[{"l":"Total migration time","v":"2h 33m 48s","d":"22 Oct 17:08:24 to 19:42:12"},{"l":"Data moved","v":"40.0 GB","d":"of 40.2 GB attempted this session"},{"l":"Avg throughput","v":"4.5 MB/s","d":"peak 8.1 MB/s"},{"l":"Files copied","v":"15","d":"1 skipped"}],"busy":[{"key":"cpu","label":"CPU","avg":11.4,"peak":52.7,"mode":"of 100% CPU"},{"key":"disk","label":"new-PC disk","avg":1.2,"peak":39.3,"mode":"relative to observed peak"},{"key":"network","label":"network","avg":48.9,"peak":100.0,"mode":"relative to observed peak"}],"verdict":{"kind":"none","text":"No clear bottleneck: the busiest resource, network, averaged only 49% busy during transfer. (disk and network are relative to the observed peak; set DDA_BENCHMARK_LINK_MBPS / DDA_BENCHMARK_DISK_MBPS for absolute ceilings.)"},"labels":["0.0m","1.3m","2.6m","3.8m","5.1m","6.4m","7.7m","9.0m","10.3m","11.5m","12.8m","14.1m","15.4m","16.7m","17.9m","19.2m","20.5m","21.8m","23.1m","24.4m","25.6m","26.9m","28.2m","29.5m","30.8m","32.0m","33.3m","34.6m","35.9m","37.2m","38.5m","39.7m","41.0m","42.3m","43.6m","44.9m","46.1m","47.4m","48.7m","50.0m","51.3m","52.6m","53.8m","55.1m","56.4m","57.7m","59.0m","60.2m","61.5m","62.8m","64.1m","65.4m","66.6m","67.9m","69.2m","70.5m","71.8m","73.1m","74.3m","75.6m","76.9m","78.2m","79.5m","80.7m","82.0m","83.3m","84.6m","85.9m","87.2m","88.4m","89.7m","91.0m","92.3m","93.6m","94.8m","96.1m","97.4m","98.7m","100.0m","101.3m","102.5m","103.8m","105.1m","106.4m","107.7m","108.9m","110.2m","111.5m","112.8m","114.1m","115.4m","116.6m","117.9m","119.2m","120.5m","121.8m","123.0m","124.3m","125.6m","126.9m","128.2m","129.5m","130.7m","132.0m","133.3m","134.6m","135.9m","137.1m","138.4m","139.7m","141.0m","142.3m","143.6m","144.8m","146.1m","147.4m","148.7m","150.0m","151.2m","152.5m"],"thr":{"instant":[null,null,7.35,6.4,5.93,5.56,5.41,5.32,5.31,5.26,5.25,5.3,5.37,5.43,5.42,5.39,5.35,5.31,5.27,5.21,5.14,5.05,5.02,5.03,5.02,5.0,5.02,5.05,5.05,4.98,4.91,4.91,4.92,4.94,4.96,4.98,4.98,4.96,4.96,4.96,4.95,4.93,4.93,4.92,4.93,4.96,4.97,4.96,4.95,4.93,4.91,4.91,4.9,4.91,4.91,4.92,4.93,4.93,4.89,4.89,4.88,4.86,4.84,4.83,4.82,4.81,4.8,4.8,4.79,4.78,4.75,4.75,4.76,4.76,4.77,4.78,4.78,4.78,4.79,4.79,4.79,4.77,4.77,4.74,4.73,4.7,4.68,4.66,4.64,4.63,4.6,4.56,4.54,4.53,4.52,4.49,4.48,4.47,4.44,4.43,4.44,4.43,4.42,4.42,4.4,4.4,4.41,4.42,4.43,4.44,4.46,4.47,4.48,4.5,4.51,4.52,4.54,4.55,4.3,0.27],"avg":[null,null,7.35,6.88,6.56,6.31,6.13,6.0,5.9,5.82,5.75,5.71,5.68,5.66,5.64,5.62,5.6,5.58,5.57,5.55,5.53,5.5,5.48,5.46,5.44,5.42,5.4,5.39,5.38,5.36,5.35,5.33,5.32,5.31,5.3,5.29,5.28,5.27,5.26,5.25,5.25,5.24,5.23,5.22,5.22,5.21,5.21,5.2,5.2,5.19,5.18,5.18,5.17,5.17,5.16,5.16,5.15,5.15,5.15,5.14,5.14,5.13,5.13,5.12,5.12,5.11,5.11,5.1,5.1,5.09,5.09,5.08,5.08,5.08,5.07,5.07,5.06,5.06,5.06,5.05,5.05,5.05,5.04,5.04,5.04,5.03,5.03,5.02,5.02,5.01,5.01,5.0,5.0,4.99,4.99,4.98,4.98,4.97,4.97,4.96,4.96,4.95,4.95,4.94,4.94,4.93,4.93,4.92,4.92,4.91,4.91,4.9,4.9,4.9,4.89,4.89,4.89,4.88,4.88,4.84],"eta":[null,null,75.64,105.18,112.3,118.62,120.59,121.43,120.41,120.51,119.39,116.91,113.87,111.2,110.09,109.5,109.18,108.87,108.67,108.94,109.5,110.35,110.01,108.55,107.3,106.6,104.81,102.73,101.55,102.2,102.9,101.57,99.97,98.24,96.25,94.41,93.16,92.37,91.15,89.83,88.74,88.09,86.91,85.82,84.18,82.23,80.55,79.56,78.53,77.98,77.11,75.82,74.77,73.39,72.04,70.46,68.8,67.72,67.29,66.13,65.31,64.41,63.87,62.73,61.85,60.86,59.79,58.48,57.6,56.55,56.07,54.79,53.41,51.86,50.36,48.78,47.5,46.19,44.8,43.39,42.24,41.4,40.35,39.67,38.77,38.45,37.92,37.22,36.64,35.68,35.37,35.27,34.74,33.56,32.6,32.28,31.73,30.73,30.47,29.19,27.85,26.9,25.95,24.7,24.1,22.69,21.0,19.5,17.68,16.17,14.35,12.61,10.83,9.09,7.35,5.65,3.96,2.3,0.66,0.0]},"res":{"cpu":{"procs":{"MyDellExperience":[1.32,1.67,1.5,1.65,1.66,1.74,1.57,1.67,1.77,1.77,1.73,1.78,1.55,1.51,1.72,1.66,1.59,1.63,1.74,1.75,1.69,1.76,1.8,1.72,1.74,1.5,1.57,1.52,1.44,1.68,1.81,1.74,1.55,1.41,1.5,1.53,1.52,1.71,1.56,1.56,1.55,1.62,1.71,1.67,1.61,1.59,1.6,1.66,1.74,1.74,1.75,1.68,1.7,1.68,1.63,1.47,1.45,1.48,1.62,1.51,1.73,1.49,1.71,1.5,1.62,1.61,1.54,1.58,1.62,1.71,1.66,1.48,1.32,1.38,1.45,1.55,2.03,2.09,2.1,2.12,1.91,1.88,1.51,1.97,1.73,1.59,2.1,2.27,2.54,1.6,1.11,1.14,1.0,1.02,0.66,0.96,1.03,0.74,1.05,1.21,1.03,0.89,0.82,0.96,0.79,1.03,0.97,0.98,0.96,0.99,1.0,1.0,1.01,1.02,1.04,0.99,1.02,1.0,1.03,1.25],"DellDataManager":[3.11,1.13,0.69,0.23,0.22,0.26,0.26,0.23,0.25,0.28,0.25,0.26,0.24,0.3,0.25,0.27,0.25,0.3,0.28,0.26,0.26,0.27,0.28,0.26,0.27,0.27,0.3,0.27,0.26,0.27,0.32,0.29,0.26,0.24,0.27,0.26,0.27,0.27,0.27,0.28,0.24,0.23,0.32,0.29,0.27,0.28,0.23,0.29,0.27,0.25,0.31,0.24,0.31,0.26,0.28,0.27,0.32,0.31,0.25,0.26,0.28,0.29,0.27,0.31,0.31,0.27,0.27,0.27,0.29,0.28,0.27,0.26,0.28,0.29,0.28,0.31,0.34,0.38,0.4,0.35,0.39,0.33,0.4,0.4,0.4,0.38,0.39,0.38,0.37,0.21,0.15,0.12,0.14,0.17,0.21,0.2,0.19,0.2,0.14,0.16,0.13,0.2,0.14,0.13,0.15,0.16,0.16,0.14,0.13,0.16,0.13,0.15,0.15,0.14,0.14,0.14,0.15,0.14,0.27,1.48],"DellFileTransferUtil":[0.44,0.2,8.71,0.62,0.59,0.57,0.66,0.56,0.64,0.52,0.73,0.74,0.7,0.69,0.64,0.69,0.44,0.59,0.64,0.49,0.54,0.41,0.63,0.73,0.49,0.61,0.64,0.8,0.55,0.31,0.53,0.66,0.71,0.69,0.66,0.74,0.57,0.58,0.6,0.63,0.68,0.49,0.62,0.58,0.79,0.77,0.66,0.5,0.54,0.53,0.56,0.66,0.58,0.69,0.59,0.7,0.62,0.55,0.5,0.49,0.62,0.44,0.59,0.61,0.51,0.55,0.73,0.54,0.63,0.53,0.47,0.61,0.57,0.64,0.66,0.62,0.69,0.73,0.66,0.72,0.55,0.63,0.51,0.59,0.47,0.32,0.53,0.56,0.59,0.36,0.11,0.19,0.26,0.31,0.17,0.14,0.28,0.18,0.25,0.43,0.34,0.26,0.33,0.28,0.18,0.39,0.3,0.36,0.4,0.34,0.37,0.37,0.36,0.43,0.39,0.39,0.36,0.4,2.1,1.74]},"system":[28.39,18.51,17.02,12.57,14.93,13.12,13.02,12.17,12.16,12.34,12.13,12.38,13.14,13.56,12.39,12.84,15.13,13.4,12.2,11.61,11.25,11.19,11.96,11.89,11.82,11.69,11.99,11.56,11.69,11.28,11.36,11.7,11.76,11.49,11.3,11.39,11.43,11.44,11.42,12.23,12.3,14.67,11.55,11.48,11.74,12.02,11.68,11.99,11.83,11.24,12.07,12.41,12.84,11.81,12.15,11.48,11.68,10.83,11.66,11.8,11.72,10.31,11.73,11.79,12.38,11.44,11.26,10.78,11.38,11.2,11.81,13.23,13.59,11.59,11.23,13.27,15.73,17.87,15.96,17.12,14.45,15.67,14.46,14.73,13.45,13.48,16.7,17.32,17.33,11.91,7.19,7.58,7.07,8.19,6.8,7.1,7.41,6.74,7.83,8.36,9.32,7.08,7.04,7.41,6.72,8.25,8.22,7.36,7.75,7.9,7.84,8.42,7.69,8.43,7.85,7.64,7.63,8.26,8.45,18.4]},"mem":{"procs":{"MyDellExperience":[627.46,639.26,639.56,639.5,639.86,639.85,639.97,640.13,640.05,640.08,640.08,639.79,639.22,639.21,639.28,639.27,639.44,639.38,639.38,639.33,639.31,639.58,639.75,640.48,640.51,640.41,640.47,640.43,640.5,640.54,640.09,639.55,639.72,639.67,639.6,639.62,639.62,639.74,639.65,639.8,639.72,639.64,639.72,639.73,639.78,639.61,639.63,639.85,639.68,639.79,639.88,639.8,639.73,639.84,639.8,639.76,639.76,639.69,640.02,639.88,639.83,639.93,639.8,639.84,639.82,639.88,640.08,640.82,640.99,641.05,640.93,640.84,640.85,640.96,640.83,640.99,640.73,640.8,640.73,640.77,640.78,640.81,640.7,640.85,640.77,640.78,640.81,640.87,640.85,640.84,640.94,641.04,641.04,641.02,640.93,641.18,641.2,640.93,641.09,641.22,641.02,641.21,641.18,641.08,641.01,641.17,641.12,641.06,641.24,641.1,641.27,641.21,641.15,641.12,641.22,641.22,641.18,641.22,641.23,647.7],"DellDataManager":[247.14,342.52,409.84,404.02,404.44,404.34,403.7,403.45,403.89,403.58,403.88,403.52,402.7,402.57,402.85,402.62,402.5,402.92,402.89,402.73,402.72,402.73,402.83,402.93,402.84,402.79,404.09,404.86,403.81,403.66,403.47,403.34,403.45,403.42,403.47,403.59,398.1,397.95,397.99,398.05,398.18,397.97,398.13,398.15,398.17,398.2,398.22,398.17,398.13,397.96,397.21,397.0,397.02,396.94,397.05,397.22,394.81,391.74,392.02,391.91,392.28,392.36,392.51,392.43,392.16,392.07,392.17,392.17,392.38,392.61,392.47,392.52,392.87,392.69,392.68,392.67,392.84,392.92,392.88,392.44,392.49,392.73,392.78,392.73,392.83,393.16,393.04,393.54,393.22,394.21,393.99,393.6,393.86,394.08,396.77,404.54,408.48,410.71,410.92,410.76,411.07,410.41,410.4,410.46,410.62,410.36,409.83,409.72,409.73,409.97,410.24,410.14,410.15,409.98,408.57,408.83,408.58,408.11,409.27,528.25],"DellFileTransferUtil":[49.24,145.84,220.15,53.12,53.14,52.99,53.61,53.39,53.77,53.14,53.49,53.21,53.4,53.46,53.5,53.4,53.38,53.28,53.28,53.36,53.3,53.11,53.24,53.37,53.8,57.09,55.82,54.27,55.56,54.16,53.69,55.06,54.79,54.0,54.45,53.64,53.62,54.34,55.94,59.55,57.27,56.12,53.95,54.52,55.06,54.07,55.03,54.02,53.59,54.22,53.75,53.75,53.73,53.86,54.21,55.26,53.84,54.2,53.64,54.15,54.43,53.93,53.78,54.12,54.05,53.95,53.78,54.69,55.39,54.2,53.93,53.85,54.18,53.89,53.84,54.22,54.41,54.62,54.06,54.07,53.75,53.92,54.45,55.32,56.66,58.87,57.51,54.22,53.97,54.29,54.33,54.25,53.72,53.67,54.31,56.41,55.7,54.49,55.33,53.66,53.8,53.69,53.86,53.67,54.04,53.9,54.9,53.71,53.92,53.74,53.71,54.07,53.84,54.13,53.75,53.77,53.75,53.78,110.22,184.82]}},"disk":{"procs":{"MyDellExperience":[0.08,0.13,0.08,0.08,0.08,0.08,0.07,0.08,0.08,0.08,0.07,0.08,0.07,0.07,0.08,0.08,0.08,0.07,0.08,0.08,0.08,0.08,0.08,0.07,0.08,0.07,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.08,0.07,0.08,0.07,0.07,0.07,0.08,0.08,0.07,0.08,0.08,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.08,0.08,0.08,0.07,0.07,0.07,0.07,0.06,0.05,0.05,0.05,0.05,0.05,0.05,0.04,0.05,0.04,0.04,0.05,0.05,0.06,0.07,0.08,0.08,0.07,0.08,0.05,0.07,0.08,0.06,0.08,0.08,0.08,0.07,0.06,0.07,0.06,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.08],"DellDataManager":[0.74,1.32,0.66,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.03,0.02,0.03,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.19,2.18],"DellFileTransferUtil":[3.39,1.15,8.2,5.38,5.07,4.71,5.0,5.1,5.27,4.43,6.12,5.53,6.24,5.58,5.37,4.87,4.65,4.62,4.87,3.66,4.07,3.23,5.04,5.76,3.99,4.98,5.91,5.41,4.55,1.95,4.27,4.94,5.56,5.64,5.67,5.42,4.45,4.59,5.01,5.03,4.33,4.27,4.72,4.73,5.97,6.0,4.97,4.41,4.11,4.09,4.39,4.83,4.72,5.16,5.15,5.73,5.2,3.54,4.16,3.69,5.04,3.31,3.68,4.55,3.89,4.12,5.15,4.1,4.03,3.55,3.55,5.19,5.15,5.14,5.78,5.31,4.31,5.24,5.02,5.11,3.55,4.42,2.94,3.9,3.08,1.65,3.28,3.14,3.12,3.29,1.31,1.93,2.98,4.86,2.38,1.6,3.68,2.2,2.91,4.67,4.31,2.86,4.05,4.55,2.21,5.86,5.31,5.4,5.38,6.14,5.83,5.85,5.94,6.13,6.08,5.83,5.74,6.14,5.85,0.08]},"system":[22.69,3.38,6.43,5.93,6.69,5.76,6.68,6.61,5.91,6.02,6.72,6.3,7.38,7.1,5.7,6.01,5.96,6.1,5.62,3.87,4.19,3.37,5.28,5.89,7.13,5.08,6.1,5.94,5.14,3.24,4.34,5.02,5.92,5.72,4.56,5.48,7.77,4.61,5.07,8.77,4.98,8.6,4.96,4.68,5.77,6.29,5.63,7.95,4.76,4.2,4.37,5.51,6.15,6.34,5.46,5.75,5.51,4.59,4.25,7.16,4.58,3.7,3.99,4.71,7.12,4.46,4.73,4.6,4.08,4.22,3.52,8.52,5.25,5.33,5.73,5.67,5.48,5.57,5.2,5.22,4.2,4.84,6.24,3.57,3.6,2.08,6.37,3.39,5.39,6.52,2.41,3.15,3.03,5.11,5.22,1.71,3.81,2.43,3.03,5.59,6.94,3.35,4.12,4.72,3.0,6.3,7.93,5.52,5.59,6.24,5.98,9.04,6.1,6.56,6.24,5.85,5.88,8.71,5.82,14.46]},"net":{"recv":[1.2,0.24,5.62,5.42,5.12,4.75,5.04,5.14,5.31,4.46,6.17,5.57,6.3,5.63,5.41,4.91,4.69,4.66,4.9,3.68,4.1,3.26,5.08,5.79,4.03,5.01,6.0,5.45,4.58,1.99,4.3,4.97,5.61,5.7,5.75,5.46,4.49,4.62,5.04,5.06,4.37,4.31,4.76,4.76,6.02,6.06,5.01,4.44,4.16,4.12,4.43,4.86,4.77,5.2,5.2,5.81,5.26,3.57,4.2,3.72,5.07,3.33,3.72,4.61,3.92,4.16,5.18,4.14,4.07,3.58,3.58,5.25,5.22,5.23,5.87,5.39,4.39,5.33,5.09,5.2,3.6,4.5,2.99,3.96,3.12,1.73,3.29,3.25,3.16,3.32,1.32,1.95,3.03,4.9,2.42,1.66,3.71,2.3,2.95,4.71,4.37,2.87,4.11,4.63,2.25,5.95,5.4,5.49,5.47,6.25,5.93,5.94,6.04,6.24,6.18,5.92,5.84,6.24,5.37,0.06],"sent":[0.53,0.31,0.05,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.02,0.02,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.01,0.02,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.11,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.03,0.03,0.02,0.02,0.03,0.02,0.03,0.03,0.02,0.02,0.02,0.02,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.02,0.03,0.02,0.02,0.02,0.02,0.02,0.01,0.02,0.02,0.02,0.03,0.01,0.01,0.02,0.12,0.02,0.01,0.02,0.02,0.02,0.03,0.03,0.02,0.02,0.03,0.01,0.04,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.04,0.03]}},"procs":[{"name":"DellDataManager","label":"DellDataManager (engine)","desc":"coordinates the whole migration."},{"name":"DellFileTransferUtil","label":"DellFileTransferUtil / rclone","desc":"the program that actually copies the files."},{"name":"MyDellExperience","label":"App window (UI)","desc":"the screen the user sees."}],"phases":[["Compatibility",9.0,"m"],["Migration info",38.0,"m"],["Time estimate",8.0,"m"],["Settings migration",41.0,"m"],["File transfer",9027.0,"x"],["Transfer reporting",0.0,"m"],["Migration report",6.0,"m"],["Unmeasured / other",75.0,"e"]],"drives":{"labels":["C:/","D:/","E:/"],"copied":[40.01,0.0,0.0],"existed":[1.99,0.04,0.01],"rem":[0.23,0.0,0.0]},"files":{"labels":["Copied","Already existed","Skipped","Backed up"],"values":[15,18944,1,11]},"skips":{"labels":["Other","Permission denied"],"v":[5,1]},"empty":{"thr":null,"cpu":null,"mem":null,"disk":null,"net":null,"phase":null,"drive":null,"files":null,"skip":null},"info":{"from":null,"to":null,"network":null}},"episodes":[{"id":1,"label":"Episode 1 - Primary migration","kind":"primary","migration_id":371,"window":{"start":"2026-10-22T17:08:32","end":"2026-10-22T19:41:56"},"tiles":[{"l":"Total migration time","v":"2h 33m 24s","d":"22 Oct 17:08:32 to 19:41:56"},{"l":"Data moved","v":"40.0 GB","d":"of 40.2 GB attempted this session"},{"l":"Avg throughput","v":"4.5 MB/s","d":"peak 8.1 MB/s"},{"l":"Files copied","v":"15","d":"1 skipped"}],"busy":[{"key":"cpu","label":"CPU","avg":11.4,"peak":52.7,"mode":"of 100% CPU"},{"key":"disk","label":"new-PC disk","avg":1.2,"peak":39.3,"mode":"relative to observed peak"},{"key":"network","label":"network","avg":48.9,"peak":100.0,"mode":"relative to observed peak"}],"verdict":{"kind":"none","text":"No clear bottleneck: the busiest resource, network, averaged only 49% busy during transfer. (disk and network are relative to the observed peak; set DDA_BENCHMARK_LINK_MBPS / DDA_BENCHMARK_DISK_MBPS for absolute ceilings.)"},"labels":["0.0m","1.3m","2.6m","3.8m","5.1m","6.4m","7.7m","8.9m","10.2m","11.5m","12.8m","14.1m","15.3m","16.6m","17.9m","19.2m","20.5m","21.7m","23.0m","24.3m","25.6m","26.8m","28.1m","29.4m","30.7m","32.0m","33.2m","34.5m","35.8m","37.1m","38.4m","39.6m","40.9m","42.2m","43.5m","44.7m","46.0m","47.3m","48.6m","49.9m","51.1m","52.4m","53.7m","55.0m","56.2m","57.5m","58.8m","60.1m","61.4m","62.6m","63.9m","65.2m","66.5m","67.8m","69.0m","70.3m","71.6m","72.9m","74.1m","75.4m","76.7m","78.0m","79.3m","80.5m","81.8m","83.1m","84.4m","85.6m","86.9m","88.2m","89.5m","90.8m","92.0m","93.3m","94.6m","95.9m","97.2m","98.4m","99.7m","101.0m","102.3m","103.5m","104.8m","106.1m","107.4m","108.7m","109.9m","111.2m","112.5m","113.8m","115.0m","116.3m","117.6m","118.9m","120.2m","121.4m","122.7m","124.0m","125.3m","126.6m","127.8m","129.1m","130.4m","131.7m","132.9m","134.2m","135.5m","136.8m","138.1m","139.3m","140.6m","141.9m","143.2m","144.5m","145.7m","147.0m","148.3m","149.6m","150.8m","152.1m"],"thr":{"instant":[null,5.21,7.64,6.34,5.89,5.53,5.41,5.32,5.31,5.25,5.26,5.3,5.38,5.43,5.42,5.39,5.35,5.31,5.27,5.2,5.13,5.05,5.02,5.03,5.02,5.0,5.02,5.05,5.05,4.98,4.91,4.91,4.92,4.94,4.96,4.98,4.98,4.96,4.96,4.96,4.95,4.93,4.93,4.92,4.93,4.96,4.97,4.96,4.95,4.93,4.91,4.91,4.9,4.91,4.91,4.92,4.93,4.93,4.9,4.89,4.88,4.86,4.84,4.83,4.82,4.81,4.8,4.8,4.79,4.78,4.75,4.75,4.76,4.76,4.77,4.78,4.78,4.78,4.79,4.79,4.79,4.77,4.77,4.75,4.73,4.71,4.68,4.66,4.64,4.63,4.6,4.56,4.54,4.53,4.53,4.5,4.48,4.47,4.44,4.43,4.44,4.43,4.42,4.42,4.4,4.4,4.41,4.42,4.43,4.44,4.46,4.47,4.48,4.49,4.51,4.52,4.53,4.55,4.56,1.51],"avg":[null,5.21,6.42,6.4,6.27,6.12,6.0,5.91,5.83,5.77,5.72,5.68,5.65,5.64,5.62,5.61,5.59,5.57,5.56,5.54,5.52,5.49,5.47,5.45,5.44,5.42,5.4,5.39,5.38,5.36,5.35,5.33,5.32,5.31,5.3,5.29,5.28,5.27,5.27,5.26,5.25,5.24,5.23,5.23,5.22,5.21,5.21,5.2,5.2,5.19,5.19,5.18,5.18,5.17,5.17,5.16,5.16,5.15,5.15,5.15,5.14,5.14,5.13,5.13,5.12,5.12,5.11,5.11,5.1,5.1,5.09,5.09,5.08,5.08,5.08,5.07,5.07,5.06,5.06,5.06,5.05,5.05,5.05,5.04,5.04,5.04,5.03,5.03,5.02,5.02,5.01,5.01,5.0,5.0,4.99,4.99,4.98,4.98,4.97,4.97,4.96,4.96,4.95,4.95,4.94,4.94,4.93,4.93,4.92,4.92,4.91,4.91,4.9,4.9,4.9,4.89,4.89,4.89,4.89,4.86],"eta":[null,0.0,89.01,105.96,112.92,119.06,120.66,121.42,120.33,120.64,119.0,116.79,113.56,111.04,110.01,109.48,109.18,108.85,108.63,109.01,109.51,110.36,109.93,108.5,107.28,106.52,104.73,102.68,101.52,102.2,102.86,101.53,99.97,98.17,96.19,94.41,93.16,92.37,91.15,89.83,88.74,88.12,86.95,85.82,84.23,82.28,80.55,79.59,78.56,78.0,77.17,75.86,74.81,73.48,72.08,70.51,68.9,67.76,67.35,66.17,65.36,64.45,63.92,62.81,61.9,60.92,59.9,58.55,57.66,56.6,56.15,54.94,53.5,52.02,50.57,48.88,47.61,46.34,44.96,43.55,42.31,41.49,40.42,39.79,38.86,38.47,38.02,37.32,36.72,35.8,35.38,35.32,34.85,33.75,32.68,32.31,31.83,30.78,30.57,29.44,28.13,27.04,26.2,25.04,24.16,22.98,21.33,19.73,18.04,16.54,14.64,12.97,11.17,9.48,7.72,5.97,4.3,2.7,0.97,0.01]},"res":{"cpu":{"procs":{"DellDataManager":[2.41,1.27,0.37,0.25,0.2,0.26,0.27,0.23,0.25,0.27,0.25,0.25,0.24,0.3,0.26,0.26,0.26,0.29,0.28,0.26,0.26,0.26,0.3,0.26,0.27,0.27,0.31,0.26,0.26,0.27,0.31,0.29,0.26,0.25,0.27,0.25,0.27,0.27,0.27,0.28,0.24,0.24,0.32,0.28,0.27,0.28,0.23,0.28,0.27,0.25,0.31,0.25,0.31,0.25,0.3,0.27,0.31,0.31,0.24,0.27,0.28,0.29,0.27,0.3,0.31,0.28,0.27,0.26,0.28,0.28,0.27,0.27,0.25,0.31,0.29,0.31,0.34,0.36,0.42,0.34,0.38,0.36,0.4,0.39,0.39,0.37,0.4,0.37,0.38,0.24,0.13,0.13,0.14,0.17,0.19,0.21,0.19,0.19,0.15,0.16,0.14,0.18,0.15,0.14,0.14,0.16,0.16,0.15,0.14,0.15,0.14,0.15,0.15,0.14,0.14,0.14,0.14,0.15,0.16,1.29],"MyDellExperience":[1.4,1.57,1.5,1.66,1.62,1.72,1.64,1.64,1.77,1.79,1.73,1.79,1.52,1.54,1.71,1.65,1.63,1.61,1.76,1.74,1.7,1.78,1.79,1.74,1.69,1.54,1.57,1.5,1.45,1.67,1.83,1.72,1.54,1.44,1.49,1.54,1.51,1.71,1.57,1.56,1.55,1.61,1.72,1.64,1.65,1.57,1.61,1.64,1.75,1.77,1.71,1.7,1.7,1.68,1.61,1.51,1.44,1.48,1.61,1.52,1.72,1.53,1.67,1.56,1.57,1.63,1.52,1.57,1.65,1.66,1.71,1.5,1.31,1.39,1.4,1.54,2.04,2.01,2.15,2.13,1.92,1.82,1.59,1.91,1.75,1.57,2.22,2.19,2.46,1.78,1.08,1.17,0.98,1.06,0.66,0.93,1.08,0.81,0.91,1.23,1.04,1.05,0.68,0.97,0.8,1.01,0.98,0.97,1.0,0.95,1.0,1.04,0.97,1.03,1.0,0.99,1.05,1.0,1.01,1.22],"DellFileTransferUtil":[0.38,5.16,2.52,0.63,0.54,0.63,0.63,0.56,0.66,0.54,0.7,0.75,0.68,0.7,0.62,0.69,0.47,0.6,0.6,0.49,0.55,0.42,0.62,0.74,0.49,0.59,0.65,0.8,0.54,0.31,0.54,0.66,0.72,0.68,0.67,0.74,0.57,0.58,0.61,0.63,0.68,0.49,0.62,0.59,0.79,0.76,0.67,0.5,0.56,0.52,0.55,0.66,0.56,0.7,0.6,0.69,0.64,0.55,0.48,0.5,0.62,0.44,0.58,0.62,0.52,0.55,0.69,0.56,0.62,0.56,0.45,0.59,0.6,0.63,0.66,0.61,0.67,0.77,0.63,0.74,0.58,0.59,0.53,0.55,0.52,0.31,0.58,0.54,0.58,0.4,0.14,0.15,0.23,0.32,0.2,0.12,0.31,0.22,0.2,0.41,0.38,0.27,0.31,0.3,0.13,0.4,0.32,0.38,0.38,0.32,0.38,0.39,0.34,0.41,0.42,0.37,0.35,0.4,0.37,1.94]},"system":[27.75,18.39,16.14,12.69,15.63,12.49,12.78,12.29,12.18,12.43,12.14,12.26,13.29,13.43,12.32,13.71,14.39,13.34,12.22,11.55,11.29,11.19,11.93,12.08,11.58,11.74,12.1,11.4,11.73,11.31,11.42,11.65,11.81,11.49,11.26,11.42,11.4,11.44,11.43,12.21,12.3,14.73,11.46,11.54,11.66,12.12,11.67,11.96,11.82,11.41,11.93,12.37,12.73,12.04,12.11,11.43,11.75,10.81,11.7,11.78,11.72,10.42,11.56,11.92,12.27,11.64,11.13,10.76,11.34,11.29,11.77,12.1,14.79,11.56,11.23,12.91,15.69,17.19,16.42,17.41,14.54,15.12,14.3,15.34,13.53,13.17,17.23,17.09,17.15,13.08,7.1,7.61,6.98,8.19,6.76,7.11,7.61,7.13,6.89,8.72,9.45,7.6,6.56,7.51,6.59,8.08,8.39,7.39,7.46,8.02,7.79,8.51,7.54,8.53,7.89,7.71,7.55,7.92,8.45,15.9]},"mem":{"procs":{"DellDataManager":[260.91,352.77,409.59,404.02,404.45,404.31,403.64,403.48,403.85,403.63,403.85,403.46,402.67,402.59,402.84,402.62,402.5,402.96,402.84,402.77,402.69,402.73,402.83,402.94,402.83,402.79,404.23,404.77,403.8,403.65,403.48,403.34,403.44,403.42,403.47,403.6,398.03,397.95,398.0,398.05,398.18,397.98,398.12,398.16,398.16,398.2,398.23,398.16,398.13,398.01,397.21,397.0,397.03,396.93,397.05,397.2,395.09,391.76,392.01,391.91,392.28,392.35,392.49,392.43,392.22,392.05,392.16,392.14,392.34,392.52,392.59,392.49,392.86,392.7,392.7,392.71,392.78,392.92,392.9,392.47,392.48,392.74,392.78,392.71,392.73,393.16,393.09,393.44,393.27,394.11,394.12,393.57,393.78,394.06,395.3,404.52,407.69,410.16,411.2,410.71,411.0,410.59,410.39,410.43,410.65,410.46,409.88,409.68,409.78,409.89,410.24,410.14,410.15,410.17,408.68,408.74,408.73,408.13,408.12,499.72],"MyDellExperience":[630.26,639.46,639.54,639.52,639.84,639.89,639.98,640.15,640.01,640.09,640.09,639.71,639.23,639.23,639.3,639.25,639.44,639.39,639.35,639.36,639.29,639.59,639.79,640.47,640.52,640.41,640.46,640.44,640.5,640.54,640.06,639.55,639.72,639.67,639.6,639.62,639.61,639.74,639.65,639.8,639.72,639.64,639.72,639.71,639.79,639.61,639.62,639.84,639.69,639.79,639.87,639.8,639.72,639.86,639.79,639.77,639.76,639.69,639.99,639.89,639.85,639.91,639.81,639.86,639.81,639.88,640.01,640.83,640.98,641.05,640.93,640.83,640.89,640.94,640.82,640.99,640.73,640.8,640.75,640.79,640.76,640.79,640.74,640.77,640.87,640.69,640.89,640.77,640.89,640.86,640.94,640.99,641.03,641.07,640.88,641.15,641.22,640.99,641.02,641.19,641.12,641.17,641.18,641.07,641.0,641.12,641.19,641.06,641.25,641.09,641.26,641.15,641.24,641.07,641.23,641.23,641.13,641.24,641.26,645.86],"DellFileTransferUtil":[49.36,164.58,103.06,53.12,53.11,52.99,53.69,53.38,53.74,53.15,53.46,53.24,53.36,53.48,53.5,53.41,53.35,53.27,53.28,53.35,53.31,53.13,53.21,53.38,53.8,57.36,55.55,54.28,55.55,54.16,53.69,55.12,54.75,54.0,54.45,53.64,53.62,54.34,55.93,59.52,57.27,56.15,53.95,54.48,55.09,54.05,55.06,54.02,53.61,54.19,53.75,53.74,53.76,53.85,54.14,55.3,53.9,54.15,53.68,54.11,54.48,53.92,53.8,54.12,54.01,53.95,53.81,54.6,55.49,54.22,53.91,53.85,54.12,53.97,53.83,54.11,54.37,54.7,54.15,54.01,53.76,53.93,54.31,55.27,56.49,58.45,57.98,54.49,54.05,54.26,54.38,54.31,53.61,53.72,54.16,55.97,56.38,54.12,55.7,53.6,53.85,53.69,53.77,53.75,53.83,53.96,55.09,53.66,53.92,53.65,53.73,53.9,54.01,54.22,53.74,53.71,53.79,53.75,53.77,238.07]}},"disk":{"procs":{"DellDataManager":[0.47,1.61,0.37,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.03,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,0.02,1.91],"MyDellExperience":[0.12,0.08,0.07,0.08,0.08,0.08,0.07,0.08,0.08,0.08,0.08,0.07,0.07,0.07,0.08,0.08,0.08,0.07,0.08,0.08,0.08,0.08,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.08,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.08,0.07,0.07,0.07,0.07,0.07,0.08,0.08,0.08,0.08,0.08,0.08,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.08,0.07,0.07,0.08,0.08,0.08,0.07,0.06,0.07,0.07,0.06,0.05,0.05,0.05,0.05,0.05,0.05,0.04,0.05,0.04,0.04,0.05,0.05,0.05,0.07,0.08,0.08,0.07,0.08,0.05,0.07,0.08,0.06,0.07,0.08,0.08,0.07,0.06,0.07,0.06,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.07,0.08],"DellFileTransferUtil":[2.85,1.08,6.76,5.36,4.98,4.81,4.99,5.08,5.28,4.45,6.12,5.57,6.28,5.5,5.28,4.94,4.64,4.6,4.86,3.58,4.18,3.29,5.0,5.83,3.93,4.96,5.86,5.47,4.43,1.98,4.35,4.95,5.57,5.63,5.66,5.41,4.45,4.59,4.99,5.04,4.33,4.26,4.73,4.73,5.94,6.0,4.97,4.42,4.25,4.06,4.3,4.79,4.72,5.19,5.2,5.64,5.37,3.59,3.91,3.89,4.94,3.38,3.58,4.68,3.79,4.35,4.89,4.18,3.97,3.82,3.33,5.12,5.09,5.15,5.76,5.37,4.35,5.28,4.9,5.12,3.79,4.12,3.26,3.73,3.27,1.63,3.5,3.12,2.86,3.51,1.45,1.47,2.78,4.92,2.39,1.6,4.02,2.63,2.22,4.55,4.67,3.21,3.66,4.67,1.52,6.0,5.35,5.37,5.38,5.86,5.91,5.89,6.11,5.95,6.29,5.69,5.71,6.25,5.83,5.4]},"system":[22.69,3.36,6.48,5.92,7.08,5.42,6.65,6.7,5.93,5.93,6.96,6.22,7.28,7.14,5.64,6.24,5.73,6.09,5.62,3.8,4.27,3.44,5.32,5.85,7.07,5.22,5.94,5.97,5.1,3.2,4.42,5.07,5.83,5.82,4.54,5.39,7.87,4.61,5.14,8.66,4.98,8.71,4.88,4.72,5.8,6.18,5.73,7.88,4.84,4.2,4.29,5.5,6.19,6.36,5.47,5.7,5.55,4.65,4.19,7.28,4.43,3.81,4.01,4.63,7.15,4.55,4.6,4.71,4.05,4.29,3.49,8.2,5.49,5.33,5.72,5.7,5.57,5.29,5.41,5.22,4.44,4.18,6.27,4.12,3.71,2.27,6.21,3.34,5.34,6.69,2.58,2.83,2.88,5.12,5.25,1.75,4.05,2.93,2.31,5.57,7.12,3.85,3.67,4.83,2.3,6.51,7.99,5.39,5.64,6.04,6.01,8.9,6.41,6.39,6.42,5.84,5.84,6.27,8.48,14.71]},"net":{"recv":[1.33,0.21,6.02,5.39,5.04,4.84,5.03,5.12,5.33,4.48,6.16,5.63,6.33,5.55,5.32,4.96,4.69,4.64,4.89,3.61,4.2,3.32,5.05,5.87,3.95,5.0,5.95,5.51,4.47,2.0,4.39,4.98,5.63,5.69,5.73,5.45,4.5,4.62,5.03,5.08,4.37,4.3,4.77,4.76,5.99,6.05,5.02,4.45,4.29,4.09,4.33,4.85,4.76,5.23,5.25,5.71,5.43,3.62,3.94,3.92,4.97,3.42,3.61,4.75,3.82,4.38,4.92,4.22,4.01,3.84,3.37,5.17,5.18,5.22,5.86,5.47,4.42,5.37,4.99,5.2,3.86,4.2,3.29,3.79,3.32,1.71,3.54,3.21,2.91,3.55,1.47,1.48,2.82,4.96,2.43,1.67,4.04,2.73,2.25,4.58,4.74,3.23,3.72,4.75,1.55,6.09,5.45,5.46,5.48,5.96,6.01,5.99,6.22,6.05,6.38,5.79,5.81,6.35,5.91,0.78],"sent":[0.79,0.06,0.04,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.02,0.02,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.01,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.11,0.03,0.03,0.02,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.03,0.03,0.02,0.02,0.03,0.02,0.03,0.03,0.03,0.02,0.02,0.02,0.03,0.03,0.03,0.03,0.03,0.02,0.03,0.02,0.03,0.02,0.02,0.02,0.02,0.02,0.01,0.02,0.02,0.02,0.03,0.01,0.01,0.02,0.12,0.02,0.01,0.02,0.02,0.01,0.03,0.03,0.02,0.02,0.03,0.01,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.03,0.04,0.03,0.03,0.03,0.03,0.03,0.04]}},"procs":[{"name":"DellDataManager","label":"DellDataManager (engine)","desc":"coordinates the whole migration."},{"name":"DellFileTransferUtil","label":"DellFileTransferUtil / rclone","desc":"the program that actually copies the files."},{"name":"MyDellExperience","label":"App window (UI)","desc":"the screen the user sees."}],"phases":[["Compatibility",9.0,"m"],["Migration info",38.0,"m"],["Time estimate",8.0,"m"],["Settings migration",41.0,"m"],["File transfer",9027.0,"x"],["Transfer reporting",0.0,"m"],["Migration report",6.0,"m"],["Unmeasured / other",75.0,"e"]],"drives":{"labels":["C:/","D:/","E:/"],"copied":[40.01,0.0,0.0],"existed":[1.99,0.04,0.01],"rem":[0.23,0.0,0.0]},"files":{"labels":["Copied","Already existed","Skipped","Backed up"],"values":[15,18944,1,11]},"skips":{"labels":["Other","Permission denied"],"v":[5,1]},"empty":{"thr":null,"cpu":null,"mem":null,"disk":null,"net":null,"phase":null,"drive":null,"files":null,"skip":null},"info":{"from":"Latitude 5410","to":"Latitude 5455","network":"Diwakar-2.4G"}}],"tuning":{"rows":[["--transfers","Number of files copied in parallel","8 (CPU count)","runtime override: CPU count (8) capped at 8; config value 4 is not used"],["--multi-thread-streams","Parallel streams used per large file","0","default"],["--multi-thread-cutoff","File size treated as large","1024M","default"],["--bwlimit","Cap on network speed (0 = unlimited)","0","default"],["--max-backlog","How many items can queue up","102400","default"],["--stats","How often progress is reported (ms)","5000","default"],["--low-level-retries","Block-level retry count","3","default"],["--retries","Whole-file retry count","1","default"]],"from_defaults":false,"source":"C:\\Program Files\\Dell\\SupportAssistAgent\\CDM\\DellDataManager.exe.config"}};</script>
+<script>
+const B = window.__BENCHMARK__ || {rollup:null, episodes:[], banners:[], tuning:{rows:[]}, sub:''};
+const views = B.rollup ? [B.rollup].concat(B.episodes) : [];
+let V = views[0] || null, charts = [], made = {}, activeTab = 'overview';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const cs=getComputedStyle(document.documentElement), C=n=>cs.getPropertyValue(n).trim();
+const PAL=['--blue','--orange','--green','--purple','--teal','--red'];
+const procColor=i=>C(PAL[i%PAL.length]);
+if(window.Chart){Chart.defaults.color=C('--muted'); Chart.defaults.borderColor=C('--grid'); Chart.defaults.font.family='system-ui'; Chart.defaults.maintainAspectRatio=false;}
+
+function wordLegend(el,list){document.getElementById(el).innerHTML=list.map(p=>
+  `<li><span class="dot" style="background:${p[1]}"></span><div><b>${esc(p[2])}</b> <span class="t">- ${esc(p[3])}</span></div></li>`).join('');}
+const procLegend=()=>V.procs.map((p,i)=>[p.name,procColor(i),p.label,p.desc]);
+
+const d=(label,data,color,fill=false,dash=false)=>({label,data,borderColor:color,backgroundColor:fill?color+'22':color,fill,spanGaps:true,borderDash:dash?[5,4]:[]});
+function mk(id,cfg){charts.push(new Chart(document.getElementById(id),cfg));}
+const line=(id,ds,o={})=>mk(id,{type:'line',data:{labels:V.labels,datasets:ds},options:{responsive:true,interaction:{mode:'index',intersect:false},elements:{point:{radius:0},line:{tension:.3,borderWidth:2}},plugins:{legend:{display:false}},scales:Object.assign({x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:C('--grid')}}},o)}});
+const xAxis={x:{grid:{display:false},title:{display:true,text:'minutes from start of window'}}};
+const procSets=group=>V.procs.filter(p=>group.procs[p.name]).map(p=>d(p.label,group.procs[p.name],procColor(V.procs.indexOf(p))));
+
+// shows the panel's message and returns true when there is nothing to draw
+function blocked(tab){
+  const msg=V.empty[tab], e=document.getElementById('e_'+tab), k=document.getElementById('k_'+tab);
+  e.hidden=!msg; e.textContent=msg||''; k.style.display=msg?'none':'';
+  return !!msg;
+}
+const inits = {
+  thr:()=>{ if(blocked('thr'))return; line('c_thr',[d('Instant',V.thr.instant,C('--blue'),true),d('Avg',V.thr.avg,C('--teal')),Object.assign(d('ETA',V.thr.eta,C('--red')),{yAxisID:'y1'})],Object.assign({y:{title:{display:true,text:'MB/s'}},y1:{position:'right',beginAtZero:true,grid:{display:false},title:{display:true,text:'min'}}},xAxis)); },
+  cpu:()=>{ if(blocked('cpu'))return; line('c_cpu',procSets(V.res.cpu).concat([d('System',V.res.cpu.system,C('--muted'),false,true)]),Object.assign({y:{max:100,title:{display:true,text:'% of whole machine'}}},xAxis)); wordLegend('leg_proc',procLegend().concat([['system',C('--muted'),'System total','all processes on the PC (dashed).']])); },
+  mem:()=>{ if(blocked('mem'))return; line('c_mem',procSets(V.res.mem),Object.assign({y:{title:{display:true,text:'MB'}}},xAxis)); wordLegend('leg_proc2',procLegend()); },
+  disk:()=>{ if(blocked('disk'))return; line('c_disk',procSets(V.res.disk).concat([d('System',V.res.disk.system,C('--muted'),false,true)]),Object.assign({y:{title:{display:true,text:'MB/s (read + write)'}}},xAxis)); wordLegend('leg_disk',procLegend().concat([['system',C('--muted'),'System total','all disk activity on the PC (dashed).']])); },
+  net:()=>{ if(blocked('net'))return; line('c_net',[d('Received',V.res.net.recv,C('--blue'),true),d('Sent',V.res.net.sent,C('--orange'))],Object.assign({y:{title:{display:true,text:'MB/s'}}},xAxis)); wordLegend('leg_net',[['recv',C('--blue'),'Received','data arriving over the network link (system-wide; Windows has no per-process network counter).'],['sent',C('--orange'),'Sent','data leaving the PC.']]); },
+  phase:()=>{ if(blocked('phase'))return; mk('c_phase',{type:'bar',data:{labels:V.phases.map(p=>p[0]),datasets:[{data:V.phases.map(p=>p[1]),backgroundColor:V.phases.map(p=>p[2]==='x'?C('--orange'):p[2]==='e'?C('--grid'):C('--blue'))}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' s'}}},scales:{x:{title:{display:true,text:'seconds'},grid:{color:C('--grid')}},y:{grid:{display:false},ticks:{autoSkip:false}}}}}); },
+  drive:()=>{ if(blocked('drive'))return; mk('c_drive',{type:'bar',data:{labels:V.drives.labels,datasets:[
+    {label:'Copied',data:V.drives.copied,backgroundColor:C('--blue'),stack:'session'},
+    {label:'Failed / incomplete',data:V.drives.rem,backgroundColor:C('--grid'),stack:'session'},
+    {label:'Already existed',data:V.drives.existed,backgroundColor:C('--teal'),stack:'existing'}
+  ]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw+' GB'}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,title:{display:true,text:'GB'},grid:{color:C('--grid')}}}}}); },
+  files:()=>{ if(blocked('files'))return; mk('c_files',{type:'doughnut',data:{labels:V.files.labels,datasets:[{data:V.files.values,backgroundColor:[C('--green'),C('--teal'),C('--red'),C('--blue')],borderWidth:0}]},options:{cutout:'60%',plugins:{legend:{display:false}}}}); },
+  skip:()=>{ if(blocked('skip'))return; mk('c_skip',{type:'bar',data:{labels:V.skips.labels,datasets:[{data:V.skips.v,backgroundColor:C('--red')}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' files'}}},scales:{x:{title:{display:true,text:'files'},grid:{color:C('--grid')}},y:{grid:{display:false},ticks:{autoSkip:false}}}}}); }
+};
+
+function renderOverview(){
+  document.getElementById('tiles').innerHTML=V.tiles.map(t=>`<div class="card tile"><div class="l">${esc(t.l)}</div><div class="v">${esc(t.v)}</div><div class="d">${esc(t.d)}</div></div>`).join('');
+  document.getElementById('busy').innerHTML=V.busy.length?'<b>Resource busy % during file transfer</b>'+V.busy.map(b=>`<div class="row"><span>${esc(b.label)}</span><div class="bar"><i style="width:${b.avg}%"></i></div><span class="m">avg ${b.avg}% / peak ${b.peak}% - ${esc(b.mode)}</span></div>`).join(''):'<span class="m">No resource profile for this window.</span>';
+  const v=V.verdict; document.getElementById('verdict').innerHTML=v?`<strong>Bottleneck:</strong> ${esc(v.text)}`:'';
+}
+function renderKnobs(){
+  const t=B.tuning||{rows:[]};
+  document.getElementById('knob_note').textContent=t.from_defaults?'Engine config not read: values below are defaults, not confirmed for this run.':'Read from '+t.source;
+  document.getElementById('t_knobs').innerHTML=t.rows.map(k=>`<tr><td><code>${esc(k[0])}</code></td><td>${esc(k[1])}${k[3]?'<br><span style="color:var(--muted);font-size:12px">'+esc(k[3])+'</span>':''}</td><td class="n">${esc(k[2])}</td></tr>`).join('');
+}
+
+function show(id){
+  activeTab=id;
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.dataset.tab===id));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+  if(V && inits[id] && !made[id] && window.Chart){ inits[id](); made[id]=true; }
+}
+function selectView(i){
+  V=views[i]; charts.forEach(c=>c.destroy()); charts=[]; made={};
+  document.querySelectorAll('.ep').forEach((b,j)=>b.classList.toggle('active',j===i));
+  renderOverview(); show(activeTab);
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>show(t.dataset.tab)));
+document.getElementById('sub').textContent=B.sub||'';
+document.getElementById('banners').innerHTML=(B.banners||[]).map(b=>`<div class="banner">${esc(b)}</div>`).join('');
+const sel=document.getElementById('episodes');
+views.forEach((v,i)=>{const b=document.createElement('button');b.className='ep';b.textContent=i===0?'Whole run':v.label;b.addEventListener('click',()=>selectView(i));sel.appendChild(b);});
+renderKnobs();
+if(V){ selectView(0); } else { show('overview'); }
+</script>
+</body>
+</html>

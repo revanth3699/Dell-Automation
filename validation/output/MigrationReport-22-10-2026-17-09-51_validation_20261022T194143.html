@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration validation: MigrationReport-22-10-2026-17-09-51</title>
+<style>
+:root { color-scheme: light dark; --donut-track: #e1e0d9; }
+@media (prefers-color-scheme: dark) { :root { --donut-track: #2c2c2a; } }
+body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem;
+       background: #fafafa; color: #1a1a1a; }
+@media (prefers-color-scheme: dark) { body { background: #1a1a1a; color: #eee; } }
+h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.1rem; margin-top: 2rem; }
+.subtitle { color: #777; margin-bottom: 1.5rem; word-break: break-all; }
+.top-row { display: flex; gap: 2rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+.summary { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.stat { background: rgba(127,127,127,0.08); border-radius: 8px; padding: 0.75rem 1.25rem; min-width: 110px; }
+.stat .num { font-size: 1.8rem; font-weight: 700; display: block; }
+.stat.pass .num { color: #0ca30c; } .stat.fail .num { color: #d03b3b; }
+.donut-wrap { display: flex; align-items: center; gap: 1rem; }
+.donut { width: 110px; height: 110px; flex-shrink: 0; }
+.donut-pct { font-size: 20px; font-weight: 700; fill: currentColor; }
+.donut-sub { font-size: 8px; fill: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+.legend { font-size: 0.85rem; }
+.legend-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.15rem 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.pass { background: #0ca30c; } .dot.fail { background: #d03b3b; }
+.overall-badge { font-size: 1rem; font-weight: 700; padding: 0.3rem 0.9rem; border-radius: 6px; }
+.overall-badge.pass { background: #dafbe1; color: #0ca30c; }
+.overall-badge.fail { background: #ffebe9; color: #d03b3b; }
+table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+td, th { text-align: left; padding: 0.4rem 0.7rem; border-bottom: 1px solid rgba(127,127,127,0.15); font-size: 0.9rem; }
+th { color: #888; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge { font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 4px; white-space: nowrap; }
+.badge.pass { background: #dafbe1; color: #0ca30c; }
+.badge.fail { background: #ffebe9; color: #d03b3b; }
+.badge.neutral { background: rgba(127,127,127,0.15); color: #8a8a8a; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
+.note { color: #777; font-size: 0.85rem; }
+.category { border: 1px solid rgba(127,127,127,0.25); border-radius: 8px; margin-bottom: 0.6rem; overflow: hidden; }
+.category-header { padding: 0.6rem 1rem; display: flex; align-items: center; gap: 0.7rem; cursor: pointer; }
+.category-header .chevron { color: #888; font-size: 0.7rem; transition: transform 0.15s ease; }
+.category-header.open .chevron { transform: rotate(90deg); }
+.category-name { font-weight: 500; flex: 1; }
+.category-meta { color: #888; font-size: 0.8rem; }
+.category-body { padding: 0 1rem 0.8rem 1rem; }
+.collapsible-body.collapsed { display: none; }
+.info-list { font-size: 0.9rem; }
+.info-list li { margin-bottom: 0.3rem; }
+</style>
+</head>
+<body>
+  <h1>Migration Validation Report</h1>
+  <div class="subtitle">Source report: C:\ProgramData\Dell\SupportAssist\CDM\Reports\MigrationReports\MigrationReport-22-10-2026-17-09-51\MigrationReport-22-10-2026-17-09-51.pdf<br>Generated: 2026-10-22T19:41:43</div>
+  <div class="top-row">
+    <div class="summary">
+      <div class="stat"><span class="num">15</span>Files claimed copied</div>
+      <div class="stat pass"><span class="num">0</span>Files missing</div>
+      <div class="stat"><span class="num">14</span>Settings categories checked</div>
+      <div class="stat pass"><span class="num">0</span>Categories mismatched</div>
+      <div class="stat"><span class="overall-badge pass">PASS</span></div>
+    </div>
+    
+    <div class="donut-wrap">
+      <svg viewBox="0 0 100 100" class="donut" role="img" aria-label="Match rate 100%">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--donut-track)" stroke-width="14"></circle>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#d03b3b" stroke-width="14"
+                stroke-dasharray="0.00 251.33" stroke-dashoffset="-251.33"
+                transform="rotate(-90 50 50)" stroke-linecap="butt"></circle>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#0ca30c" stroke-width="14"
+                stroke-dasharray="251.33 251.33" stroke-dashoffset="0"
+                transform="rotate(-90 50 50)" stroke-linecap="butt"></circle>
+        <text x="50" y="47" text-anchor="middle" class="donut-pct">100%</text>
+        <text x="50" y="62" text-anchor="middle" class="donut-sub">match rate</text>
+      </svg>
+      <div class="legend">
+        <div class="legend-row"><span class="dot pass"></span>Matched &mdash; 29</div>
+        <div class="legend-row"><span class="dot fail"></span>Mismatched/missing &mdash; 0</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Files copied <span class="category-meta">(15 claimed by the report)</span></h2>
+  
+    <table>
+      <tr><th>Path</th><th>Status</th><th>Size</th></tr>
+      <tr>
+            <td class="mono">C:\Users\revan\DESKTOP-CJSIUUR\Desktop\dell\Dell-Automation\coordination_service\state.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>3,062 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\DESKTOP-CJSIUUR\Desktop\dell\Dell-Automation\reports\output\index.html</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>5,500 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\DESKTOP-CJSIUUR\Desktop\dell\Dell-Automation\reports\output\680_source_20261022-032458.html</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>2,204,052 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\DESKTOP-CJSIUUR\Desktop\dell\Dell-Automation\reports\output\logs\source.log</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>261,517 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\DESKTOP-CJSIUUR\Desktop\dell\Dell-Automation\reports\output\logs\automation.log</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>3,504,732 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\testdata\payload.bin</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>42,949,672,960 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.claude.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>62,381 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.claude\policy-limits.json.signature.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>3,000 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.claude\backups\.claude.json.backup.1792440853192</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>60,963 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.claude\backups\.claude.json.backup.1792441714507</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>61,272 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.vscode\extensions\ms-python.vscode-pylance-2026.4.1\dist\.cache\global_indices\requests.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>3,717 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.vscode\extensions\ms-python.vscode-pylance-2026.4.1\dist\.cache\global_indices\pygments.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>328 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.vscode\extensions\ms-python.vscode-pylance-2026.4.1\dist\.cache\global_indices\colorama.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>2,094 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.vscode\extensions\ms-python.vscode-pylance-2026.4.1\dist\.cache\global_indices\yaml.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>12,362 bytes</td>
+        </tr><tr>
+            <td class="mono">C:\Users\revan\.vscode\extensions\ms-python.vscode-pylance-2026.4.1\dist\.cache\global_indices\cffi.json</td>
+            <td><span class="badge pass">OK</span></td>
+            <td>1,408 bytes</td>
+        </tr>
+    </table>
+  
+    <h2>Files not migrated <span class="category-meta">(1, informational only -- the report itself already explains these)</span></h2>
+    <ul class="info-list"><li><span class="mono">C:\Users\Betsol\OneDrive - BETSOL\Microsoft Teams Chat Files\DellDataAssistant-15.10.2026.log</span> &mdash; reason 2953: Failed to migrate file as the permission for file was denied</li></ul>
+
+  <h2>Settings copied <span class="category-meta">(18 claimed by the report)</span></h2>
+  
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">High Contrast</span>
+            <span class="category-meta">3/3 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Filter Key</span>
+            <span class="category-meta">9/9 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Toggle Keys</span>
+            <span class="category-meta">1/1 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Color Filters</span>
+            <span class="category-meta">3/3 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Magnifier</span>
+            <span class="category-meta">1/1 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Sticky Keys</span>
+            <span class="category-meta">1/1 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Mouse</span>
+            <span class="category-meta">38/38 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Sound</span>
+            <span class="category-meta">129/129 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Keyboard</span>
+            <span class="category-meta">3/3 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Folder Options</span>
+            <span class="category-meta">55/55 values match &middot; 3 skipped (volatile)</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Colors</span>
+            <span class="category-meta">7/7 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Taskbar Settings</span>
+            <span class="category-meta">53/53 values match &middot; 3 skipped (volatile)</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">Phone and Modem</span>
+            <span class="category-meta">5/5 values match</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge neutral">N/A</span>
+            <span class="category-name">Fax Options</span>
+            <span class="category-meta">No backup data was captured for this category</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge neutral">N/A</span>
+            <span class="category-name">Microsoft Edge Favorites</span>
+            <span class="category-meta">No backup data was captured for this category</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge neutral">N/A</span>
+            <span class="category-name">Additional Clocks</span>
+            <span class="category-meta">No backup data was captured for this category</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge neutral">N/A</span>
+            <span class="category-name">Additional Calendars</span>
+            <span class="category-meta">No backup data was captured for this category</span>
+          </div>
+        </div>
+        <div class="category">
+          <div class="category-header">
+            <span class="badge pass">OK</span>
+            <span class="category-name">User Locale</span>
+            <span class="category-meta">61/61 values match</span>
+          </div>
+        </div>
+  
+    <h2>Settings not migrated <span class="category-meta">(1, informational only)</span></h2>
+    <ul class="info-list"><li>Wallpaper &mdash; the report itself already reports this as failed</li></ul>
+
+  <script>
+document.querySelectorAll('.category-header').forEach(function (h) {
+  var body = h.nextElementSibling;
+  var hasBody = body && body.classList.contains('collapsible-body');
+  if (!hasBody) { return; }
+  h.classList.add('open');
+  h.addEventListener('click', function () {
+    body.classList.toggle('collapsed');
+    h.classList.toggle('open');
+  });
+});
+</script>
+</body>
+</html>
