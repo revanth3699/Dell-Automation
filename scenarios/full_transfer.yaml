@@ -11,6 +11,8 @@ roles:
   target:
     defaults: {step_timeout: 300, tick: 0.5}
     policies: {base: happy_path}
+    setup: [start_benchmark]
+    teardown: [stop_benchmark_report]
     steps:
       - at: [welcome, welcomeSignedOut]
         do: continue

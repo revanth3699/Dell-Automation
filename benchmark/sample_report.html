@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migration Benchmark</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --muted:#6b7280; --line:#e4e7eb;
+    --blue:#4e79a7; --orange:#f28e2b; --green:#59a14f; --purple:#b07aa1;
+    --teal:#76b7b2; --red:#e15759; --grid:#eceef1; --accent:#4e79a7;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+    --bg:#15181c; --card:#1e2228; --ink:#e8eaed; --muted:#9aa3ad; --line:#2c323a; --grid:#262b32;
+  }}
+  :root[data-theme=dark]{--bg:#15181c;--card:#1e2228;--ink:#e8eaed;--muted:#9aa3ad;--line:#2c323a;--grid:#262b32;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 16px}
+  h1{font-size:20px;margin:0 0 2px}
+  .sub{color:var(--muted);margin:0 0 18px;font-size:13px}
+  code{background:var(--grid);padding:1px 5px;border-radius:4px;font-size:13px}
+
+  /* tabs */
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;border-bottom:1px solid var(--line);padding-bottom:10px}
+  .tab{background:transparent;border:1px solid var(--line);color:var(--muted);padding:7px 12px;border-radius:8px;font:inherit;font-size:13px;cursor:pointer}
+  .tab:hover{color:var(--ink)}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+
+  .panel{display:none}
+  .panel.on{display:block}
+  h2{font-size:17px;margin:0 0 10px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+  canvas{max-height:300px}
+
+  /* explanation box */
+  .explain{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 10px 10px 0;padding:12px 16px;margin-bottom:16px}
+  .explain p{margin:6px 0}
+  .explain b{color:var(--ink)}
+
+  /* worded legend */
+  .legend2{list-style:none;margin:14px 0 0;padding:0;font-size:13px}
+  .legend2 li{display:flex;gap:9px;align-items:flex-start;padding:5px 0}
+  .legend2 .dot{width:12px;height:12px;border-radius:3px;flex:none;margin-top:3px}
+  .legend2 b{color:var(--ink)}
+  .legend2 span.t{color:var(--muted)}
+
+  /* overview tiles + tables */
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+  .tile .l{color:var(--muted);font-size:12px}.tile .v{font-size:24px;font-weight:700;margin-top:3px}.tile .d{font-size:12px;color:var(--muted);margin-top:2px}
+  .callout{border-left:3px solid var(--orange);background:rgba(242,142,43,.08);padding:12px 14px;border-radius:0 8px 8px 0;margin-top:16px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600} td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Migration Performance Benchmark</h1>
+  <p class="sub">Run <code>run-20261022-A</code> · Old PC → New PC · Wi-Fi "OFFICE-5G" · 22 Oct 2026 · <strong>sample data</strong></p>
+
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="thr">Throughput &amp; ETA</button>
+    <button class="tab" data-tab="cpu">CPU usage</button>
+    <button class="tab" data-tab="mem">Memory</button>
+    <button class="tab" data-tab="disk">Disk I/O</button>
+    <button class="tab" data-tab="net">Network</button>
+    <button class="tab" data-tab="phase">Phase durations</button>
+    <button class="tab" data-tab="drive">Data per drive</button>
+    <button class="tab" data-tab="files">File outcomes</button>
+    <button class="tab" data-tab="skip">Skip reasons</button>
+    <button class="tab" data-tab="knobs">Transfer settings</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <section class="panel" data-tab="overview">
+    <h2>Overview</h2>
+    <div class="explain"><p>The headline results for this run. Each tab after this one explains a single graph in detail: what it tracks, how to read it, and what the lines mean.</p></div>
+    <div class="grid">
+      <div class="card tile"><div class="l">Total migration time</div><div class="v">42m 18s</div><div class="d">transfer + settings</div></div>
+      <div class="card tile"><div class="l">Data moved</div><div class="v">118.4 GB</div><div class="d">of 131.2 GB selected</div></div>
+      <div class="card tile"><div class="l">Avg throughput</div><div class="v">47.8 MB/s</div><div class="d">peak 92.1 MB/s</div></div>
+      <div class="card tile"><div class="l">Files copied</div><div class="v">214,905</div><div class="d">1,204 skipped</div></div>
+    </div>
+    <div class="callout"><strong>Bottleneck:</strong> During file transfer (72% of total time) the <strong>new-PC disk</strong> was 95–100% busy writing, while Wi-Fi sat near 35% and the processor near 40%. Speed is limited by the disk, not the network. See the Disk I/O and Network tabs to compare.</div>
+  </section>
+
+  <!-- THROUGHPUT -->
+  <section class="panel" data-tab="thr">
+    <h2>Transfer throughput &amp; ETA</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how fast data is being copied from the old PC to the new PC, over the whole migration, plus the live estimate of time remaining.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes from start). Left = copy speed in MB/s. Right = ETA in minutes.</p>
+      <p><b>How to read:</b> a higher blue line means faster copying. Dips show moments the transfer slowed down. The red ETA line should slope down toward zero — if it climbs, the transfer is struggling.</p>
+    </div>
+    <div class="card"><canvas id="c_thr"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Instant speed</b> <span class="t">— how fast data is moving right now (spiky, sampled every 5 seconds).</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Average speed</b> <span class="t">— the smoothed running average, the overall pace.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>ETA (minutes left)</b> <span class="t">— estimated time remaining; read it on the right-hand axis.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- CPU -->
+  <section class="panel" data-tab="cpu">
+    <h2>CPU usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much of the processor each of the four migration programs is using, moment by moment.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = processor used, as a percentage (0–100%).</p>
+      <p><b>How to read:</b> a line sitting near 100% means that program is <b>processor-limited</b> — the CPU is the bottleneck. "Everything" usually spikes at the start (while it scans your files) then drops off.</p>
+    </div>
+    <div class="card"><canvas id="c_cpu"></canvas></div>
+    <ul class="legend2" id="leg_proc"></ul>
+  </section>
+
+  <!-- MEMORY -->
+  <section class="panel" data-tab="mem">
+    <h2>Memory usage per program</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much RAM (memory) each program is holding during the migration.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = memory used, in megabytes (MB).</p>
+      <p><b>How to read:</b> stable or gently rising-and-falling lines are healthy. Watch for a line that <b>keeps climbing and never comes back down</b> — that can signal a memory leak. rclone using more memory while copying large files is normal.</p>
+    </div>
+    <div class="card"><canvas id="c_mem"></canvas></div>
+    <ul class="legend2" id="leg_proc2"></ul>
+  </section>
+
+  <!-- DISK -->
+  <section class="panel" data-tab="disk">
+    <h2>Disk I/O — new PC</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data is being read from and written to the <b>new PC's disk</b> each second — mostly by rclone as it saves the incoming files.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = disk throughput in MB/s.</p>
+      <p><b>How to read:</b> if this line is <b>high and flat (maxed out)</b> at the same time the Throughput graph is low, the <b>disk is the bottleneck</b> — the PC simply cannot write files any faster. (That is the story in this sample run.)</p>
+    </div>
+    <div class="card"><canvas id="c_disk"></canvas></div>
+    <ul class="legend2" id="leg_disk"></ul>
+  </section>
+
+  <!-- NETWORK -->
+  <section class="panel" data-tab="net">
+    <h2>Network throughput</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data is sent and received over the network link (Wi-Fi or Ethernet) each second.</p>
+      <p><b>Axes:</b> bottom = elapsed time (minutes). Left = network throughput in MB/s.</p>
+      <p><b>How to read:</b> compare this against the Disk I/O tab at the same time. If the network line is <b>low</b> while disk is <b>maxed</b>, the network has spare capacity and is not the problem. If the network is maxed while disk is not, the <b>connection</b> is the bottleneck.</p>
+    </div>
+    <div class="card"><canvas id="c_net"></canvas></div>
+    <ul class="legend2" id="leg_net"></ul>
+  </section>
+
+  <!-- PHASES -->
+  <section class="panel" data-tab="phase">
+    <h2>Phase durations</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how long each stage of the migration took, from first contact between the PCs to the final report.</p>
+      <p><b>Axes:</b> bottom = duration in seconds. Each row (top to bottom) is one stage in the order it ran.</p>
+      <p><b>How to read:</b> the longest bar is where most of the time went — the stage worth optimising first. Copying files is almost always the longest.</p>
+    </div>
+    <div class="card"><canvas id="c_phase" style="max-height:320px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--orange)"></span><div><b>File transfer</b> <span class="t">— the actual file copy; usually the dominant stage.</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Measured stage</b> <span class="t">— duration taken directly from the app's own timestamps.</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Estimated stage</b> <span class="t">— the app doesn't time this stage, so the value is approximate.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- DRIVE -->
+  <section class="panel" data-tab="drive">
+    <h2>Data per drive</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> how much data came from each drive on the old PC, split by what happened to it.</p>
+      <p><b>Axes:</b> bottom = one bar per drive (C:, D:, E:). Left = data in gigabytes (GB). Each bar is stacked into segments.</p>
+      <p><b>How to read:</b> taller bar = more data on that drive. The coloured segments show how much actually had to be copied versus what was already on the new PC.</p>
+    </div>
+    <div class="card"><canvas id="c_drive"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Copied</b> <span class="t">— new data transferred to the new PC.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">— data already on the new PC, so it was skipped (saves time).</span></div></li>
+      <li><span class="dot" style="background:var(--grid)"></span><div><b>Remaining / skipped</b> <span class="t">— data not copied (deselected or failed).</span></div></li>
+    </ul>
+  </section>
+
+  <!-- FILES -->
+  <section class="panel" data-tab="files">
+    <h2>File outcomes</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> the number of files by what happened to each one. This counts files, not size.</p>
+      <p><b>How to read:</b> each slice of the ring is one outcome; a bigger slice means more files. A large red "skipped" slice means many files couldn't be copied — check the Skip reasons tab to find out why.</p>
+    </div>
+    <div class="card"><canvas id="c_files" style="max-height:260px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--green)"></span><div><b>Copied</b> <span class="t">— successfully transferred.</span></div></li>
+      <li><span class="dot" style="background:var(--teal)"></span><div><b>Already existed</b> <span class="t">— identical file already on the new PC.</span></div></li>
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Skipped</b> <span class="t">— could not be copied (see Skip reasons).</span></div></li>
+      <li><span class="dot" style="background:var(--blue)"></span><div><b>Backed up</b> <span class="t">— an existing new-PC file was moved aside before copying.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- SKIP -->
+  <section class="panel" data-tab="skip">
+    <h2>Skip reasons</h2>
+    <div class="explain">
+      <p><b>What it tracks:</b> for the files that were skipped, the reason each one was skipped — grouped into categories.</p>
+      <p><b>Axes:</b> bottom = number of files. Each row is one reason, longest at the top.</p>
+      <p><b>How to read:</b> the top bar is the biggest cause of skipped files — fix that first to improve how complete the migration is.</p>
+    </div>
+    <div class="card"><canvas id="c_skip" style="max-height:240px"></canvas></div>
+    <ul class="legend2">
+      <li><span class="dot" style="background:var(--red)"></span><div><b>Files skipped</b> <span class="t">— count of files that could not be migrated, per reason.</span></div></li>
+    </ul>
+  </section>
+
+  <!-- KNOBS -->
+  <section class="panel" data-tab="knobs">
+    <h2>Transfer settings used</h2>
+    <div class="explain">
+      <p><b>What it shows:</b> the settings the copy engine ran with. These control <b>how</b> files are copied (not what) — they are the knobs you change to speed things up.</p>
+      <p><b>Where they live:</b> the engine's config file (<code>App.config</code> / the deployed <code>.exe.config</code>), read by <code>DellDataManager</code> — not set by the app's screen.</p>
+    </div>
+    <div class="card" style="padding:4px 4px 0">
+      <table><thead><tr><th>Setting (rclone flag)</th><th>What it does</th><th class="n">This run</th></tr></thead><tbody id="t_knobs"></tbody></table>
+    </div>
+  </section>
+</div>
+
+<script>
+// ===== SAMPLE DATA — replace with harvester output =====
+const T = Array.from({length:13},(_,i)=>i*3+'m');
+const thr = {instant:[62,88,91,74,55,49,46,44,48,52,41,38,47], avg:[62,75,82,80,74,68,63,59,57,56,53,51,48], eta:[35,30,26,24,22,19,16,13,10,7,5,3,1]};
+const res = {
+  cpu:{eng:[18,22,20,19,17,18,16,17,18,16,15,14,15], rcl:[30,44,46,41,38,40,37,39,42,36,34,33,40], ui:[6,5,5,4,4,4,3,4,4,3,3,3,3], ev:[55,12,4,3,3,2,2,2,2,2,2,2,2]},
+  mem:{eng:[180,210,215,220,222,225,224,228,230,231,233,234,235], rcl:[90,260,540,610,580,600,590,620,640,615,600,590,560], ui:[140,145,148,150,150,151,151,152,152,153,153,153,154], ev:[320,180,90,85,84,83,83,82,82,82,81,81,81]},
+  disk:{eng:[2,3,3,2,2,2,2,2,2,2,2,2,2], rcl:[40,86,90,72,54,48,45,43,47,51,40,37,46]},
+  net:{eng:[1,1,1,1,1,1,1,1,1,1,1,1,1], rcl:[22,31,33,27,20,18,17,16,18,19,15,14,17]}
+};
+const phases = [['Discovery',4,'e'],['Pairing (J-PAKE)',9,'e'],['Fetch system info',3,'e'],['Compatibility',6,'m'],['Pre-check',22,'m'],['Duplicate check',48,'m'],['File enumeration',95,'e'],['File transfer',1824,'x'],['Settings migration',540,'m'],['Report',12,'e']];
+const drives = {labels:['C:\\','D:\\','E:\\'], copied:[72,38,8.4], existed:[9,3,0.6], rem:[2,1,0.2]};
+const files = [214905,41203,1204,860]; const fileLabels=['Copied','Already existed','Skipped','Backed up'];
+const skips = {labels:['Permission denied','File in use','Network drop','Path too long','Other'], v:[512,348,210,84,50]};
+const knobs = [['--transfers','Number of files copied in parallel','8 (CPU count)'],['--multi-thread-streams','Parallel streams used per large file','0 (off)'],['--multi-thread-cutoff','File size treated as "large"','1024M'],['--bwlimit','Cap on network speed','0 (unlimited)'],['--max-backlog','How many items can queue up','102400'],['--stats','How often progress is reported','5s'],['--retries / --low-level-retries','Whole-file / block retry counts','1 / 3'],['CPU affinity throttle','Caps rclone CPU so the PC stays responsive','on']];
+
+// program descriptions (fully worded legend, shared by resource tabs)
+const procs = [
+  ['eng','var(--blue)','DellDataManager (engine)','coordinates the whole migration.'],
+  ['rcl','var(--orange)','DellFileTransferUtil / rclone','the program that actually copies the files.'],
+  ['ui','var(--green)','App window (UI)','the screen the user sees.'],
+  ['ev','var(--purple)','Everything','scans and lists the files before copying.']
+];
+const twoProcs = [
+  ['eng','var(--blue)','DellDataManager (engine)','coordinates the migration.'],
+  ['rcl','var(--orange)','DellFileTransferUtil / rclone','the program moving the data.']
+];
+function wordLegend(el,list){document.getElementById(el).innerHTML=list.map(p=>
+  `<li><span class="dot" style="background:${p[1]}"></span><div><b>${p[2]}</b> <span class="t">— ${p[3]}</span></div></li>`).join('');}
+
+// ===== chart helpers =====
+const cs=getComputedStyle(document.documentElement), C=n=>cs.getPropertyValue(n).trim();
+Chart.defaults.color=C('--muted'); Chart.defaults.borderColor=C('--grid'); Chart.defaults.font.family='system-ui'; Chart.defaults.maintainAspectRatio=false;
+const d=(label,data,color,fill=false)=>({label,data,borderColor:color,backgroundColor:fill?color+'22':color,fill});
+const line=(id,ds,o={})=>new Chart(document.getElementById(id),{type:'line',data:{labels:T,datasets:ds},options:{responsive:true,interaction:{mode:'index',intersect:false},elements:{point:{radius:0},line:{tension:.3,borderWidth:2}},plugins:{legend:{display:false}},scales:Object.assign({x:{grid:{display:false}},y:{beginAtZero:true,grid:{color:C('--grid')}}},o)}});
+
+// lazy init per tab (charts in hidden panels would size to 0 if built upfront)
+const inits = {
+  thr:()=>line('c_thr',[d('Instant',thr.instant,C('--blue'),true),d('Avg',thr.avg,C('--teal')),Object.assign(d('ETA',thr.eta,C('--red')),{yAxisID:'y1'})],{y:{title:{display:true,text:'MB/s'}},y1:{position:'right',beginAtZero:true,grid:{display:false},title:{display:true,text:'min'}}}),
+  cpu:()=>{line('c_cpu',[d('eng',res.cpu.eng,C('--blue')),d('rcl',res.cpu.rcl,C('--orange')),d('ui',res.cpu.ui,C('--green')),d('ev',res.cpu.ev,C('--purple'))],{y:{max:100,title:{display:true,text:'%'}}});wordLegend('leg_proc',procs);},
+  mem:()=>{line('c_mem',[d('eng',res.mem.eng,C('--blue')),d('rcl',res.mem.rcl,C('--orange')),d('ui',res.mem.ui,C('--green')),d('ev',res.mem.ev,C('--purple'))],{y:{title:{display:true,text:'MB'}}});wordLegend('leg_proc2',procs);},
+  disk:()=>{line('c_disk',[d('eng',res.disk.eng,C('--blue')),d('rcl',res.disk.rcl,C('--orange'),true)],{y:{title:{display:true,text:'MB/s'}}});wordLegend('leg_disk',twoProcs);},
+  net:()=>{line('c_net',[d('eng',res.net.eng,C('--blue')),d('rcl',res.net.rcl,C('--orange'),true)],{y:{title:{display:true,text:'MB/s'}}});wordLegend('leg_net',twoProcs);},
+  phase:()=>new Chart(document.getElementById('c_phase'),{type:'bar',data:{labels:phases.map(p=>p[0]),datasets:[{data:phases.map(p=>p[1]),backgroundColor:phases.map(p=>p[2]==='x'?C('--orange'):p[2]==='e'?C('--grid'):C('--blue'))}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' s'}}},scales:{x:{title:{display:true,text:'seconds'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}}),
+  drive:()=>new Chart(document.getElementById('c_drive'),{type:'bar',data:{labels:drives.labels,datasets:[{label:'Copied',data:drives.copied,backgroundColor:C('--blue')},{label:'Already existed',data:drives.existed,backgroundColor:C('--teal')},{label:'Remaining',data:drives.rem,backgroundColor:C('--grid')}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.dataset.label+': '+c.raw+' GB'}}},scales:{x:{stacked:true,grid:{display:false}},y:{stacked:true,title:{display:true,text:'GB'},grid:{color:C('--grid')}}}}}),
+  files:()=>new Chart(document.getElementById('c_files'),{type:'doughnut',data:{labels:fileLabels,datasets:[{data:files,backgroundColor:[C('--green'),C('--teal'),C('--red'),C('--blue')],borderWidth:0}]},options:{cutout:'60%',plugins:{legend:{display:false}}}}),
+  skip:()=>new Chart(document.getElementById('c_skip'),{type:'bar',data:{labels:skips.labels,datasets:[{data:skips.v,backgroundColor:C('--red')}]},options:{indexAxis:'y',plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.raw+' files'}}},scales:{x:{title:{display:true,text:'files'},grid:{color:C('--grid')}},y:{grid:{display:false}}}}})
+};
+
+// table (no chart)
+document.getElementById('t_knobs').innerHTML=knobs.map(k=>`<tr><td><code>${k[0]}</code></td><td>${k[1]}</td><td class="n">${k[2]}</td></tr>`).join('');
+
+// ===== tab switching =====
+const made={};
+function show(id){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.toggle('on',p.dataset.tab===id));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+  if(inits[id] && !made[id]){ inits[id](); made[id]=true; }
+}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>show(t.dataset.tab)));
+show('overview');
+</script>
+</body>
+</html>
