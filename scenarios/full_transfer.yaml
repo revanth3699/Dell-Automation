@@ -48,6 +48,13 @@ roles:
         timeout: 120
         note: complete when nothing was skipped, skippedFiles otherwise (confirmed live 2026-10-19 -- both happen)
       - at: skippedFiles
+        env: validate_migration_report
+        optional: true
+        note: >
+          the first transfer's own report, checked before Retry: the retry writes a "(Retry - 1)" report
+          into the same folder, which then becomes the newest PDF (on the complete branch the one report
+          is checked after Download PDF below)
+      - at: skippedFiles
         do: retry_if_offered
         optional: true
         timeout: 120
@@ -99,7 +106,9 @@ roles:
         do: download_pdf
       - at: migrationDone
         env: validate_migration_report
-        note: validation/validate_migration.py against the newest MigrationReport PDF -- fails the run on a mismatch
+        note: >
+          validation/validate_migration.py against the newest MigrationReport PDF (the "(Retry - 1)" report
+          after a retry round) -- fails the run on a mismatch
       - at: migrationDone
         do: tell_us_how_we_did
       - at: feedbackModal
@@ -165,6 +174,7 @@ roles:
             do: download_pdf
           - at: migrationDone
             env: validate_migration_report
+            note: the second migration's own report (a new report folder)
           - at: migrationDone
             do: tell_us_how_we_did
           - at: feedbackModal

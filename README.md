@@ -1,7 +1,7 @@
 ﻿# Dell Data Assistant Automation Framework
 
-See PROJECT_PLAN.md for the full design, architecture, phased roadmap, and Phase 0 findings.
-See tools/phase0_inspection_notes.md for raw inspection notes and confirmed locators.
+See [CLAUDE.md](CLAUDE.md) for the code architecture: which layer new code goes in and
+the conventions every module follows.
 See [DIALOG_HANDLING.md](DIALOG_HANDLING.md) for a full catalog of every unpredictable
 dialog/condition this automation watches for -- where it's checked, how long, and
 whether it's fatal or clicked through.
@@ -14,11 +14,15 @@ See [TARGET_STATE_MACHINE.md](TARGET_STATE_MACHINE.md) for the Target app's full
 screen/dialog transition table (from the backend code) that the YAML scenario runner
 is built on -- see **State-machine scenario runner** below for how to run it.
 
-Status: sign-in, pairing (via the Coordination Service), and transfer are implemented
-and have run live for both Target and Source PCs; per-run HTML reporting is wired into
-every real entry point. Data/category selection and full unattended end-to-end polish
-are still open. See `tracking/IMPLEMENTATION_STATUS.md` for the authoritative,
-file-by-file current status.
+Status (2026-10-20): two entry points exist. `orchestration/scenario_runner.py` is the
+preferred one -- it drives YAML scenarios through the app's transition table, and
+`full_transfer` has run live on two PCs through sign-in, pairing, the transfer, the
+skipped-files Retry round, the PDF report validator, feedback, the erase page and the
+Source's Try Again (see the status note at the end of **State-machine scenario runner**
+for exactly what is and is not confirmed). `orchestration/role_runner.py` is the
+original hand-written flow, unchanged and still runnable. PROJECT_PLAN.md and
+`tracking/IMPLEMENTATION_STATUS.md` are local-only, gitignored history and predate the
+state-machine work -- do not treat them as current.
 
 ## Setup
 
@@ -32,10 +36,12 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    ```
 3. Copy `.env.example` to `.env` and fill in the machine-specific paths
    (`DDA_TARGET_BUILD_PATH` / `DDA_SOURCE_BUILD_PATH`, and `DDA_COORDINATION_SERVICE_URL`
-   once you know which machine hosts the Coordination Service). Credentials
-   (`DDA_TARGET_SIGNIN_USERNAME` etc.) are real environment variables only -- never put
-   them in `.env`. See **Environment variables** below for exactly what each machine
-   needs.
+   once you know which machine hosts the Coordination Service). `factory/config.py`
+   loads `.env` before anything else reads the environment, so the Target's sign-in
+   credentials (`DDA_TARGET_SIGNIN_USERNAME` etc.) can go either in the shell
+   environment or in `.env`. `.env` is gitignored and must stay that way: only the
+   dedicated test account belongs there, never a real one. See **Environment
+   variables** below for exactly what each machine needs.
 4. Run anything through uv, e.g.:
    ```
    uv run python utils/run_coordination_service.py
@@ -44,9 +50,9 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
    uv run python -m orchestration.scenario_runner --role target --run-id <id> --scenario full_transfer
    uv run python -m orchestration.scenario_runner --role source --run-id <id> --scenario full_transfer
    ```
-   `role_runner` is the original hand-written flow; `scenario_runner` drives a YAML
-   scenario from `scenarios/` (see **State-machine scenario runner** for the full
-   checklist).
+   `scenario_runner` drives a YAML scenario from `scenarios/` (see **State-machine
+   scenario runner** for the full checklist); `role_runner` is the original hand-written
+   flow, kept unchanged.
    Target also takes `--launch {exe,mock,simulator}` (default `exe`): `simulator`
    launches the Target PC UI app indirectly via the CDM Simulator WPF app (mimics Dell
    SupportAssist, which isn't really integrated yet) instead of launching it directly --
@@ -54,7 +60,8 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/) (not plain pip/ve
 
 **WinAppDriver, Windows Developer Mode, and required Python packages are all
 auto-detected and auto-installed/enabled on first run** -- `utils/prerequisites.py`'s
-`ensure_prerequisites()` runs at the start of every `role_runner` invocation and
+`ensure_prerequisites()` runs at the start of every `role_runner`/`scenario_runner`
+invocation (`--skip-prerequisites` bypasses it on a machine already set up) and
 installs WinAppDriver via `winget` if it's missing (one admin approval prompt), enables
 Developer Mode if it's off (another admin prompt), and confirms WinAppDriver can launch
 elevated as a one-time self-test (then closes it again) -- `factory/session.py` starts
@@ -66,24 +73,28 @@ dependencies.
 
 ```
 dell-automation/
-├── assertions/              Expected-text constants (NOT locators) -- the single
-│   └── target/              source of truth for text a flow/locator needs to match,
-│                            e.g. error-banner copy, transition-screen phrases polled
-│                            from raw page source. No assertions/source/ yet.
+├── assertions/              Expected texts + their existence-check locators +
+│   ├── source/              is_showing()-style poll functions, one module per screen
+│   └── target/              or dialog for each role (every screen the state machine
+│                            observes has one; see CLAUDE.md for the assertion /
+│                            locator / component split). Never click targets.
 │
-├── components/              Page Objects -- one class per screen/dialog.
-│   ├── base_component.py    The shared template every component builds on: find
-│   │                        (explicit wait) -> act -> screenshot -> record, via
-│   │                        utils.retry / utils.wait_utils / reports.action_reporter.
-│   ├── shared/               Reserved for cross-role components; empty today (Source
-│   │                        has no sign-in step, so nothing ended up here in practice).
-│   ├── source/               Welcome/trust-network/searching/pairing-code/transfer
-│   │                        screens for the Source PC.
-│   └── target/                Welcome/sign-in/pairing/transfer/migration-summary
-│                            screens and shared dialogs (ConfirmAccounts, CloseApps,
-│                            TrustNetwork, SignInFailed, SignInWaiting) for Target PC.
+├── components/              Page Objects -- one class per screen/dialog, actions only
+│   ├── base_component.py    (click/type/read, no existence checks). base_component.py
+│   │                        is the shared template: find (explicit wait) -> act ->
+│   │                        screenshot -> record, via utils.retry / utils.wait_utils /
+│   │                        reports.action_reporter.
+│   ├── shared/               Reserved for cross-role components; empty today.
+│   ├── source/               Welcome, trust-network, pairing-code, transfer-progress
+│   │                        (all five endings, Try Again, Close), confirm-cancel and
+│   │                        the network/battery/region dialogs of the Source PC.
+│   └── target/                Every Target screen from Welcome to Migration Done and
+│                            the erase page (incl. ready-to-move, choose-what-to-move,
+│                            drive mapping, skipped files, feedback), the sign-in
+│                            modals, all interrupting dialogs (common_dialogs.py), the
+│                            window chrome (app_window.py) and the CDM Simulator.
 │
-├── coordination_service/    Standalone FastAPI relay (app.py: PUT/GET
+├── coordination_service/    Standalone FastAPI relay (app.py: PUT/GET/DELETE
 │                            /runs/{run_id}/{key}) -- the only channel between the two
 │                            independent per-machine automation processes. Run once,
 │                            reachable by both machines (utils/run_coordination_service.py).
@@ -118,11 +129,17 @@ dell-automation/
 │   │                        orchestration.scenario_runner --role --run-id --scenario
 │   │                        <name>`; drives a YAML scenario from scenarios/ through
 │   │                        the transition table. See "State-machine scenario runner".
-│   └── statemachine/          model.py (State/Action/Model), observer.py (snapshot +
-│                            probe observers), scenario.py (YAML loader + validation),
-│                            runner.py (the one observe->policy->act loop), peer.py
-│                            (publish/wait_for_peer over the coordination service),
-│                            target_model.py / source_model.py (the transition tables).
+│   └── statemachine/          model.py (State/Action/Model), observer.py (snapshot,
+│                            probe and the default hybrid observer), scenario.py (YAML
+│                            loader, step groups, validation + lint), runner.py (the
+│                            one observe->policy->act loop: re-clicks, rewinds, peer
+│                            and app-alive checks), peer.py (publish / wait_for_peer /
+│                            step-group conditions / own-key clearing / peer-failed
+│                            detection over the coordination service), context.py
+│                            (the per-run RunContext handed to every action),
+│                            target_model.py / source_model.py (the transition tables,
+│                            composite actions such as type_code, retry_if_offered,
+│                            close_app).
 │
 ├── scenarios/                 YAML scenarios for scenario_runner.py, one file per
 │                            end-to-end case (full_transfer, cancel_during_transfer,
@@ -141,31 +158,30 @@ dell-automation/
 ├── tests/
 │   ├── conftest.py            Pytest fixtures (Session + credentials) and the
 │   │                        reporting hooks (pytest_configure/pytest_sessionfinish).
-│   └── statemachine/          Hardware-free unit tests for the runner/model/scenario
-│                            loader, plus validation of every scenarios/*.yaml against
-│                            the real models: `uv run pytest tests/statemachine`.
+│   ├── statemachine/          Hardware-free unit tests for the runner, models, loader,
+│   │                        policies, peer sync, step groups, graceful close and
+│   │                        failure handling, plus validation + lint of every
+│   │                        scenarios/*.yaml against the real models.
+│   └── report_validation/     Unit tests for the PDF validator's registry comparison.
+│                            `uv run pytest tests/statemachine tests/report_validation`
+│                            needs no hardware.
 │
-├── tools/                     Manual/dev scripts (launch_target_app.py,
-│                            run_sign_in_flow.py, several _test_*.py one-off
-│                            diagnostic scripts) -- NOT part of the real run path;
-│                            useful for piecemeal debugging only.
-│
-├── tracking/
-│   └── IMPLEMENTATION_STATUS.md   Authoritative, maintained "what's actually built vs.
-│                                planned" doc -- check this, not this README, for
-│                                current per-file/per-phase status.
+├── tools/, tracking/          Local-only, gitignored: one-off dev scripts and the old
+│                            status doc. Not part of any run path; absent from a clone.
 │
 ├── utils/                      Supporting utilities, deliberately separate from
 │   │                           factory/ (2026-10-07): factory/ is drivers/sessions/
 │   │                           config; these are the helpers everything else reaches for.
 │   ├── prerequisites.py         Standalone one-time pass/fail gate, run once before
 │   │                           automation starts.
-│   ├── environment.py           Named machine setup/teardown steps for scenarios
-│   │                           (start Notepad, disable/enable the network adapter,
-│   │                           Public/Private network profile, Windows region) --
-│   │                           PowerShell-based, unverified live.
-│   ├── coordination_client.py   The pairing-code hand-off client (talks to
-│   │                           coordination_service/app.py).
+│   ├── environment.py           Named steps a scenario can run outside the app:
+│   │                           open/close Notepad, disable/enable the network adapter,
+│   │                           Public/Private network profile, Windows region (all
+│   │                           PowerShell-based, unverified live) and
+│   │                           validate_migration_report (runs validation/, confirmed
+│   │                           live 2026-10-20).
+│   ├── coordination_client.py   publish / wait_for / clear against
+│   │                           coordination_service/app.py.
 │   ├── mock_server.py           GlassFloor entitlement mock-server launcher (dev use).
 │   ├── ocr.py                   Windows-native OCR fallback for UIA reads that come
 │   │                           back incomplete.
@@ -177,10 +193,10 @@ dell-automation/
 │   └── run_coordination_service.py  Starts the Coordination Service and prints the
 │                                  address to give the other machine.
 │
-└── validation/                 Standalone PDF-migration-report validator -- run
-    │                           manually ON the Target PC any time after a migration;
-    │                           NOT wired into orchestration/role_runner.py. See
-    │                           "PDF migration-report validation" below.
+└── validation/                 PDF-migration-report validator: run manually on the
+    │                           Target PC, or as the `validate_migration_report` step
+    │                           of a scenario (full_transfer does, after each Download
+    │                           PDF). See "PDF migration-report validation" below.
     └── output/                   Generated HTML reports land here (gitignored).
 ```
 
@@ -199,8 +215,9 @@ Locators  -->  Components  -->  Flows  -->  Orchestration (role_runner.py)
 Factory (driver_factory.py, session.py, capabilities.py, config.py, logger_factory.py)
   -- used by Components/Flows/Orchestration, never imports from them.
 
-Utils (prerequisites.py, coordination_client.py, mock_server.py, ocr.py, retry.py,
-  wait_utils.py) -- standalone helpers, used by Components/Flows/Orchestration/Factory.
+Utils (prerequisites.py, coordination_client.py, environment.py, mock_server.py,
+  ocr.py, retry.py, wait_utils.py) -- standalone helpers, used by
+  Components/Flows/Orchestration/Factory.
   factory/session.py imports factory/driver_factory.py for the real WinAppDriver
   process lifecycle; utils/prerequisites.py imports that SAME driver_factory code for
   its own one-time launch-then-close self-test. Neither factory/ file imports anything
@@ -208,8 +225,10 @@ Utils (prerequisites.py, coordination_client.py, mock_server.py, ocr.py, retry.p
   standalone gate, not a Factory-layer dependency.
 
 Reports (report_models.py -> action_reporter.py -> html_report_builder.py) -- only
-  components/base_component.py (every click/type/get_text) and the two real entry
-  points (orchestration/role_runner.py, tests/conftest.py) touch this layer directly.
+  components/base_component.py (every click/type/get_text), the state-machine runner
+  (one row per observed state change and per step action) and the real entry points
+  (orchestration/role_runner.py, orchestration/scenario_runner.py, tests/conftest.py)
+  touch this layer directly.
 ```
 
 Concrete import examples, so this isn't just a diagram:
@@ -223,12 +242,15 @@ Concrete import examples, so this isn't just a diagram:
 - `orchestration/role_runner.py` is the only file that imports from every layer at once:
   `utils.prerequisites`, `factory.session`, every `flows/*` module, and `reports/*`.
 
-## Code flow: one `role_runner` run, end to end
+## Code flow: one `role_runner` run, end to end (the original hand-written path)
+
+This section describes `role_runner.py`, which predates the state-machine runner and
+is unchanged. For the YAML-driven path see **State-machine scenario runner** below.
 
 Both machines run `python -m orchestration.role_runner --role {target|source} --run-id <id>
 --scenario full_transfer` as fully independent processes -- there is no single process
 holding both machines' sessions. A scenario function (`full_transfer` is the only one
-today) resolves `role` into a concrete runner class (`TargetRunner`/`SourceRunner`, see
+in `role_runner`) resolves `role` into a concrete runner class (`TargetRunner`/`SourceRunner`, see
 `orchestration/role_runner.py`) and a per-role post-pairing step list, then calls
 `RoleRunner.run()`, the thin wrapper that does the same three things regardless of role
 or scenario:
@@ -307,11 +329,10 @@ dialog that may interrupt them.
    uv run python utils/run_coordination_service.py
    ```
 3. **Target PC** -- `.env` needs `DDA_TARGET_BUILD_PATH` (and `DDA_CDM_SIMULATOR_PATH` for
-   `--launch simulator`); the sign-in credentials must be set as environment variables.
-   Choose a **new** run id for every run and use the same one on both machines -- the
-   coordination service keeps its values per run id, so a reused id hands the Target the
-   previous run's pairing code (the Target now ignores a code that was already there when
-   it started, but a fresh id is the clean way):
+   `--launch simulator`) plus the sign-in credentials. Use the same run id on both
+   machines. A run id may be reused: each role deletes its own keys on the coordination
+   service when it starts (see "Reused run ids" below), which needs the service running
+   from the current build.
    ```
    uv run python -m orchestration.scenario_runner --role target --run-id r1 --scenario full_transfer
    ```
@@ -325,18 +346,32 @@ dialog that may interrupt them.
 5. **Watch for a UAC prompt** on the Target after the browser sign-in -- automation
    cannot see or click it; approve it by hand.
 6. **Validation**: `full_transfer` runs the PDF migration-report validator (see the
-   next section) as a step on the Target once Migration Done is showing; a missing file
-   or a registry mismatch fails the run, and the HTML comparison lands in
-   `validation/output/`. Any scenario can do the same with
-   `env: validate_migration_report`.
-7. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` or
-   `SCENARIO FAILED: <reason> during step N [screen=... overlay=...]` (exit code 1; 2 for
-   an invalid scenario file). The HTML report, with a screenshot at every state change, is
-   written to `reports/output/<run_id>_<role>_<timestamp>.html` on each machine.
+   next section) as a step on the Target against every report the run produces: the
+   first transfer's report before the Retry click, the "(Retry - 1)" report after the
+   retry round's Download PDF, and the second migration's report after its Download PDF
+   (one report, checked once, on a clean run). A missing file or a registry mismatch
+   fails the run, and the HTML comparison lands in `validation/output/`. Any scenario
+   can do the same with `env: validate_migration_report`.
+7. **Results**: the console ends with `Scenario '<name>' (<role>) PASSED` (the app is
+   then closed the way a user does, see below) or `SCENARIO FAILED: <reason> during step
+   N [screen=... overlay=...]` (exit code 1; 2 for an invalid scenario file). The HTML
+   report, with a screenshot at every state change and step action, is written to
+   `reports/output/<run_id>_<role>_<timestamp>.html` on each machine.
+
+What `full_transfer` does, per role: the Target signs in (skipped when the login is
+cached), pairs with the code the Source publishes, migrates everything, and walks the
+results: summary -> View details -> one Retry round when files were skipped -> the
+outcome (`target_outcome=partial` or `clean`) -> Finish / Go to summary -> Migration
+Done -> Download PDF -> validator -> feedback -> Erase your old PC -> Back to Home. The
+Source clicks through pairing, announces every ending, and keeps its app open until the
+Target is done. When the outcome is still partial after the Retry round, the Source
+clicks Try Again (its final screen after the Target's Back to Home), both pair again
+from the home screen and the whole migration runs a second time, ending the same way.
+There is no third round. On a clean outcome neither side retries.
 
 Useful flags: `--launch {exe,mock,simulator}` (Target only; the scenario's own `launch:`
-is the default), `--observer {snapshot,probe}`, `--skip-prerequisites` to bypass the
-WinAppDriver/Developer-Mode checks on a machine already set up.
+is the default), `--observer {hybrid,snapshot,probe}`, `--skip-prerequisites` to bypass
+the WinAppDriver/Developer-Mode checks on a machine already set up, `--validate-only`.
 
 Scenarios that need the machine prepared (`setup:` steps such as `set_network_public`,
 `disable_network`, `set_region_unsupported`) must run from an **elevated** terminal;
@@ -402,19 +437,29 @@ the Source's `pairing_code`) before it publishes `started`. The service must be
 running from the current build for that (`DELETE /runs/{run_id}/{key}`, restart it
 after pulling); against an older service the runner warns and falls back to
 stale-value detection only (a value present at start is ignored until it changes).
-Every scenario is validated against the models by `tests/statemachine/test_scenarios.py`;
-`uv run pytest tests/statemachine` needs no hardware.
 
-Status: everything under `orchestration/statemachine/`, `scenarios/`, `utils/environment.py`
-and the 2026-10-19 assertion/locator/component additions is verified against the rebit
-source only, not against the live app. The first live milestone is `full_transfer` on
-real hardware; `validation/` stays a separate manual step, as before.
+Every scenario is validated and linted against the models by
+`tests/statemachine/test_scenarios.py`; `uv run pytest tests/statemachine
+tests/report_validation` needs no hardware.
+
+Status (2026-10-20, after the day's live runs of `full_transfer`): confirmed live on
+real hardware -- the cached-login path, pairing with a fresh code (stale codes ignored),
+the account-mismatch / install-browser / close-applications policies, the transfer, the
+results summary and skipped-files screens, the Retry round, the outcome publish, Go to
+summary, Download PDF + the validator on a partial report, feedback, the erase page,
+Back to Home, the second-round start up to the code screen; on the Source, code
+publishing, every ending, the wait for the outcome, the Try Again click and the
+searching -> pairing-code screens; and the peer-failed stop on the Target when the
+Source was interrupted. Not yet seen live: the second migration running to its end, the
+graceful close at the end of a passing run, the app-gone detection, rewinds, the other
+scenarios, and the network/region environment steps.
 
 ## PDF migration-report validation
 
-A standalone tool (`validation/`), separate from the live automation run above --
-`orchestration/role_runner.py` never calls it, and it isn't part of any `--scenario`.
-Run it manually, ON the Target PC, any time after a migration finishes. It cross-checks
+A standalone tool (`validation/`) that can also run as a scenario step
+(`env: validate_migration_report`; `full_transfer` runs it on the Target against every
+report the run produces and fails the run on a mismatch). Run it manually, ON the Target PC, any
+time after a migration finishes. It cross-checks
 a Dell Migrate `MigrationReport-*.pdf`'s own claims (which files and settings
 categories it says it copied) against what's **actually** on this PC: files checked for
 real existence on disk, and settings checked by reading the live Windows registry.
@@ -474,6 +519,8 @@ found or parsed at all.
   types) or have no GUID/log mapping available -- these are reported with an
   explanatory note instead of a match/mismatch verdict, since there's nothing to
   compare yet.
+- `REG_MULTI_SZ` values are compared element by element: the `.reg` export writes
+  them with `\0` separators, which the live registry hands back as a list.
 
 Requires `pypdf` -- already pinned in `pyproject.toml`/`uv.lock`, so a plain `uv sync`
 is all that's needed; no separate install step.
@@ -481,17 +528,17 @@ is all that's needed; no separate install step.
 ## Environment variables
 
 Target PC and Source PC are two independent machines, each running their own
-`role_runner` invocation -- they don't need the same `.env`, just the ones relevant to
-their own role (plus `DDA_COORDINATION_SERVICE_URL`, which both must agree on). See
-`.env.example` for the full file with defaults and comments.
+`scenario_runner`/`role_runner` invocation -- they don't need the same `.env`, just the
+ones relevant to their own role (plus `DDA_COORDINATION_SERVICE_URL`, which both must
+agree on). See `.env.example` for the full file with defaults and comments.
 
 | Variable | Target PC | Source PC | Notes |
 |---|---|---|---|
 | `DDA_TARGET_BUILD_PATH` | **Required** | not used | Path to `MyDellExperience.exe` on this machine (no installer exists for this build; renamed from `DellDataAssistant.TargetPc.exe`, confirmed 2026-10-19). |
 | `DDA_SOURCE_BUILD_PATH` | not used | **Required** | Path to the *already-installed* `DellDataAssistant.exe` (the Source build is a self-extracting installer -- point at what it produces, not the original downloaded installer). |
-| `DDA_TARGET_SIGNIN_USERNAME` | **Required** | not used | Real environment variable only -- never put credentials in `.env`. |
+| `DDA_TARGET_SIGNIN_USERNAME` | **Required** | not used | Shell environment or the gitignored `.env` (`factory/config.py` loads it). Only the dedicated test account, never a real one; only needed when the app has no cached login. |
 | `DDA_TARGET_SIGNIN_PASSWORD` | **Required** | not used | Same as above. |
-| `DDA_TARGET_OTP_STATIC_VALUE` | **Required** | not used | Same as above. |
+| `DDA_TARGET_OTP_STATIC_VALUE` | **Required** | not used | Same as above -- the test account's static one-time code. |
 | `DDA_COORDINATION_SERVICE_URL` | **Required** | **Required** | Must point to wherever the Coordination Service is actually hosted (either machine, or a third host) -- both processes for a given `--run-id` must agree on this address. |
 | `DDA_WINAPPDRIVER_HOST` / `DDA_WINAPPDRIVER_PORT` | default OK | default OK | Only change if WinAppDriver needs to run on a non-default host/port. |
 | `DDA_TARGET_EXE_NAME` / `DDA_TARGET_PROCESS_NAME` | default OK | not used | Only change if a different Target build/process name is in play. |
