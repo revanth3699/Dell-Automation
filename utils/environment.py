@@ -16,6 +16,7 @@ each one a matching undo so a scenario's teardown can restore the machine.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from collections.abc import Callable
@@ -129,6 +130,87 @@ def validate_migration_report(ctx) -> None:
     ctx.log.success("validation: migration report matches this PC")
 
 
+# --------------------------------------------------------------------- benchmark
+
+BENCHMARK_STOP_WAIT_SECONDS = 15
+
+
+def start_benchmark(ctx) -> None:
+    """Target setup: launches the benchmark resource sampler as its own subprocess (see
+    benchmark/resource_sampler.py, BENCHMARKING_PLAN.md). Never blocks and never raises: a
+    sampler that fails to start only costs the report its resource tabs."""
+    try:
+        import sys
+        from pathlib import Path
+
+        from benchmark import paths
+
+        env = {**os.environ, **(ctx.env or {})}
+        out = paths.prepare_output_dir(ctx.run_id)
+        stop_file = out / f"STOP_{ctx.role}"
+        cmd = [
+            sys.executable, "-m", "benchmark.resource_sampler",
+            "--run-id", ctx.run_id, "--role", ctx.role, "--out", str(out),
+            "--interval", str(paths.interval(env)), "--stop-file", str(stop_file),
+            "--processes", ",".join(paths.processes(env)),
+        ]
+        log_file = (out / f"sampler_{ctx.role}.log").open("w", encoding="utf-8")
+        proc = subprocess.Popen(cmd, cwd=str(Path(__file__).resolve().parent.parent),
+                                stdout=log_file, stderr=subprocess.STDOUT)
+        ctx.scratch["benchmark"] = {"proc": proc, "out": out, "stop_file": stop_file, "log_file": log_file}
+        ctx.log.info(f"benchmark: resource sampler started (pid {proc.pid}) -> {out}")
+    except Exception as exc:
+        ctx.log.warning(f"benchmark: could not start the resource sampler: {exc}")
+
+
+def stop_benchmark_report(ctx) -> None:
+    """Target teardown: stops the sampler, harvests CDM.db / the rclone log / the samples and
+    renders benchmark/output/<run_id>/report_<role>.html. MUST NEVER RAISE -- it runs in the
+    scenario's guaranteed teardown, so every failure is logged and swallowed."""
+    try:
+        from benchmark import correlate, harvest, paths, report
+
+        env = {**os.environ, **(ctx.env or {})}
+        state = ctx.scratch.get("benchmark") or {}
+        out = state.get("out") or paths.output_dir(ctx.run_id)
+        _stop_sampler(ctx, state)
+        run_report = harvest.harvest_run(ctx.run_id, ctx.role, out, env)
+        correlate.annotate(run_report, env)
+        html = report.render(run_report, out / f"report_{ctx.role}.html")
+        ctx.log.success(f"benchmark: report written to {html}")
+    except BaseException as exc:  # noqa: BLE001 -- teardown safety: nothing may escape
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        try:
+            ctx.log.warning(f"benchmark: report not produced: {exc}")
+        except Exception:
+            pass
+
+
+def _stop_sampler(ctx, state: dict) -> None:
+    """Touches the stop file, waits briefly for a clean exit, terminates as a backstop."""
+    try:
+        stop_file = state.get("stop_file")
+        if stop_file is not None:
+            stop_file.write_text("stop", encoding="utf-8")
+        proc = state.get("proc")
+        if proc is not None:
+            try:
+                proc.wait(timeout=BENCHMARK_STOP_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                ctx.log.warning("benchmark: sampler did not exit on the stop file; terminating it")
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        log_file = state.get("log_file")
+        if log_file is not None:
+            log_file.close()
+    except Exception as exc:
+        ctx.log.warning(f"benchmark: error while stopping the sampler: {exc}")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -141,6 +223,8 @@ STEPS: dict[str, Callable] = {
     "set_region_unsupported": set_region_unsupported,
     "restore_region": restore_region,
     "validate_migration_report": validate_migration_report,
+    "start_benchmark": start_benchmark,
+    "stop_benchmark_report": stop_benchmark_report,
 }
 
 
