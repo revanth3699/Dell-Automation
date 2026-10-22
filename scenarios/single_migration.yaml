@@ -42,7 +42,8 @@ roles:
         args: {value: migrating}
         timeout: 180
       - at: resultsSummary
-        timeout: 7200
+        timeout: 21600
+        note: 6h -- large files/datasets take proportionally longer to copy than the project's usual 2h ceiling covers
       - at: resultsSummary
         do: view_details
       - at: [complete, skippedFiles]
@@ -98,12 +99,15 @@ roles:
         timeout: 1800
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: announce
-        timeout: 7200
-        note: any ending -- no Try Again round here by design, regardless of a partial outcome
+        timeout: 21600
+        note: >
+          any ending -- no Try Again round here by design, regardless of a partial outcome.
+          6h, matching the Target's resultsSummary wait: large files/datasets take proportionally
+          longer to copy than the project's usual 2h ceiling covers
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
-        args: {state: [finished, failed], timeout: 7200}
-        timeout: 7260
+        args: {state: [finished, failed], timeout: 21600}
+        timeout: 21660
         note: keep the Source app open until the Target script has ended
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: close_app
