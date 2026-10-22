@@ -1,0 +1,192 @@
+# Manually publishes hand-picked HTML reports to GitHub Pages.
+#
+# reports/output/*, validation/output/* are git-ignored (see .gitignore -- "never
+# pushed"), and benchmark/output/<run>/ mixes report_target.html with .jsonl/.log/.zip
+# artifacts. So a report only reaches this workflow if you deliberately force-add it
+# first:
+#
+#   git add -f reports/output/681_target_20261022-170753.html
+#   git add -f "validation/output/MigrationReport-22-10-2026-17-09-51_validation_20261022T194143.html"
+#   git commit -m "Publish report for run 681"
+#   git push
+#
+# Then run this workflow (Actions tab -> Deploy Reports to GitHub Pages -> Run
+# workflow, or `gh workflow run deploy-reports.yml -f reports_path=...`), filling in
+# only the source(s) you want deployed. Each input accepts:
+#   - a single file path, e.g. reports/output/681_target_20261022-170835.html
+#   - a directory, e.g. validation/output  (recurses)
+#   - a glob, e.g. benchmark/output/681/*.html
+#
+# reports_path / validation_path are always filtered to just .html/.htm files, even if
+# a glob or directory would otherwise match more. benchmark_path is different: a
+# directory (e.g. benchmark/output/681) is deployed whole -- report_target.html plus
+# its resources_*.jsonl/sampler_*.log/etc. neighbors -- since those are the benchmark
+# run's supporting artifacts, not noise. A single file or glob passed to
+# benchmark_path still deploys only what matched, unfiltered by extension.
+#
+# Every run replaces the previously published site.
+#
+# One-time setup: repo Settings -> Pages -> Build and deployment -> Source ->
+# "GitHub Actions".
+
+name: Deploy Reports to GitHub Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      reports_path:
+        description: "Path/dir/glob under reports/output/ to publish. Leave blank to skip."
+        required: false
+        type: string
+      validation_path:
+        description: "Path/dir/glob under validation/output/ to publish. Leave blank to skip."
+        required: false
+        type: string
+      benchmark_path:
+        description: "Path/dir/glob under benchmark/output/ to publish. Leave blank to skip."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  collect-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate at least one path was given
+        env:
+          REPORTS_PATH: ${{ inputs.reports_path }}
+          VALIDATION_PATH: ${{ inputs.validation_path }}
+          BENCHMARK_PATH: ${{ inputs.benchmark_path }}
+        run: |
+          if [ -z "$REPORTS_PATH" ] && [ -z "$VALIDATION_PATH" ] && [ -z "$BENCHMARK_PATH" ]; then
+            echo "::error::Provide at least one of reports_path, validation_path, benchmark_path."
+            exit 1
+          fi
+
+      - name: Collect selected HTML files
+        id: collect
+        shell: bash
+        env:
+          REPORTS_PATH: ${{ inputs.reports_path }}
+          VALIDATION_PATH: ${{ inputs.validation_path }}
+          BENCHMARK_PATH: ${{ inputs.benchmark_path }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          SITE_DIR="$GITHUB_WORKSPACE/_site"
+          mkdir -p "$SITE_DIR"
+
+          # collect_source <label> <pattern> <allowed-prefix> <dest-subdir> <filter-html:true|false>
+          collect_source() {
+            local label="$1" pattern="$2" prefix="$3" dest="$4" filter_html="$5"
+            [ -z "$pattern" ] && return 0
+
+            case "$pattern" in
+              "$prefix"*) ;;
+              *)
+                echo "::error::${label}_path must be under ${prefix} (got: $pattern)"
+                exit 1
+                ;;
+            esac
+
+            local matches=()
+            if [ -d "$pattern" ]; then
+              if [ "$filter_html" = "true" ]; then
+                while IFS= read -r -d '' f; do matches+=("$f"); done \
+                  < <(find "$pattern" -type f \( -iname '*.html' -o -iname '*.htm' \) -print0)
+              else
+                # whole-folder mode (benchmark): every file, not just HTML
+                while IFS= read -r -d '' f; do matches+=("$f"); done \
+                  < <(find "$pattern" -type f -print0)
+              fi
+            elif [[ "$pattern" == *[\*\?\[]* ]]; then
+              # contains glob metacharacters -- must stay unquoted to expand
+              for f in $pattern; do
+                [ -f "$f" ] && matches+=("$f")
+              done
+            else
+              # literal path -- quote so spaces/parentheses in filenames survive
+              [ -f "$pattern" ] && matches+=("$pattern")
+            fi
+
+            local kept=0
+            for f in "${matches[@]}"; do
+              if [ "$filter_html" = "true" ]; then
+                case "$f" in
+                  *.html|*.HTML|*.htm|*.HTM) ;;
+                  *)
+                    echo "  skipped (not .html): $f"
+                    continue
+                    ;;
+                esac
+              fi
+              # preserve the path relative to the source folder, so e.g. a whole
+              # benchmark run directory keeps report_target.html alongside its
+              # resources_*.jsonl/sampler_*.log instead of flattening into one dir
+              local rel="${f#"$prefix"}"
+              local target="$SITE_DIR/$dest/$rel"
+              mkdir -p "$(dirname "$target")"
+              cp -- "$f" "$target"
+              echo "  deployed: $f -> $dest/$rel"
+              kept=$((kept + 1))
+            done
+
+            if [ "$kept" -eq 0 ]; then
+              echo "::error::No files matched ${label}_path ($pattern)"
+              exit 1
+            fi
+          }
+
+          echo "reports_path:"
+          collect_source "reports" "$REPORTS_PATH" "reports/output/" "reports" "true"
+          echo "validation_path:"
+          collect_source "validation" "$VALIDATION_PATH" "validation/output/" "validation" "true"
+          echo "benchmark_path:"
+          collect_source "benchmark" "$BENCHMARK_PATH" "benchmark/output/" "benchmark" "false"
+
+      - name: Build index page
+        shell: bash
+        run: |
+          set -euo pipefail
+          SITE_DIR="$GITHUB_WORKSPACE/_site"
+          {
+            echo "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+            echo "<title>Dell Automation Reports</title></head><body>"
+            echo "<h1>Dell Automation Reports</h1>"
+            echo "<p>Deployed $(date -u +'%Y-%m-%d %H:%M UTC') from run ${{ github.run_id }}.</p>"
+            for sub in reports validation benchmark; do
+              if [ -d "$SITE_DIR/$sub" ]; then
+                echo "<h2>${sub}</h2><ul>"
+                while IFS= read -r -d '' f; do
+                  relpath="${f#"$SITE_DIR"/}"
+                  echo "<li><a href=\"${relpath}\">${relpath}</a></li>"
+                done < <(find "$SITE_DIR/$sub" -type f -print0 | sort -z)
+                echo "</ul>"
+              fi
+            done
+            echo "</body></html>"
+          } > "$SITE_DIR/index.html"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
