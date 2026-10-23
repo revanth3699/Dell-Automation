@@ -94,6 +94,11 @@ dell-automation/
 │                            modals, all interrupting dialogs (common_dialogs.py), the
 │                            window chrome (app_window.py) and the CDM Simulator.
 │
+├── screen_catalog/          Browsable catalog of every Target-app screen and popup, rendered
+│                            by the app's own React code (read from the Rebit repo via
+│                            REBIT_WEB_SRC) for screen-text validation. Separate Node
+│                            project -- see screen_catalog/README.md.
+│
 ├── coordination_service/    Standalone FastAPI relay (app.py: PUT/GET/DELETE
 │                            /runs/{run_id}/{key}) -- the only channel between the two
 │                            independent per-machine automation processes. Run once,

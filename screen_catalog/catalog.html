@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Screen Catalog</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'></svg>" />
+  </head>
+  <body>
+    <!-- Dev-only screen catalog (see src/catalog/*). Separate Vite entry from index.html; NOT part of the
+         production build that embeds into the app's wwwroot. Mirrors index.html's theme background layers
+         so a driven <App/> renders with the same chrome; omits index.html's native boot guard, which only
+         matters inside the real WebView2 shell. -->
+    <div class="bg-layer bg-layer-light" aria-hidden="true"></div>
+    <div class="bg-layer bg-layer-dark" aria-hidden="true"></div>
+    <div id="root"></div>
+    <script type="module" src="/src/catalog/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+dist-catalog/
+# Local path to the Rebit app (see .env.example) and the generated typecheck config that embeds it.
+.env
+tsconfig.generated.json

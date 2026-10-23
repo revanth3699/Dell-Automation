@@ -1,0 +1,21 @@
+{
+  "_about": "Strings in Resources.resx (via screens.json) that the screen catalog can NOT show on any React screen, each with the reason and where it was verified (repo paths relative to Cdm/Cdm/TargetPc.UI). scripts/catalog-audit.mjs fails on a string that is neither rendered nor listed here, and on an entry here that is missing or has since become rendered — so this list cannot go stale silently. Verified by searching all .cs, .xaml, .ts and .tsx (excluding Resources.Designer.cs, bin/obj, node_modules, the catalog and the tests).",
+  "resxKeys": {
+    "Splash_WelcomeTo": "Native WPF splash only — MainWindow.xaml.cs:1505. React draws no splash.",
+    "Splash_YourDell": "Native WPF splash only — MainWindow.xaml.cs:1512. React draws no splash.",
+    "WindowTitle_Product": "Native window title bar — Utilities/System/WindowTitleResolver.cs:39-42. Not part of the React surface.",
+    "WindowTitle_Migration": "Native window title bar — Utilities/System/WindowTitleResolver.cs:58. Not part of the React surface.",
+    "ChooseWhatToMove_DoesNotFitWarning": "Dead key: no reference in any .cs, .xaml, .ts or .tsx. Replaced by the per-drive ChooseWhatToMove_DriveDoesNotFitWarning.",
+    "ChooseWhatToMove_ApplyingLabel": "Dead key: no reference in any .cs, .xaml, .ts or .tsx.",
+    "Buttons_CancelMigration": "Dead key: no reference in any .cs, .xaml, .ts or .tsx.",
+    "Buttons_ContinueMigration": "Dead key: no reference in any .cs, .xaml, .ts or .tsx.",
+    "Buttons_StartMigrationNow": "Dead key: no reference in any .cs, .xaml, .ts or .tsx.",
+    "Buttons_ShowSkippedFiles": "Dead key: no reference in any .cs, .xaml, .ts or .tsx. ResultsSummaryView.tsx notes the separate 'Show skipped files' button was removed in favour of the subtitle link.",
+    "Buttons_ViewDetails": "Dead key: no reference in any .cs, .xaml, .ts or .tsx (resultsSummaryViewDetails is a channel name, not this string).",
+    "Failure_ErrorCode": "Never shown by design: web/src/screens/precheck/FailureModal.tsx:39 ('deliberately not shown') and contract.ts FailureScreenState.errorCode ('never rendered'). No t('Failure_ErrorCode') exists in web/src.",
+    "NetworkLost_ThisPC": "Unreachable in production: only produced by EngineErrorRoute.MessageFor (:138) and FailurePageViewModel.MessageFor (:171), and every path that sees network-loss codes 2505/2506 shows NoNetworkPage first (ViewModels/MainWindowViewModel.cs:558-566, :1310-1319, :807-830). The only producer of the MTDErrorCode, NetworkStatusRoute.ErrorCodeFor, is referenced only by tests.",
+    "NetworkLost_OtherPC": "Unreachable in production — see NetworkLost_ThisPC.",
+    "AppError_Body": "React error-boundary fallback (web/src/components/AppErrorBoundary.tsx:42): shown only after a render-time exception inside a screen. Not reachable through navigation, so the catalog does not stage it (it would need deliberate fault injection and would trip its own JS-error check).",
+    "AppError_UnrecoverableBody": "Shown only if native pushes a screen id this React build does not know (web/src/App.tsx:150, a native/React version mismatch), or on the native WPF startup-failure modal (Views/StartupFailureModal.xaml.cs:63). Not reachable through normal navigation; ScreenId is a closed union, so the catalog does not stage it."
+  }
+}

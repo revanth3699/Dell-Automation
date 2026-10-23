@@ -41,6 +41,8 @@ coordination_service/state.json
 !/TARGET_STATE_MACHINE.md
 # testdata seeding usage guide -- pushed so it ships with the scripts.
 !/testdata/README.md
+# screen_catalog usage guide -- pushed so the catalog's setup and rules ship with it.
+!/screen_catalog/README.md
 !/BENCHMARKING_PLAN.md
 
 # Dev/debug scripts used only for building this framework locally (manual, piecemeal
