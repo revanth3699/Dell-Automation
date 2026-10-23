@@ -11,6 +11,9 @@ description: >
     4. The run finishes, validates the migration report against this PC, and tears down:
        the seeded data is removed (clean_test_data) and the network is restored.
 
+  Both PCs run the resource benchmark sampler for the whole run (start_benchmark /
+  stop_benchmark_report) -- a per-role report lands in benchmark/output/<run_id>/.
+
   Needs an ELEVATED run on both PCs (network adapter + seeding). DDA_NETWORK_ADAPTER_NAME
   may be set to pick the adapter. To change the data volume, edit the seed step args
   (profile: Minimal | Standard | Stress) -- keep the two roles' profiles the same so the
@@ -20,7 +23,8 @@ roles:
   target:
     defaults: {step_timeout: 300, tick: 0.5}
     policies: {base: happy_path}
-    teardown: [enable_network, clean_test_data]
+    setup: [start_benchmark]
+    teardown: [enable_network, clean_test_data, stop_benchmark_report]
     steps:
       - at: [welcome, welcomeSignedOut]
         env: seed_target_data
@@ -91,7 +95,8 @@ roles:
   source:
     defaults: {step_timeout: 300, tick: 0.5}
     policies: {base: happy_path}
-    teardown: [clean_test_data]
+    setup: [start_benchmark]
+    teardown: [clean_test_data, stop_benchmark_report]
     steps:
       - at: welcome
         env: seed_source_data
