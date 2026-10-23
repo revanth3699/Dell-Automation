@@ -91,12 +91,38 @@ def _wifi_profile_for_adapter(ctx, name: str) -> tuple[str, str] | None:
     return None
 
 
+def _is_migrating(ctx, timeout: float = 2.0) -> bool:
+    """True if this PC's app is currently showing its transfer-in-progress screen -- the
+    same probe orchestration/statemachine/{target,source}_model.py's "migrating" state is
+    built on, reused here (not through the model/Observer, which env steps don't have
+    access to) so disable_network can check it directly against ctx.app."""
+    if ctx.role == "source":
+        from assertions.source.transfer_progress_screen import is_migrating
+        return is_migrating(ctx.app, timeout=timeout)
+    from assertions.target.transfer_progress_screen import is_showing
+    return is_showing(ctx.app, timeout=timeout)
+
+
 def disable_network(ctx, args=None) -> None:
     """Drops this PC's network -- raises the noNetwork overlay. Needs admin. If `name` is
     currently-connected WiFi, captures its profile/SSID first so enable_network can rejoin
     the SAME network explicitly rather than relying on Windows' own auto-reconnect (which
     silently does nothing if "Connect automatically" is off for that profile, and isn't
-    guaranteed to pick the same network back when more than one known network is in range)."""
+    guaranteed to pick the same network back when more than one known network is in range).
+
+    Confirms the app is still on its migrating screen right before actually disabling the
+    adapter -- a step's wait_before timer is scheduled relative to when "migrating" was
+    first reached, so on a fast transfer it could otherwise fire after the app has already
+    moved past that screen, dropping the network outside of any real migration. Skips the
+    disable (with a warning) rather than risk that. args: timeout (seconds for this one-shot
+    screen check, default 2.0)."""
+    args = args or {}
+    timeout = float(args.get("timeout", 2.0))
+    if not _is_migrating(ctx, timeout=timeout):
+        ctx.log.warning("environment: not on the migrating screen anymore -- skipping disable_network "
+                        "(refusing to drop the network outside of an actual migration)")
+        return
+
     name = _adapter_name(ctx)
     wifi = _wifi_profile_for_adapter(ctx, name)
     ctx.scratch["network_profile"], ctx.scratch["network_ssid"] = wifi or (None, None)
