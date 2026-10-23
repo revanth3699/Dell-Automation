@@ -127,8 +127,18 @@ Target fetches it and runs the check (`check_permissions`) with no manual copy â
 "Driving it from a scenario" below.
 
 **Manual (standalone).** Copy the Source manifest to the Target yourself, then run:
+state into `source_manifest_latest.json`. After the migration, the checker compares the
+migrated files **on the Target PC** against that captured state.
+
+**Automated (inside a scenario).** The example scenario does this for you: the Source
+publishes its manifest through the Coordination Service (`publish_source_manifest`), and the
+Target fetches it and runs the check (`check_permissions`) with no manual copy â€” see
+"Driving it from a scenario" below.
+
+**Manual (standalone).** Copy the Source manifest to the Target yourself, then run:
 
 ```powershell
+# 1) Copy source_manifest_latest.json from the Source PC, e.g. to C:\from_source\.
 # 1) Copy source_manifest_latest.json from the Source PC, e.g. to C:\from_source\.
 # 2) On the Target PC, after the migration completes:
 powershell -ExecutionPolicy Bypass -File testdata\check_permissions.ps1 `

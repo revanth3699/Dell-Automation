@@ -139,6 +139,26 @@ def test_abandoned_stub_migration_is_dropped(tmp_path):
     assert windows[0].kind == "primary"              # not "try_again" -- the stub no longer counts
 
 
+def test_zero_duration_stub_with_real_timestamps_is_dropped(tmp_path):
+    """Same phantom-stub pattern as test_abandoned_stub_migration_is_dropped, but confirmed live
+    (2026-10-23, run 681) in a variant the MinValue check above doesn't catch: the abandoned row's
+    MigrationStartTime/MigrationEndTime were both stamped with the SAME real instant (not left
+    null, not MinValue) as the fresh id that followed, with no audit trail. Without the start==end
+    check this showed up as a 1-second, content-free episode that pushed the one real migration
+    into the "Try Again" label by list position, even though nothing was ever retried."""
+    conn = h.new_db(tmp_path / "g.db")
+    conn.execute("INSERT INTO MigrationStatus (id, role, migrationState, timeCreated, timeUpdated,"
+                 " MigrationStartTime, MigrationEndTime) VALUES (372, 'NewPC', 'Init', ?, ?, ?, ?)",
+                 (h.iso_utc(T0), h.iso(T0), h.iso(T0), h.iso(T0)))
+    h.add_migration(conn, 373, T0)   # the real migration, stamped at the same instant
+    conn.commit()
+    conn.close()
+    eps = harvest.read_episodes(tmp_path / "g.db")
+    assert [e.migration_id for e in eps] == [373]
+    windows = harvest.expand_segments(eps)
+    assert windows[0].kind == "primary"              # not "try_again" -- the stub no longer counts
+
+
 def test_db_missing_and_locked_raise_typed_error(tmp_path):
     with pytest.raises(harvest.CdmDbError):
         harvest.read_episodes(tmp_path / "missing.db")

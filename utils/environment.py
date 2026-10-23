@@ -21,6 +21,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from pathlib import Path
 
 PS_TIMEOUT_SECONDS = 60
 
@@ -44,12 +45,14 @@ def _powershell(command: str, timeout: int = PS_TIMEOUT_SECONDS) -> str:
 # --------------------------------------------------------------------- applications
 
 def open_notepad(ctx, args=None) -> None:
+def open_notepad(ctx, args=None) -> None:
     """Gives the close-applications precheck something to find."""
     subprocess.Popen(["notepad.exe"])
     time.sleep(2.0)
     ctx.log.info("environment: started notepad.exe so the Close applications dialog has something to close")
 
 
+def close_notepad(ctx, args=None) -> None:
 def close_notepad(ctx, args=None) -> None:
     _powershell("Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force")
     ctx.log.info("environment: notepad.exe stopped")
@@ -73,6 +76,7 @@ def _adapter_name(ctx) -> str:
 
 
 def disable_network(ctx, args=None) -> None:
+def disable_network(ctx, args=None) -> None:
     """Drops this PC's network -- raises the noNetwork overlay. Needs admin."""
     name = _adapter_name(ctx)
     _powershell(f"Disable-NetAdapter -Name '{name}' -Confirm:$false")
@@ -80,11 +84,13 @@ def disable_network(ctx, args=None) -> None:
 
 
 def enable_network(ctx, args=None) -> None:
+def enable_network(ctx, args=None) -> None:
     name = ctx.scratch.get("network_adapter") or _adapter_name(ctx)
     _powershell(f"Enable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.info(f"environment: network adapter {name!r} enabled")
 
 
+def set_network_public(ctx, args=None) -> None:
 def set_network_public(ctx, args=None) -> None:
     """Makes the trust-network precheck fail (TrustRequired). Needs admin."""
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Public")
@@ -92,12 +98,14 @@ def set_network_public(ctx, args=None) -> None:
 
 
 def set_network_private(ctx, args=None) -> None:
+def set_network_private(ctx, args=None) -> None:
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private")
     ctx.log.info("environment: network profile set to Private")
 
 
 # --------------------------------------------------------------------- region
 
+def set_region_unsupported(ctx, args=None) -> None:
 def set_region_unsupported(ctx, args=None) -> None:
     """Sets the Windows home location to one the app's supported-region list does not
     include (GeoId 4 = Afghanistan) -- raises localeNotSupported. The previous value is
@@ -108,6 +116,7 @@ def set_region_unsupported(ctx, args=None) -> None:
 
 
 def restore_region(ctx, args=None) -> None:
+def restore_region(ctx, args=None) -> None:
     geo = ctx.scratch.get("geo_id") or ctx.env.get("DDA_HOME_GEOID", "244")  # 244 = United States
     _powershell(f"Set-WinHomeLocation -GeoId {geo}")
     ctx.log.info(f"environment: Windows home location restored to GeoId {geo}")
@@ -115,6 +124,7 @@ def restore_region(ctx, args=None) -> None:
 
 # --------------------------------------------------------------------- validation
 
+def validate_migration_report(ctx, args=None) -> None:
 def validate_migration_report(ctx, args=None) -> None:
     """Runs validation/validate_migration.py against the newest MigrationReport PDF on
     this (Target) PC: every file the report claims was copied must exist, and every
@@ -136,6 +146,7 @@ def validate_migration_report(ctx, args=None) -> None:
 BENCHMARK_STOP_WAIT_SECONDS = 15
 
 
+def start_benchmark(ctx, args=None) -> None:
 def start_benchmark(ctx, args=None) -> None:
     """Target setup: launches the benchmark resource sampler as its own subprocess (see
     benchmark/resource_sampler.py, BENCHMARKING_PLAN.md). Never blocks and never raises: a
@@ -164,6 +175,7 @@ def start_benchmark(ctx, args=None) -> None:
         ctx.log.warning(f"benchmark: could not start the resource sampler: {exc}")
 
 
+def stop_benchmark_report(ctx, args=None) -> None:
 def stop_benchmark_report(ctx, args=None) -> None:
     """Target teardown: stops the sampler, harvests CDM.db / the rclone log / the samples and
     renders benchmark/output/<run_id>/report_<role>.html. MUST NEVER RAISE -- it runs in the

@@ -252,6 +252,15 @@ def read_episodes(db_path: Path) -> list[Episode]:
             continue
         start = min(starts)
         end = max(max(ends), start) if ends else start
+        if not trail and end == start:
+            continue  # the same phantom-stub pattern as the MinValue check above, but this time
+                      # the app stamped REAL (non-null, non-MinValue) MigrationStartTime /
+                      # MigrationEndTime on the abandoned row -- both set to the same instant as
+                      # the fresh id that followed, instead of leaving timeUpdated at MinValue.
+                      # Confirmed live (2026-10-23, run 681): a zero-duration, zero-audit-trail
+                      # episode like this still pushed the one real migration into the "Try
+                      # Again" slot by list position, exactly like the all-null stub case above --
+                      # this just catches the variant where the stub row got real timestamps.
         marks = [t for s, t in trail if s == MIGRATION_STARTED]
         if len(marks) > 1:
             bounds = [start] + marks[1:] + [end]
