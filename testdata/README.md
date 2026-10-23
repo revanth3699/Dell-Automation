@@ -18,11 +18,12 @@ cleanup never touches your real files.
 
 | File | Role |
 |---|---|
-| `seed_source.ps1` | Run on the **Source (old) PC** — writes the data to be migrated + all edge/stress cases. |
+| `seed_source.ps1` | Run on the **Source (old) PC** — writes the data to be migrated + all edge/stress/permission cases. |
 | `seed_target.ps1` | Run on the **Target (new) PC** — writes pre-existing data that collides with the Source's. |
+| `check_permissions.ps1` | Run on the **Target PC after migration** — checks whether file permissions survived. |
 | `clean.ps1` | Run on **both** PCs afterward — removes every `DellMigrateTest` folder (and nothing else). |
 | `_common.ps1` | Shared library + the single data plan both seed scripts consume (keeps paths aligned). |
-| `output/` | Per-run JSON manifests (hashes/sizes of what was written) — git-ignored. |
+| `output/` | Per-run JSON manifests (hashes/sizes/**security state** of what was written) + the permission-check report — git-ignored. |
 
 ## Usage
 
@@ -83,11 +84,63 @@ tagged `SOURCE` / `TARGET` where relevant, so after migration you can tell which
 Generated binaries carry correct magic bytes for their extension (enough for category
 detection) but are **test files, not valid playable media**.
 
+### Permission cases (`perms\`, Source only)
+
+These test whether **NTFS permissions / ACLs survive the migration**. All ACEs use
+**well-known SIDs** (Everyone, Users, Administrators) so they're identical on both PCs and
+can actually be compared across machines — a local-user SID would differ and be
+uncheckable.
+
+| File (under `Documents\DellMigrateTest\perms\`) | What it tests |
+|---|---|
+| `readonly-attr.txt` | Read-only attribute retention. |
+| `deny-write-everyone.txt` | Explicit **Deny Write** ACE for Everyone. |
+| `deny-write-users.txt` | Explicit **Deny Write** ACE for the Users group. |
+| `grant-full-users.txt` | Explicit **Allow FullControl** ACE for Users. |
+| `readonly-everyone.txt` | Allow Read&Execute + Deny Write for Everyone (read-only for all). |
+| `inherit-broken-keep.txt` | Inheritance **disabled, inherited ACEs copied** (protected ACL). |
+| `inherit-broken-strip.txt` | Inheritance **disabled, inherited ACEs removed** (only explicit remain). |
+| `encrypted.txt` | **EFS-encrypted** file. |
+| `compressed.txt` | **NTFS-compressed** file. |
+| `inherited-folder\` + `child.txt` | Folder grants an **inheritable** Users:Modify ACE; the child should inherit it. |
+
+> EFS and NTFS compression are best-effort — if the machine/volume doesn't support them,
+> seeding continues and that one attribute simply isn't set.
+
 ## Verifying what won a conflict
 
 Each run writes `output/<role>_manifest_latest.json` with the SHA-256 and size of every
-file it created. To see which version survived a conflict, compare a Target file's current
-hash on disk against the `source_` vs `target_` manifest hash for the same `RelPath`.
+file it created (plus the captured **security state** of the permission/attribute files).
+To see which version survived a conflict, compare a Target file's current hash on disk
+against the `source_` vs `target_` manifest hash for the same `RelPath`.
+
+## Checking permission retention after migration
+
+The Source seed captures each permission file's attributes, ACL, owner, and EFS/compression
+state into `source_manifest_latest.json`. After the migration, run the checker **on the
+Target PC** to compare the migrated files against that captured state:
+
+```powershell
+# 1) Copy the Source manifest to the Target PC. The migration does NOT carry it (it lives
+#    outside the user profile), so copy it yourself, e.g. to C:\from_source\.
+# 2) On the Target PC, after the migration completes:
+powershell -ExecutionPolicy Bypass -File testdata\check_permissions.ps1 `
+    -SourceManifest C:\from_source\source_manifest_latest.json
+```
+
+It prints `RETAINED` / `CHANGED` / `MISSING` per file (with the exact difference), writes
+`output\permission_check_<timestamp>.json`, and exits non-zero if anything changed.
+
+What it compares:
+- **Attribute bits** — ReadOnly, Hidden, System, Encrypted, Compressed (Archive is ignored
+  because copying sets it).
+- **Inheritance-protected** flag.
+- **Explicit ACEs built from well-known SIDs** — a local-user ACE can't be matched across
+  machines, so only these portable ACEs are checked. Inherited ACEs are skipped (they
+  depend on the target's own parent folders).
+
+> Caveat: for an EFS-encrypted file the checker only confirms the *Encrypted attribute*
+> survived — not that the Target user can actually decrypt it (EFS keys are per-user).
 
 ## Notes / gotchas
 
@@ -95,8 +148,9 @@ hash on disk against the `source_` vs `target_` manifest hash for the same `RelP
   so the scripts need no BOM.
 - Run `clean.ps1` on a PC **before** re-seeding it to start from a known-empty state.
 - The large file is skipped automatically if the target drive lacks ~110% of its size free.
-- `clean.ps1` uses a robocopy mirror-empty pass so it can delete the >260-char tree and
-  read-only/system files that plain `Remove-Item` cannot.
+- `clean.ps1` resets ACLs (`icacls /reset`) and uses a robocopy mirror-empty pass so it can
+  delete the >260-char tree, the read-only/system files, and the Deny-ACE/protected-ACL
+  permission files that plain `Remove-Item` cannot.
 - These are standalone setup scripts. If you want them driven from the state-machine
   scenario runner's `setup:` / `teardown:`, they can be wrapped as steps in
   [`utils/environment.py`](../utils/environment.py) — ask and I'll add `seed_source_data`

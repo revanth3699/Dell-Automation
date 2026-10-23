@@ -166,14 +166,165 @@ function Set-FileAttrs {
     [System.IO.File]::SetAttributes($Path, $value)
 }
 
+# --------------------------------------------------------------- permissions / ACLs
+#
+# NTFS permissions are expressed as ACEs tied to a security identity (SID). A SID for a
+# local user is machine-specific, so an ACE for "the current user" cannot be compared
+# across the Source and Target PCs. The *well-known* SIDs below are byte-identical on
+# every Windows machine, so ACEs built from them ARE comparable across the two PCs --
+# that is what makes "were the permissions retained?" a checkable question. The
+# permission scenarios therefore lean on these well-known identities.
+
+function Get-WellKnownSid {
+    param([Parameter(Mandatory)][string]$Name)
+    $type = switch ($Name) {
+        'Everyone'           { [System.Security.Principal.WellKnownSidType]::WorldSid }
+        'Users'              { [System.Security.Principal.WellKnownSidType]::BuiltinUsersSid }
+        'Administrators'     { [System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid }
+        'AuthenticatedUsers' { [System.Security.Principal.WellKnownSidType]::AuthenticatedUserSid }
+        default { throw "Unknown well-known identity: $Name" }
+    }
+    return (New-Object System.Security.Principal.SecurityIdentifier($type, $null))
+}
+
+# SIDs we treat as portable (same on every machine) when comparing ACLs across PCs.
+$script:PortableSids = @('S-1-1-0','S-1-5-32-544','S-1-5-32-545','S-1-5-11','S-1-5-18','S-1-3-0')
+
+# Applies one named permission scenario to an already-written file (or folder). Each
+# scenario is a distinct NTFS-permission situation whose retention we want to test.
+function Set-PermissionScenario {
+    param([string]$Path, [string]$Scenario)
+    if ($script:IsDryRun -or [string]::IsNullOrEmpty($Scenario)) { return }
+
+    $acl = Get-Acl -LiteralPath $Path
+    switch ($Scenario) {
+        'deny-write-everyone' {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Everyone'), 'Write', 'None', 'None', 'Deny')
+            $acl.AddAccessRule($rule)
+        }
+        'deny-write-users' {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Users'), 'Write', 'None', 'None', 'Deny')
+            $acl.AddAccessRule($rule)
+        }
+        'grant-full-users' {
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Users'), 'FullControl', 'None', 'None', 'Allow')
+            $acl.AddAccessRule($rule)
+        }
+        'readonly-everyone' {
+            $allow = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Everyone'), 'ReadAndExecute', 'None', 'None', 'Allow')
+            $deny = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Everyone'), 'Write', 'None', 'None', 'Deny')
+            $acl.AddAccessRule($allow); $acl.AddAccessRule($deny)
+        }
+        'protected-keep' {
+            # Break inheritance but COPY the inherited ACEs into explicit ones.
+            $acl.SetAccessRuleProtection($true, $true)
+        }
+        'protected-remove' {
+            # Break inheritance and REMOVE inherited ACEs; re-grant Administrators +
+            # Users FullControl so the file stays usable (and gives us explicit ACEs to
+            # check for retention).
+            $acl.SetAccessRuleProtection($true, $false)
+            foreach ($id in 'Administrators','Users') {
+                $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    (Get-WellKnownSid $id), 'FullControl', 'None', 'None', 'Allow')
+                $acl.AddAccessRule($rule)
+            }
+        }
+        'folder-inherited' {
+            # On a folder: add an ACE that children inherit (ContainerInherit +
+            # ObjectInherit), so we can check whether the inherited permission
+            # propagates on the target too.
+            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                (Get-WellKnownSid 'Users'), 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+            $acl.AddAccessRule($rule)
+        }
+        default { throw "Unknown permission scenario: $Scenario" }
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+# Best-effort: EFS can be disabled by policy and NTFS compression needs an NTFS volume.
+# A failure here just means that attribute won't be set -- the retention check then
+# compares "not encrypted" to "not encrypted", which is still a valid (if weaker) result.
+function Set-Encrypted {
+    param([string]$Path)
+    if ($script:IsDryRun) { return }
+    try { [System.IO.File]::Encrypt($Path) }
+    catch { Write-Warn2 "could not EFS-encrypt $Path ($($_.Exception.Message)) -- continuing" }
+}
+function Set-Compressed {
+    param([string]$Path)
+    if ($script:IsDryRun) { return }
+    # No .NET API for per-file NTFS compression; compact.exe is the supported tool.
+    try { & compact /c /q /i "$Path" | Out-Null }
+    catch { Write-Warn2 "could not NTFS-compress $Path ($($_.Exception.Message)) -- continuing" }
+}
+
+# Reads the full security state of a path into a plain object for the manifest. Captured
+# at seed time on the Source; check_permissions.ps1 compares the Target against it.
+function Get-SecurityInfo {
+    param([string]$Path)
+    try {
+        $item  = Get-Item -LiteralPath $Path -Force
+        $attrs = $item.Attributes
+        $acl   = Get-Acl -LiteralPath $Path
+        $aces  = @()
+        foreach ($r in $acl.Access) {
+            $sid = $null
+            try { $sid = $r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = $r.IdentityReference.Value }
+            $aces += [pscustomobject]@{
+                Sid        = $sid
+                Identity   = $r.IdentityReference.Value
+                Rights     = $r.FileSystemRights.ToString()
+                Type       = $r.AccessControlType.ToString()
+                Inherited  = [bool]$r.IsInherited
+                Portable   = ($script:PortableSids -contains $sid)
+                Inheritance= $r.InheritanceFlags.ToString()
+            }
+        }
+        return [pscustomobject]@{
+            Attributes = $attrs.ToString()
+            ReadOnly   = [bool]($attrs -band [System.IO.FileAttributes]::ReadOnly)
+            Hidden     = [bool]($attrs -band [System.IO.FileAttributes]::Hidden)
+            System     = [bool]($attrs -band [System.IO.FileAttributes]::System)
+            Encrypted  = [bool]($attrs -band [System.IO.FileAttributes]::Encrypted)
+            Compressed = [bool]($attrs -band [System.IO.FileAttributes]::Compressed)
+            Owner      = $acl.Owner
+            Protected  = [bool]$acl.AreAccessRulesProtected
+            Aces       = $aces
+        }
+    } catch {
+        return $null
+    }
+}
+
 # --------------------------------------------------------------------- manifest
+
+# Path of FullPath relative to its category's marker root (e.g. "edge\perms\x.txt").
+# Stored so check_permissions.ps1 can rebuild the Target path under the Target user's
+# own profile, regardless of differing user names / drive layouts between the two PCs.
+function Get-MarkerRelPath {
+    param([string]$Category, [string]$FullPath)
+    $root = Join-Path (Get-KnownFolder $Category) $script:MarkerFolderName
+    $full = [System.IO.Path]::GetFullPath($FullPath)
+    if ($full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $full.Substring($root.Length).TrimStart('\')
+    }
+    return $null
+}
 
 function Add-ManifestEntry {
     param(
         [string]$Class, [string]$Category, [string]$RelPath, [string]$FullPath,
-        [string]$Kind, [string]$Side, [string[]]$Attr, [string]$Note
+        [string]$Kind, [string]$Side, [string[]]$Attr, [string]$Note,
+        [string]$Scenario = '', [switch]$CaptureSecurity
     )
-    $size = $null; $hash = $null
+    $size = $null; $hash = $null; $sec = $null
     if (-not $script:IsDryRun) {
         try {
             if ([System.IO.File]::Exists($FullPath)) {
@@ -181,18 +332,22 @@ function Add-ManifestEntry {
                 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FullPath).Hash
             }
         } catch { }   # hashing a locked/odd file is best-effort only
+        if ($CaptureSecurity) { $sec = Get-SecurityInfo $FullPath }
     }
     $script:Manifest.Add([pscustomobject]@{
-        Class    = $Class
-        Category = $Category
-        RelPath  = $RelPath
-        FullPath = $FullPath
-        Kind     = $Kind
-        Side     = $Side
-        Attr     = ($Attr -join ',')
-        Size     = $size
-        Sha256   = $hash
-        Note     = $Note
+        Class     = $Class
+        Category  = $Category
+        RelPath   = $RelPath
+        MarkerRel = (Get-MarkerRelPath $Category $FullPath)
+        FullPath  = $FullPath
+        Kind      = $Kind
+        Side      = $Side
+        Attr      = ($Attr -join ',')
+        Scenario  = $Scenario
+        Size      = $size
+        Sha256    = $hash
+        Security  = $sec
+        Note      = $Note
     })
 }
 
@@ -212,7 +367,7 @@ function Save-Manifest {
         markerName  = $script:MarkerFolderName
         entries     = $script:Manifest
     }
-    $json = $payload | ConvertTo-Json -Depth 6
+    $json = $payload | ConvertTo-Json -Depth 10
     [System.IO.File]::WriteAllText($stamped, $json, $script:Utf8NoBom)
     [System.IO.File]::WriteAllText($latest,  $json, $script:Utf8NoBom)
     return $latest
@@ -280,11 +435,13 @@ function Get-TestDataPlan {
     $P = New-Object System.Collections.Generic.List[object]
     function Add-Entry {
         param($Class,$Category,$RelPath,$Kind,$Source,$Target,
-              [long]$Size=0,$Header='',[string[]]$Attr=@(),[int]$Count=0,$Note='')
+              [long]$Size=0,$Header='',[string[]]$Attr=@(),[int]$Count=0,$Note='',
+              $Acl='',[switch]$Encrypt,[switch]$Compress)
         $P.Add([pscustomobject]@{
             Class=$Class; Category=$Category; RelPath=$RelPath; Kind=$Kind;
             Source=$Source; Target=$Target; Size=$Size; Header=$Header;
-            Attr=$Attr; Count=$Count; Note=$Note
+            Attr=$Attr; Count=$Count; Note=$Note;
+            Acl=$Acl; Encrypt=[bool]$Encrypt; Compress=[bool]$Compress
         })
     }
 
@@ -337,6 +494,22 @@ function Get-TestDataPlan {
         Add-Entry 'edge-large' 'Videos' 'edge\bigfile.bin' 'big' 'src-big' $null -Size ([long]$bigDefaultMB * 1MB) -Header 'bin' -Note 'large file -> capacity / does-not-fit'
     }
     # Locked / in-use file is created only with -IncludeLocked (see seed_source.ps1).
+
+    # ---- G. Source-only PERMISSION cases (does the migration retain them?) -----------
+    # All use well-known SIDs so the ACEs are identical on both PCs and therefore
+    # checkable by check_permissions.ps1 after the transfer.
+    Add-Entry 'edge-perms' 'Documents' 'perms\readonly-attr.txt'       'text' "ReadOnly attribute set." $null -Attr @('ReadOnly') -Note 'read-only attribute retention'
+    Add-Entry 'edge-perms' 'Documents' 'perms\deny-write-everyone.txt' 'text' "Everyone is DENIED Write." $null -Acl 'deny-write-everyone' -Note 'explicit Deny ACE (Everyone)'
+    Add-Entry 'edge-perms' 'Documents' 'perms\deny-write-users.txt'    'text' "Users group is DENIED Write." $null -Acl 'deny-write-users' -Note 'explicit Deny ACE (Users)'
+    Add-Entry 'edge-perms' 'Documents' 'perms\grant-full-users.txt'    'text' "Users group granted FullControl." $null -Acl 'grant-full-users' -Note 'explicit Allow ACE (Users)'
+    Add-Entry 'edge-perms' 'Documents' 'perms\readonly-everyone.txt'   'text' "Everyone read-only (Allow RX + Deny Write)." $null -Acl 'readonly-everyone' -Note 'read-only for Everyone'
+    Add-Entry 'edge-perms' 'Documents' 'perms\inherit-broken-keep.txt' 'text' "Inheritance disabled, inherited ACEs copied." $null -Acl 'protected-keep' -Note 'protected ACL, inherited copied'
+    Add-Entry 'edge-perms' 'Documents' 'perms\inherit-broken-strip.txt' 'text' "Inheritance disabled, inherited ACEs removed." $null -Acl 'protected-remove' -Note 'protected ACL, inherited removed'
+    Add-Entry 'edge-perms' 'Documents' 'perms\encrypted.txt'           'text' "EFS-encrypted file content." $null -Encrypt -Note 'EFS encryption retention'
+    Add-Entry 'edge-perms' 'Documents' 'perms\compressed.txt'          'text' ("NTFS-compressed file. " + ('padding ' * 500)) $null -Compress -Note 'NTFS compression retention'
+    # A folder whose ACE children inherit, plus a child file that should pick it up.
+    Add-Entry 'edge-perms' 'Documents' 'perms\inherited-folder'        'empty' 'x' $null -Acl 'folder-inherited' -Note 'folder grants Users:Modify, inheritable'
+    Add-Entry 'edge-perms' 'Documents' 'perms\inherited-folder\child.txt' 'text' "Should inherit the folder's Users:Modify ACE." $null -Note 'inheritance propagation to child'
 
     return $P
 }
@@ -419,10 +592,20 @@ function Invoke-SeedEntry {
         default { throw "Unknown entry kind: $($Entry.Kind)" }
     }
 
+    # Apply permission scenario / encryption / compression to the entry's main path.
+    if ($Entry.Acl)      { Set-PermissionScenario -Path $base -Scenario $Entry.Acl }
+    if ($Entry.Encrypt)  { Set-Encrypted  -Path $base }
+    if ($Entry.Compress) { Set-Compressed -Path $base }
+
+    # Capture the full security state only where it's the point of the test (keeps the
+    # manifest small and avoids an ACL read per file for the many-small/bulk cases).
+    $captureSec = ($Entry.Class -eq 'edge-perms') -or ($Entry.Attr.Count -gt 0) -or
+                  $Entry.Acl -or $Entry.Encrypt -or $Entry.Compress
+
     foreach ($fp in $recorded) {
         Add-ManifestEntry -Class $Entry.Class -Category $Entry.Category `
             -RelPath $Entry.RelPath -FullPath $fp -Kind $Entry.Kind -Side $Side `
-            -Attr $Entry.Attr -Note $Entry.Note
+            -Attr $Entry.Attr -Note $Entry.Note -Scenario $Entry.Acl -CaptureSecurity:$captureSec
     }
     return $true
 }

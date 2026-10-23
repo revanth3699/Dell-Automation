@@ -59,6 +59,11 @@ if (-not $DryRun -and -not $Force) {
     if ($ans -notmatch '^(y|yes)$') { Write-Warn2 "Aborted."; return }
 }
 
+# This is a best-effort cleanup: a single native-tool stderr line (e.g. icacls on the
+# >260-char path) must not abort it. _common.ps1 set ErrorActionPreference=Stop, which
+# would otherwise turn a redirected native stderr line into a terminating error.
+$ErrorActionPreference = 'Continue'
+
 # An empty scratch folder we mirror onto each marker root. robocopy /MIR handles
 # >260-char paths and read-only/system files natively -- plain Remove-Item does not.
 $empty = Join-Path $env:TEMP ('dda_empty_' + [guid]::NewGuid().ToString('N'))
@@ -67,6 +72,12 @@ if (-not $DryRun) { [System.IO.Directory]::CreateDirectory($empty) | Out-Null }
 foreach ($r in $roots) {
     if ($DryRun) { continue }
     try {
+        # 0) Reset ACLs to inherited -- the perm test files carry explicit Deny ACEs and
+        #    protected ACLs that can otherwise block deletion. /reset restores inheritance
+        #    (removing the Deny ACEs) so the current user regains delete rights. Run via
+        #    cmd so icacls's own stderr (it can't walk the >260-char path) is swallowed by
+        #    cmd and never reaches PowerShell as an error.
+        & cmd /c "icacls `"$r`" /reset /T /C /Q >nul 2>nul"
         # 1) Mirror the empty folder -> deletes every file/subfolder inside $r,
         #    including the deep (>260-char) tree and any read-only/system files.
         & robocopy $empty $r /MIR /NFL /NDL /NJH /NJS /R:1 /W:1 | Out-Null
