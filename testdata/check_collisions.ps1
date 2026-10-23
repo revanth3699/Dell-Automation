@@ -43,7 +43,8 @@ param(
     [string]$TargetManifest,
     [ValidateSet('', 'source', 'target')][string]$ExpectedConflictWinner = '',
     [switch]$RequireMigrated,
-    [switch]$NoJson
+    [switch]$NoJson,
+    [switch]$NoHtml
 )
 
 . (Join-Path $PSScriptRoot '_common.ps1')
@@ -198,6 +199,37 @@ if (-not $NoJson) {
     }
     [System.IO.File]::WriteAllText($out, ($payload | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
     Write-Step "JSON report: $out"
+}
+
+if (-not $NoHtml) {
+    $rows = ''
+    foreach ($r in ($results | Sort-Object Class, Rel)) {
+        $kind = if ($r.Fail) { 'fail' }
+                elseif ($r.Status -like 'CONFLICT-*' -or $r.Status -like 'NOT-*' -or $r.Status -like '*CHANGED') { 'warn' }
+                else { 'pass' }
+        $winner = if ($r.Winner) { ConvertTo-HtmlText $r.Winner } else { '&ndash;' }
+        $rows += ('<tr><td>{0}</td><td class="mono">{1}</td><td>{2}</td><td>{3}</td></tr>' -f `
+            (ConvertTo-HtmlText $r.Class), (ConvertTo-HtmlText $r.Rel), (New-Badge $r.Status $kind), $winner)
+    }
+    $body = @"
+  <h2>Every seeded case <span class="note">($($results.Count) cases)</span></h2>
+  <table>
+    <tr><th>Class</th><th>Path (under DellMigrateTest)</th><th>Outcome</th><th>Conflict winner</th></tr>
+    $rows
+  </table>
+"@
+    $okCount = $results.Count - $failed.Count
+    $stats = @(
+        @{ num = $results.Count; label = 'Cases'; kind = '' },
+        @{ num = $conflicts.Count; label = 'Conflicts'; kind = '' },
+        @{ num = $failed.Count; label = 'Data loss/corruption'; kind = $(if ($failed.Count) { 'fail' } else { 'pass' }) }
+    )
+    $sub = ("Source manifest: {0}<br>Target: {1} &middot; {2}" -f (ConvertTo-HtmlText $SourceManifest), (ConvertTo-HtmlText $env:COMPUTERNAME), (Get-Date).ToString('s'))
+    $outDir = Join-Path $PSScriptRoot 'output'
+    $htmlOut = Join-Path $outDir ("collision_check_{0}.html" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-HtmlReport -Title 'Collision + Edge-Case Report' -Subtitle $sub -Stats $stats `
+        -Pass $okCount -Fail $failed.Count -BodyHtml $body -OverallOk $allOk -OutPath $htmlOut | Out-Null
+    Write-Step "HTML report: $htmlOut"
 }
 
 exit $(if ($allOk) { 0 } else { 1 })
