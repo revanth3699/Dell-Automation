@@ -94,11 +94,12 @@ roles:
     steps:
       - at: welcome
         env: seed_source_data
-        args: {profile: Standard, script_timeout: 1800}
-        timeout: 1800
+        args: {profile: Standard, big_file_mb: 10240, script_timeout: 7200}
+        timeout: 7200
         note: >
           lay down the Source's data to be migrated (edge + permission cases included).
-          Add include_locked: true to also create a genuinely in-use file.
+          big_file_mb: 10240 generates a 10 GB file (needs ~11 GB free on the Videos drive,
+          or the seed script skips it). Add include_locked: true for a genuinely in-use file.
       - at: welcome
         env: publish_source_manifest
         note: >
