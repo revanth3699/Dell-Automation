@@ -614,3 +614,127 @@ function Invoke-SeedEntry {
     }
     return $true
 }
+
+
+# --------------------------------------------------------------------- HTML reports
+#
+# Self-contained HTML report helpers shared by check_permissions.ps1 and
+# check_collisions.ps1 -- same "the report is the only artifact" convention and visual
+# language (donut, stat tiles, status badges, light/dark) as validation/'s HTML reports.
+
+function ConvertTo-HtmlText {
+    param([string]$Text)
+    if ($null -eq $Text) { return '' }
+    return ($Text -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;' -replace '"', '&quot;')
+}
+
+# A coloured status pill. Kind is pass | fail | warn | neutral.
+function New-Badge {
+    param([string]$Text, [string]$Kind = 'neutral')
+    return ('<span class="badge {0}">{1}</span>' -f $Kind, (ConvertTo-HtmlText $Text))
+}
+
+function New-DonutSvg {
+    param([int]$Pass, [int]$Fail)
+    $total = $Pass + $Fail
+    $r = 40.0
+    $circ = 2 * [Math]::PI * $r
+    if ($total -eq 0) { $passLen = 0.0; $failLen = 0.0; $pct = '&ndash;' }
+    else { $passLen = $circ * ($Pass / $total); $failLen = $circ - $passLen; $pct = ('{0:N0}%' -f ($Pass / $total * 100)) }
+    return @"
+    <div class="donut-wrap">
+      <svg viewBox="0 0 100 100" class="donut" role="img" aria-label="Pass rate $pct">
+        <circle cx="50" cy="50" r="40" fill="none" stroke="var(--donut-track)" stroke-width="14"></circle>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#d03b3b" stroke-width="14"
+                stroke-dasharray="$([Math]::Round($failLen,2)) $([Math]::Round($circ,2))" stroke-dashoffset="$([Math]::Round(-$passLen,2))"
+                transform="rotate(-90 50 50)"></circle>
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#0ca30c" stroke-width="14"
+                stroke-dasharray="$([Math]::Round($passLen,2)) $([Math]::Round($circ,2))" stroke-dashoffset="0"
+                transform="rotate(-90 50 50)"></circle>
+        <text x="50" y="47" text-anchor="middle" class="donut-pct">$pct</text>
+        <text x="50" y="62" text-anchor="middle" class="donut-sub">pass rate</text>
+      </svg>
+      <div class="legend">
+        <div class="legend-row"><span class="dot pass"></span>OK &mdash; $Pass</div>
+        <div class="legend-row"><span class="dot fail"></span>Failed &mdash; $Fail</div>
+      </div>
+    </div>
+"@
+}
+
+$script:ReportStyle = @'
+:root { color-scheme: light dark; --donut-track: #e1e0d9; }
+@media (prefers-color-scheme: dark) { :root { --donut-track: #2c2c2a; } }
+body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem; background: #fafafa; color: #1a1a1a; }
+@media (prefers-color-scheme: dark) { body { background: #1a1a1a; color: #eee; } }
+h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+h2 { font-size: 1.1rem; margin-top: 2rem; }
+.subtitle { color: #777; margin-bottom: 1.5rem; word-break: break-all; }
+.top-row { display: flex; gap: 2rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+.summary { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+.stat { background: rgba(127,127,127,0.08); border-radius: 8px; padding: 0.75rem 1.25rem; min-width: 110px; }
+.stat .num { font-size: 1.8rem; font-weight: 700; display: block; }
+.stat.pass .num { color: #0ca30c; } .stat.fail .num { color: #d03b3b; }
+.donut-wrap { display: flex; align-items: center; gap: 1rem; }
+.donut { width: 110px; height: 110px; flex-shrink: 0; }
+.donut-pct { font-size: 20px; font-weight: 700; fill: currentColor; }
+.donut-sub { font-size: 8px; fill: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+.legend { font-size: 0.85rem; }
+.legend-row { display: flex; align-items: center; gap: 0.4rem; margin: 0.15rem 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.pass { background: #0ca30c; } .dot.fail { background: #d03b3b; }
+.overall-badge { font-size: 1rem; font-weight: 700; padding: 0.3rem 0.9rem; border-radius: 6px; }
+.overall-badge.pass { background: #dafbe1; color: #0ca30c; }
+.overall-badge.fail { background: #ffebe9; color: #d03b3b; }
+table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; }
+td, th { text-align: left; padding: 0.4rem 0.7rem; border-bottom: 1px solid rgba(127,127,127,0.15); font-size: 0.9rem; vertical-align: top; }
+th { color: #888; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge { font-size: 0.7rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 4px; white-space: nowrap; }
+.badge.pass { background: #dafbe1; color: #0ca30c; }
+.badge.fail { background: #ffebe9; color: #d03b3b; }
+.badge.warn { background: #fff4d6; color: #a6760a; }
+.badge.neutral { background: rgba(127,127,127,0.15); color: #8a8a8a; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; word-break: break-all; }
+.note { color: #777; font-size: 0.85rem; }
+'@
+
+# Writes one self-contained HTML report. $Stats is an array of @{num;label;kind}; $Pass
+# and $Fail drive the donut + overall badge; $BodyHtml is the checker-built section(s).
+function New-HtmlReport {
+    param(
+        [string]$Title, [string]$Subtitle, [object[]]$Stats,
+        [int]$Pass, [int]$Fail, [string]$BodyHtml, [bool]$OverallOk, [string]$OutPath
+    )
+    $statTiles = ''
+    foreach ($s in $Stats) {
+        $kind = if ($s.kind) { ' ' + $s.kind } else { '' }
+        $statTiles += ('<div class="stat{0}"><span class="num">{1}</span>{2}</div>' -f $kind, $s.num, (ConvertTo-HtmlText $s.label))
+    }
+    $overall = if ($OverallOk) { '<div class="stat"><span class="overall-badge pass">PASS</span></div>' }
+               else { '<div class="stat"><span class="overall-badge fail">FAIL</span></div>' }
+    $donut = New-DonutSvg -Pass $Pass -Fail $Fail
+    $html = @"
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$(ConvertTo-HtmlText $Title)</title>
+<style>$script:ReportStyle</style>
+</head>
+<body>
+  <h1>$(ConvertTo-HtmlText $Title)</h1>
+  <div class="subtitle">$Subtitle</div>
+  <div class="top-row">
+    <div class="summary">$statTiles$overall</div>
+    $donut
+  </div>
+  $BodyHtml
+</body>
+</html>
+"@
+    $dir = [System.IO.Path]::GetDirectoryName($OutPath)
+    [System.IO.Directory]::CreateDirectory($dir) | Out-Null
+    [System.IO.File]::WriteAllText($OutPath, $html, $script:Utf8NoBom)
+    return $OutPath
+}

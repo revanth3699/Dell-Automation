@@ -24,7 +24,7 @@ cleanup never touches your real files.
 | `check_collisions.ps1` | Run on the **Target PC after migration** — validates every seeded case (collisions + edge cases) on disk. |
 | `clean.ps1` | Run on **both** PCs afterward — removes every `DellMigrateTest` folder (and nothing else). |
 | `_common.ps1` | Shared library + the single data plan both seed scripts consume (keeps paths aligned). |
-| `output/` | Per-run JSON manifests (hashes/sizes/**security state** of what was written) + the permission-check report — git-ignored. |
+| `output/` | Per-run JSON manifests + the check reports (**visual HTML** + JSON) — git-ignored. |
 
 ## Usage
 
@@ -146,7 +146,11 @@ powershell -ExecutionPolicy Bypass -File testdata\check_permissions.ps1 `
 ```
 
 It prints `RETAINED` / `CHANGED` / `MISSING` per file (with the exact difference), writes
-`output\permission_check_<timestamp>.json`, and exits non-zero if anything changed.
+`output\permission_check_<timestamp>.json` **and a self-contained visual HTML report**
+(`permission_check_<timestamp>.html`, with a donut + status badges, same style as the
+migration-validation report), and exits non-zero if anything changed. `check_collisions.ps1`
+writes the same pair (`collision_check_<timestamp>.{html,json}`). Pass `-NoHtml` / `-NoJson`
+to skip either.
 
 What it compares:
 - **Attribute bits** — ReadOnly, Hidden, System, Encrypted, Compressed (Archive is ignored

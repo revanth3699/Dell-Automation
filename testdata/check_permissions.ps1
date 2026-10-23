@@ -35,7 +35,8 @@
 [CmdletBinding()]
 param(
     [string]$SourceManifest,
-    [switch]$NoJson
+    [switch]$NoJson,
+    [switch]$NoHtml
 )
 
 . (Join-Path $PSScriptRoot '_common.ps1')
@@ -142,6 +143,35 @@ if (-not $NoJson) {
     }
     [System.IO.File]::WriteAllText($out, ($payload | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
     Write-Step "JSON report: $out"
+}
+
+if (-not $NoHtml) {
+    $rows = ''
+    foreach ($r in $results) {
+        $kind = switch ($r.Status) { 'RETAINED' { 'pass' } 'MISSING' { 'fail' } default { 'fail' } }
+        $diffs = if ($r.Diffs) { (($r.Diffs | ForEach-Object { ConvertTo-HtmlText $_ }) -join '<br>') } else { '&ndash;' }
+        $rows += ('<tr><td class="mono">{0}</td><td>{1}</td><td class="mono">{2}</td><td class="note">{3}</td></tr>' -f `
+            (ConvertTo-HtmlText $r.RelPath), (New-Badge $r.Status $kind), (ConvertTo-HtmlText $r.Scenario), $diffs)
+    }
+    $body = @"
+  <h2>Permission files <span class="note">($($results.Count) checked)</span></h2>
+  <table>
+    <tr><th>File</th><th>Status</th><th>Scenario</th><th>Differences</th></tr>
+    $rows
+  </table>
+"@
+    $changed = $results.Count - $retained
+    $stats = @(
+        @{ num = $results.Count; label = 'Files checked'; kind = '' },
+        @{ num = $retained; label = 'Retained'; kind = 'pass' },
+        @{ num = $changed; label = 'Changed/Missing'; kind = $(if ($changed) { 'fail' } else { 'pass' }) }
+    )
+    $sub = ("Source manifest: {0}<br>Target: {1} &middot; {2}" -f (ConvertTo-HtmlText $SourceManifest), (ConvertTo-HtmlText $env:COMPUTERNAME), (Get-Date).ToString('s'))
+    $outDir = Join-Path $PSScriptRoot 'output'
+    $htmlOut = Join-Path $outDir ("permission_check_{0}.html" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-HtmlReport -Title 'Permission Retention Report' -Subtitle $sub -Stats $stats `
+        -Pass $retained -Fail $changed -BodyHtml $body -OverallOk $allOk -OutPath $htmlOut | Out-Null
+    Write-Step "HTML report: $htmlOut"
 }
 
 exit $(if ($allOk) { 0 } else { 1 })
