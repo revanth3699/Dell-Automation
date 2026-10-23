@@ -54,7 +54,7 @@ Write-Head "Dell Migrate -- PERMISSION RETENTION CHECK"
 Write-Step "source manifest: $SourceManifest"
 Write-Step "this (target) machine: $env:COMPUTERNAME  user=$env:USERNAME"
 
-$manifest = Get-Content -LiteralPath $SourceManifest -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $SourceManifest -Raw -Encoding UTF8 | ConvertFrom-Json
 $permEntries = $manifest.entries | Where-Object { $_.Security }   # only those with captured security
 
 # Normalized key for a comparable (explicit, portable) ACE.

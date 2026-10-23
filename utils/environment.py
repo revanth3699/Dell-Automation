@@ -325,6 +325,44 @@ def check_permissions(ctx, args=None) -> None:
                         "(fail_on_change=false) -- see testdata/output/permission_check_*.json")
 
 
+def check_collisions(ctx, args=None) -> None:
+    """Target: validates every seeded case (collisions AND edge cases) against the live
+    files on this PC after the migration, via testdata/check_collisions.ps1. Fetches the
+    Source manifest from the Coordination Service and uses the local Target manifest. Run
+    after the migration, before clean_test_data. args: key, fetch_timeout, script_timeout,
+    expected_conflict_winner (source|target), require_migrated (bool), fail_on_change
+    (default true -- data loss/corruption fails the scenario)."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    fetch_timeout = float(args.get("fetch_timeout") or 300)
+    fail_on_change = args.get("fail_on_change", True)
+
+    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
+    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
+    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    incoming.write_text(content, encoding="utf-8")
+
+    target_manifest = _TESTDATA_DIR / "output" / "target_manifest_latest.json"
+    if not target_manifest.is_file():
+        raise EnvironmentStepError(f"target manifest not found: {target_manifest} (run seed_target_data first)")
+
+    script_args = ["-SourceManifest", str(incoming), "-TargetManifest", str(target_manifest)]
+    if args.get("expected_conflict_winner"):
+        script_args += ["-ExpectedConflictWinner", str(args["expected_conflict_winner"])]
+    if args.get("require_migrated"):
+        script_args += ["-RequireMigrated"]
+
+    try:
+        _run_testdata_script(ctx, "check_collisions.ps1", script_args, _testdata_timeout(args))
+        ctx.log.success("environment: collision + edge-case check PASSED")
+    except EnvironmentStepError:
+        if fail_on_change:
+            raise
+        ctx.log.warning("environment: collision/edge check reported issues (fail_on_change=false) "
+                        "-- see testdata/output/collision_check_*.json")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -344,6 +382,7 @@ STEPS: dict[str, Callable] = {
     "clean_test_data": clean_test_data,
     "publish_source_manifest": publish_source_manifest,
     "check_permissions": check_permissions,
+    "check_collisions": check_collisions,
 }
 
 
