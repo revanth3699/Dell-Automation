@@ -117,12 +117,18 @@ against the `source_` vs `target_` manifest hash for the same `RelPath`.
 ## Checking permission retention after migration
 
 The Source seed captures each permission file's attributes, ACL, owner, and EFS/compression
-state into `source_manifest_latest.json`. After the migration, run the checker **on the
-Target PC** to compare the migrated files against that captured state:
+state into `source_manifest_latest.json`. After the migration, the checker compares the
+migrated files **on the Target PC** against that captured state.
+
+**Automated (inside a scenario).** The example scenario does this for you: the Source
+publishes its manifest through the Coordination Service (`publish_source_manifest`), and the
+Target fetches it and runs the check (`check_permissions`) with no manual copy — see
+"Driving it from a scenario" below.
+
+**Manual (standalone).** Copy the Source manifest to the Target yourself, then run:
 
 ```powershell
-# 1) Copy the Source manifest to the Target PC. The migration does NOT carry it (it lives
-#    outside the user profile), so copy it yourself, e.g. to C:\from_source\.
+# 1) Copy source_manifest_latest.json from the Source PC, e.g. to C:\from_source\.
 # 2) On the Target PC, after the migration completes:
 powershell -ExecutionPolicy Bypass -File testdata\check_permissions.ps1 `
     -SourceManifest C:\from_source\source_manifest_latest.json
@@ -151,8 +157,38 @@ What it compares:
 - `clean.ps1` resets ACLs (`icacls /reset`) and uses a robocopy mirror-empty pass so it can
   delete the >260-char tree, the read-only/system files, and the Deny-ACE/protected-ACL
   permission files that plain `Remove-Item` cannot.
-- These are standalone setup scripts. If you want them driven from the state-machine
-  scenario runner's `setup:` / `teardown:`, they can be wrapped as steps in
-  [`utils/environment.py`](../utils/environment.py) — ask and I'll add `seed_source_data`
-  / `seed_target_data` / `clean_test_data` entries.
+## Driving it from a scenario
+
+These scripts are also wired into the state-machine scenario runner as environment steps
+in [`utils/environment.py`](../utils/environment.py): `seed_source_data`, `seed_target_data`,
+and `clean_test_data`. A scenario step passes the seed parameters straight through from its
+`args:` map, so all seeding input lives in the YAML:
+
+```yaml
+- at: welcome
+  env: seed_source_data
+  args: {profile: Standard, many_small_count: 500, include_locked: true, script_timeout: 1800}
+```
+
+Recognised `args` keys: `profile`, `many_small_count`, `big_file_mb`, `include_locked`,
+`lock_minutes`, `dry_run`, `script_timeout`. Put `clean_test_data` in the role's
+`teardown:` so the data is removed even if the run fails.
+
+For the permission-retention check, two more env steps do it with no manual file copy:
+- `publish_source_manifest` (Source, after `seed_source_data`) — publishes the manifest
+  through the Coordination Service. args: `key`, `manifest_path`.
+- `check_permissions` (Target, after the migration, before `clean_test_data`) — fetches
+  the manifest and runs `check_permissions.ps1` against the migrated files. args:
+  `fetch_timeout`, `fail_on_change` (default `true` — a changed/missing permission fails
+  the run; set `false` to only report), `script_timeout`.
+
+A complete example ships as
+[`scenarios/transfer_with_data_and_network_drop.yaml`](../scenarios/transfer_with_data_and_network_drop.yaml):
+it seeds both PCs, runs one full migration, drops the Target's network mid-transfer, then
+validates and cleans up. Run it with:
+
+```
+python -m orchestration.scenario_runner --role target --run-id <id> --scenario transfer_with_data_and_network_drop
+python -m orchestration.scenario_runner --role source --run-id <id> --scenario transfer_with_data_and_network_drop
+```
 ```

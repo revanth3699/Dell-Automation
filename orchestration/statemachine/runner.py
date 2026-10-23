@@ -374,7 +374,7 @@ class Runner:
 
         if step.env is not None:
             name, perform, default_expect = step.env, environment.resolve(step.env), ()
-            perform_args = (self.ctx,)
+            perform_args = (self.ctx, step.args)   # env steps receive the YAML args too
         else:
             action = self.model.get(matched).action(step.do)
             name, perform, default_expect = action.name, action.perform, action.expect
