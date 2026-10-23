@@ -76,6 +76,13 @@ roles:
         env: validate_migration_report
         note: validation/validate_migration.py against the newest report -- fails the run on a mismatch
       - at: migrationDone
+        env: check_permissions
+        args: {fetch_timeout: 300, fail_on_change: true}
+        note: >
+          fetches the Source manifest from the Coordination Service and runs
+          testdata/check_permissions.ps1 against the migrated files on this PC -- fails the
+          run if any permission was not retained. Set fail_on_change: false to only report.
+      - at: migrationDone
         do: transfer_more_data
       - at: welcome
         timeout: 180
@@ -92,6 +99,11 @@ roles:
         note: >
           lay down the Source's data to be migrated (edge + permission cases included).
           Add include_locked: true to also create a genuinely in-use file.
+      - at: welcome
+        env: publish_source_manifest
+        note: >
+          publish the seeding manifest (with each permission file's captured security state)
+          so the Target's check_permissions step can fetch it -- no manual file copy needed.
       - at: welcome
         do: lets_get_started
         timeout: 120

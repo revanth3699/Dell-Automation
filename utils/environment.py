@@ -279,6 +279,52 @@ def clean_test_data(ctx, args=None) -> None:
     ctx.log.info("environment: test data cleaned")
 
 
+# Coordination key the Source manifest is published under so the Target can fetch it and
+# run the permission-retention check without a manual file copy between the two PCs.
+SOURCE_MANIFEST_KEY = "source_perm_manifest"
+
+
+def publish_source_manifest(ctx, args=None) -> None:
+    """Source: publishes its seeding manifest (which holds every permission file's captured
+    security state) through the Coordination Service, so the Target's check_permissions step
+    can fetch it. Run after seed_source_data. args: key, manifest_path."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    manifest = Path(args.get("manifest_path") or (_TESTDATA_DIR / "output" / "source_manifest_latest.json"))
+    if not manifest.is_file():
+        raise EnvironmentStepError(f"source manifest not found: {manifest} (run seed_source_data first)")
+    content = manifest.read_text(encoding="utf-8")
+    ctx.coordination.publish(ctx.run_id, key, content)
+    ctx.log.success(f"environment: published source manifest ({len(content)} bytes) as {key!r}")
+
+
+def check_permissions(ctx, args=None) -> None:
+    """Target: fetches the Source manifest from the Coordination Service and runs
+    testdata/check_permissions.ps1 against the migrated files on this PC. Run after the
+    migration completes, before clean_test_data. args: key, fetch_timeout, script_timeout,
+    fail_on_change (default true -- a changed/missing permission fails the scenario)."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    fetch_timeout = float(args.get("fetch_timeout") or 300)
+    fail_on_change = args.get("fail_on_change", True)
+
+    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
+    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
+    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    incoming.write_text(content, encoding="utf-8")
+
+    try:
+        _run_testdata_script(ctx, "check_permissions.ps1",
+                             ["-SourceManifest", str(incoming)], _testdata_timeout(args))
+        ctx.log.success("environment: permission retention check PASSED")
+    except EnvironmentStepError:
+        if fail_on_change:
+            raise
+        ctx.log.warning("environment: permission retention check reported changes "
+                        "(fail_on_change=false) -- see testdata/output/permission_check_*.json")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -296,6 +342,8 @@ STEPS: dict[str, Callable] = {
     "seed_source_data": seed_source_data,
     "seed_target_data": seed_target_data,
     "clean_test_data": clean_test_data,
+    "publish_source_manifest": publish_source_manifest,
+    "check_permissions": check_permissions,
 }
 
 
