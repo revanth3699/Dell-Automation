@@ -142,7 +142,11 @@ roles:
         do: download_pdf
       - at: migrationDone
         env: validate_migration_report
-        note: validation/validate_migration.py against the newest report -- fails the run on a mismatch
+        args: {fail_on_mismatch: false}
+        note: >
+          validation/validate_migration.py against the newest report -- reports a mismatch
+          but does NOT abort the scenario, so check_permissions/check_collisions below still
+          run and produce their own testdata/output reports regardless of this step's result
       - at: migrationDone
         env: check_permissions
         args: {fetch_timeout: 300, fail_on_change: true}

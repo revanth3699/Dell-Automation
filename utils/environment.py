@@ -150,17 +150,27 @@ def restore_region(ctx, args=None) -> None:
 def validate_migration_report(ctx, args=None) -> None:
     """Runs validation/validate_migration.py against the newest MigrationReport PDF on
     this (Target) PC: every file the report claims was copied must exist, and every
-    registry-backed setting must match. Writes the usual validation/output HTML and
-    fails the scenario if anything checkable did not match. Added as a scenario step
-    per explicit user direction (2026-10-20); the standalone CLI still works unchanged."""
+    registry-backed setting must match. Writes the usual validation/output HTML. Added as
+    a scenario step per explicit user direction (2026-10-20); the standalone CLI still
+    works unchanged. args: fail_on_mismatch (default true -- a report/PC mismatch fails
+    the scenario immediately; set false so later steps -- e.g. check_permissions/
+    check_collisions -- still run and produce their own testdata/output reports instead
+    of being skipped by the abort. Confirmed live 2026-10-23: a mismatch here was
+    silently swallowing those two steps' reports entirely, not just this one's)."""
     from validation.validate_migration import run as validate
 
+    args = args or {}
+    fail_on_mismatch = args.get("fail_on_mismatch", True)
     report = ctx.env.get("DDA_MIGRATION_REPORT_PATH")
     ctx.log.info("validation: checking the migration report against this PC" + (f" ({report})" if report else ""))
     ok = validate(report_path=report, write_html=True)
-    if not ok:
-        raise EnvironmentStepError("migration-report validation FAILED -- see validation/output/ for the HTML report")
-    ctx.log.success("validation: migration report matches this PC")
+    if ok:
+        ctx.log.success("validation: migration report matches this PC")
+        return
+    message = "migration-report validation FAILED -- see validation/output/ for the HTML report"
+    if fail_on_mismatch:
+        raise EnvironmentStepError(message)
+    ctx.log.warning(f"validation: {message} (fail_on_mismatch=false -- continuing)")
 
 
 # --------------------------------------------------------------------- benchmark
