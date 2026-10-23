@@ -6,8 +6,9 @@ description: >
        down the pre-existing/colliding data. All seeding input (profile, counts, etc.) is
        in the `args:` of the seed_*_data steps below.
     2. Sign in, pair, and start a single transfer of everything.
-    3. Mid-transfer the TARGET drops its own network adapter (disable_network), waits for
-       the no-network overlay, re-enables it, and the transfer must resume on its own.
+    3. Mid-transfer the TARGET drops and restores its own network adapter SIX times
+       (disable_network / enable_network), each time waiting for the no-network overlay and
+       then for the transfer to resume on its own before the next drop.
     4. The run finishes, validates the migration report against this PC, and tears down:
        the seeded data is removed (clean_test_data) and the network is restored.
 
@@ -57,10 +58,15 @@ roles:
         do: publish
         args: {value: migrating}
         timeout: 180
+      # Six disconnect/reconnect cycles, all mid-transfer (6 drops, 5 gaps between them).
+      # Each: wait into the transfer, drop the adapter, wait for the no-network overlay,
+      # bring it back, and let the transfer resume. The 10 GB file keeps the transfer
+      # running long enough for all six; wait_before controls the spacing between drops.
+      # --- cycle 1 of 6 ---
       - at: migrating
         env: disable_network
         wait_before: 30
-        note: the network drop "in between" -- wait_before is how long into the transfer it happens
+        note: network drop "in between" -- wait_before is how long into the transfer it happens
       - at: noNetwork
         timeout: 180
         note: the no-network overlay must appear after the adapter goes down
@@ -70,6 +76,61 @@ roles:
       - at: migrating
         timeout: 600
         note: the overlay must clear by itself once the engine reports the network back
+      # --- cycle 2 of 6 ---
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+      # --- cycle 3 of 6 ---
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+      # --- cycle 4 of 6 ---
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+      # --- cycle 5 of 6 ---
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+      # --- cycle 6 of 6 ---
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+      - at: noNetwork
+        timeout: 180
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
       - at: resultsSummary
         timeout: 21600
         note: up to 6h -- a large transfer (e.g. the 10 GB file) can take a long time to complete
