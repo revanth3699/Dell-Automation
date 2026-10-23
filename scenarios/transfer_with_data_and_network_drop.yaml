@@ -149,6 +149,16 @@ roles:
           testdata/check_permissions.ps1 against the migrated files on this PC -- fails the
           run if any permission was not retained. Set fail_on_change: false to only report.
       - at: migrationDone
+        env: check_collisions
+        args: {fetch_timeout: 300, fail_on_change: true}
+        note: >
+          validates every seeded case (collisions AND edge cases) on disk via
+          testdata/check_collisions.ps1 -- identical-file integrity, conflict winners,
+          Target-only / same-folder preservation, and whether each edge case migrated.
+          Fails only on data loss/corruption. Add expected_conflict_winner: source|target
+          to assert who wins a conflict, or require_migrated: true to fail on a dropped
+          source-only file.
+      - at: migrationDone
         do: transfer_more_data
       - at: welcome
         timeout: 180

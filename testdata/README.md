@@ -21,6 +21,7 @@ cleanup never touches your real files.
 | `seed_source.ps1` | Run on the **Source (old) PC** — writes the data to be migrated + all edge/stress/permission cases. |
 | `seed_target.ps1` | Run on the **Target (new) PC** — writes pre-existing data that collides with the Source's. |
 | `check_permissions.ps1` | Run on the **Target PC after migration** — checks whether file permissions survived. |
+| `check_collisions.ps1` | Run on the **Target PC after migration** — validates every seeded case (collisions + edge cases) on disk. |
 | `clean.ps1` | Run on **both** PCs afterward — removes every `DellMigrateTest` folder (and nothing else). |
 | `_common.ps1` | Shared library + the single data plan both seed scripts consume (keeps paths aligned). |
 | `output/` | Per-run JSON manifests (hashes/sizes/**security state** of what was written) + the permission-check report — git-ignored. |
@@ -126,8 +127,18 @@ Target fetches it and runs the check (`check_permissions`) with no manual copy �
 "Driving it from a scenario" below.
 
 **Manual (standalone).** Copy the Source manifest to the Target yourself, then run:
+state into `source_manifest_latest.json`. After the migration, the checker compares the
+migrated files **on the Target PC** against that captured state.
+
+**Automated (inside a scenario).** The example scenario does this for you: the Source
+publishes its manifest through the Coordination Service (`publish_source_manifest`), and the
+Target fetches it and runs the check (`check_permissions`) with no manual copy — see
+"Driving it from a scenario" below.
+
+**Manual (standalone).** Copy the Source manifest to the Target yourself, then run:
 
 ```powershell
+# 1) Copy source_manifest_latest.json from the Source PC, e.g. to C:\from_source\.
 # 1) Copy source_manifest_latest.json from the Source PC, e.g. to C:\from_source\.
 # 2) On the Target PC, after the migration completes:
 powershell -ExecutionPolicy Bypass -File testdata\check_permissions.ps1 `
@@ -174,13 +185,25 @@ Recognised `args` keys: `profile`, `many_small_count`, `big_file_mb`, `include_l
 `lock_minutes`, `dry_run`, `script_timeout`. Put `clean_test_data` in the role's
 `teardown:` so the data is removed even if the run fails.
 
-For the permission-retention check, two more env steps do it with no manual file copy:
+For the post-migration checks, three more env steps run with no manual file copy:
 - `publish_source_manifest` (Source, after `seed_source_data`) — publishes the manifest
   through the Coordination Service. args: `key`, `manifest_path`.
 - `check_permissions` (Target, after the migration, before `clean_test_data`) — fetches
   the manifest and runs `check_permissions.ps1` against the migrated files. args:
   `fetch_timeout`, `fail_on_change` (default `true` — a changed/missing permission fails
   the run; set `false` to only report), `script_timeout`.
+- `check_collisions` (Target, after the migration) — fetches the Source manifest, uses the
+  local Target manifest, and runs `check_collisions.ps1` to validate **every seeded case
+  on disk**: identical-file integrity, conflict winners, Target-only / same-folder
+  preservation, and whether each **edge case** migrated (empty folder, zero-byte, >260-char
+  path, long name, special-char names, hidden/readonly/system, zip/exe, many-small, the
+  large file by size). It fails only on data loss / corruption. args: `fetch_timeout`,
+  `expected_conflict_winner` (`source`|`target` — assert the winner), `require_migrated`
+  (fail if a plain source-only file was dropped), `fail_on_change`, `script_timeout`.
+
+This on-disk check complements `validate_migration_report`: the report validator confirms
+what the Dell migration *summary/PDF claims* matches disk, while `check_collisions` checks
+the *actual outcome* of every seeded file independently of the report.
 
 A complete example ships as
 [`scenarios/transfer_with_data_and_network_drop.yaml`](../scenarios/transfer_with_data_and_network_drop.yaml):

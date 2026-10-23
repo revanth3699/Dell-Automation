@@ -21,6 +21,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
+from pathlib import Path
 
 PS_TIMEOUT_SECONDS = 60
 
@@ -44,12 +45,14 @@ def _powershell(command: str, timeout: int = PS_TIMEOUT_SECONDS) -> str:
 # --------------------------------------------------------------------- applications
 
 def open_notepad(ctx, args=None) -> None:
+def open_notepad(ctx, args=None) -> None:
     """Gives the close-applications precheck something to find."""
     subprocess.Popen(["notepad.exe"])
     time.sleep(2.0)
     ctx.log.info("environment: started notepad.exe so the Close applications dialog has something to close")
 
 
+def close_notepad(ctx, args=None) -> None:
 def close_notepad(ctx, args=None) -> None:
     _powershell("Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force")
     ctx.log.info("environment: notepad.exe stopped")
@@ -73,6 +76,7 @@ def _adapter_name(ctx) -> str:
 
 
 def disable_network(ctx, args=None) -> None:
+def disable_network(ctx, args=None) -> None:
     """Drops this PC's network -- raises the noNetwork overlay. Needs admin."""
     name = _adapter_name(ctx)
     _powershell(f"Disable-NetAdapter -Name '{name}' -Confirm:$false")
@@ -80,11 +84,13 @@ def disable_network(ctx, args=None) -> None:
 
 
 def enable_network(ctx, args=None) -> None:
+def enable_network(ctx, args=None) -> None:
     name = ctx.scratch.get("network_adapter") or _adapter_name(ctx)
     _powershell(f"Enable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.info(f"environment: network adapter {name!r} enabled")
 
 
+def set_network_public(ctx, args=None) -> None:
 def set_network_public(ctx, args=None) -> None:
     """Makes the trust-network precheck fail (TrustRequired). Needs admin."""
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Public")
@@ -92,12 +98,14 @@ def set_network_public(ctx, args=None) -> None:
 
 
 def set_network_private(ctx, args=None) -> None:
+def set_network_private(ctx, args=None) -> None:
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private")
     ctx.log.info("environment: network profile set to Private")
 
 
 # --------------------------------------------------------------------- region
 
+def set_region_unsupported(ctx, args=None) -> None:
 def set_region_unsupported(ctx, args=None) -> None:
     """Sets the Windows home location to one the app's supported-region list does not
     include (GeoId 4 = Afghanistan) -- raises localeNotSupported. The previous value is
@@ -108,6 +116,7 @@ def set_region_unsupported(ctx, args=None) -> None:
 
 
 def restore_region(ctx, args=None) -> None:
+def restore_region(ctx, args=None) -> None:
     geo = ctx.scratch.get("geo_id") or ctx.env.get("DDA_HOME_GEOID", "244")  # 244 = United States
     _powershell(f"Set-WinHomeLocation -GeoId {geo}")
     ctx.log.info(f"environment: Windows home location restored to GeoId {geo}")
@@ -115,6 +124,7 @@ def restore_region(ctx, args=None) -> None:
 
 # --------------------------------------------------------------------- validation
 
+def validate_migration_report(ctx, args=None) -> None:
 def validate_migration_report(ctx, args=None) -> None:
     """Runs validation/validate_migration.py against the newest MigrationReport PDF on
     this (Target) PC: every file the report claims was copied must exist, and every
@@ -136,6 +146,7 @@ def validate_migration_report(ctx, args=None) -> None:
 BENCHMARK_STOP_WAIT_SECONDS = 15
 
 
+def start_benchmark(ctx, args=None) -> None:
 def start_benchmark(ctx, args=None) -> None:
     """Target setup: launches the benchmark resource sampler as its own subprocess (see
     benchmark/resource_sampler.py, BENCHMARKING_PLAN.md). Never blocks and never raises: a
@@ -164,6 +175,7 @@ def start_benchmark(ctx, args=None) -> None:
         ctx.log.warning(f"benchmark: could not start the resource sampler: {exc}")
 
 
+def stop_benchmark_report(ctx, args=None) -> None:
 def stop_benchmark_report(ctx, args=None) -> None:
     """Target teardown: stops the sampler, harvests CDM.db / the rclone log / the samples and
     renders benchmark/output/<run_id>/report_<role>.html. MUST NEVER RAISE -- it runs in the
@@ -325,6 +337,44 @@ def check_permissions(ctx, args=None) -> None:
                         "(fail_on_change=false) -- see testdata/output/permission_check_*.json")
 
 
+def check_collisions(ctx, args=None) -> None:
+    """Target: validates every seeded case (collisions AND edge cases) against the live
+    files on this PC after the migration, via testdata/check_collisions.ps1. Fetches the
+    Source manifest from the Coordination Service and uses the local Target manifest. Run
+    after the migration, before clean_test_data. args: key, fetch_timeout, script_timeout,
+    expected_conflict_winner (source|target), require_migrated (bool), fail_on_change
+    (default true -- data loss/corruption fails the scenario)."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    fetch_timeout = float(args.get("fetch_timeout") or 300)
+    fail_on_change = args.get("fail_on_change", True)
+
+    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
+    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
+    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    incoming.write_text(content, encoding="utf-8")
+
+    target_manifest = _TESTDATA_DIR / "output" / "target_manifest_latest.json"
+    if not target_manifest.is_file():
+        raise EnvironmentStepError(f"target manifest not found: {target_manifest} (run seed_target_data first)")
+
+    script_args = ["-SourceManifest", str(incoming), "-TargetManifest", str(target_manifest)]
+    if args.get("expected_conflict_winner"):
+        script_args += ["-ExpectedConflictWinner", str(args["expected_conflict_winner"])]
+    if args.get("require_migrated"):
+        script_args += ["-RequireMigrated"]
+
+    try:
+        _run_testdata_script(ctx, "check_collisions.ps1", script_args, _testdata_timeout(args))
+        ctx.log.success("environment: collision + edge-case check PASSED")
+    except EnvironmentStepError:
+        if fail_on_change:
+            raise
+        ctx.log.warning("environment: collision/edge check reported issues (fail_on_change=false) "
+                        "-- see testdata/output/collision_check_*.json")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -344,6 +394,7 @@ STEPS: dict[str, Callable] = {
     "clean_test_data": clean_test_data,
     "publish_source_manifest": publish_source_manifest,
     "check_permissions": check_permissions,
+    "check_collisions": check_collisions,
 }
 
 

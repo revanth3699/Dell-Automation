@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:MarkerFolderName = 'DellMigrateTest'
+$script:MaxHashBytes     = 256MB   # files larger than this are recorded/compared by size, not hash
 $script:Utf8NoBom        = New-Object System.Text.UTF8Encoding($false)
 $script:Manifest         = New-Object System.Collections.Generic.List[object]
 $script:IsDryRun           = $false
@@ -329,9 +330,13 @@ function Add-ManifestEntry {
         try {
             if ([System.IO.File]::Exists($FullPath)) {
                 $size = (Get-Item -LiteralPath $FullPath -Force).Length
-                $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FullPath).Hash
+                # Skip hashing very large files (e.g. the multi-GB big file): a 10 GB hash
+                # at seed AND again at check is slow -- those are verified by size instead.
+                if ($size -le $script:MaxHashBytes) {
+                    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $FullPath).Hash
+                }
             }
-        } catch { }   # hashing a locked/odd file is best-effort only
+        } catch { }   # hashing a locked/odd/long-path file is best-effort only
         if ($CaptureSecurity) { $sec = Get-SecurityInfo $FullPath }
     }
     $script:Manifest.Add([pscustomobject]@{
