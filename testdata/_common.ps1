@@ -54,14 +54,48 @@ function Resolve-EntryPath {
     return (Join-Path $root $RelPath)
 }
 
-# Marker roots across every category -- used by clean.ps1.
+# Marker roots across every category -- used by clean.ps1. Includes not just each
+# category's own direct <KnownFolder>\DellMigrateTest, but also any copy Dell Data
+# Assistant renamed under <ProfileRoot>\<OtherComputerName>\<Category>\DellMigrateTest when
+# a whole-folder-name collision made it land there instead of merging in place (confirmed
+# live 2026-10-23, run 692 -- see Resolve-LiveEntryPath below for the full story). Without
+# this, those renamed copies -- potentially several GB of seeded test data -- are left
+# behind on the real user profile forever, since they sit outside every plain marker root.
 function Get-AllMarkerRoots {
     $keys = 'Documents','Desktop','Pictures','Music','Videos','Downloads'
     $out = @()
     foreach ($k in $keys) {
         $out += (Join-Path (Get-KnownFolder $k) $script:MarkerFolderName)
+        $out += @(Get-ChildItem -Path (Join-Path $HOME "*\$k\$script:MarkerFolderName") -Directory -ErrorAction SilentlyContinue |
+                  ForEach-Object { $_.FullName })
     }
-    return $out
+    return @($out | Select-Object -Unique)
+}
+
+# Dell Data Assistant can resolve a whole-folder-name collision (the DellMigrateTest root
+# already existing on Target, as transfer_with_data_and_network_drop.yaml's seed_target_data
+# step deliberately creates for Documents/Desktop/Pictures) by renaming the ENTIRE incoming
+# Source folder under <ProfileRoot>\<SourceMachine>\<Category>\DellMigrateTest\<rel>, instead
+# of merging file-by-file in place. Confirmed live (2026-10-23, run 692): every one of
+# seed_source.ps1's Documents/Desktop/Pictures entries (the "perms"/"edge" permission-test
+# files included) landed there -- not at the plain Resolve-EntryPath location -- because
+# seed_target_data had pre-seeded those same three categories with colliding content.
+# check_permissions.ps1 and check_collisions.ps1's Source-only/edge-case checks use this
+# instead of Resolve-EntryPath directly, so a renamed-not-missing file is not reported as
+# "not migrated"/MISSING. $SourceMachine is the seeding manifest's own "machine" field
+# (empty/omitted -- e.g. for a Target-only entry, which is never renamed -- skips the
+# fallback and behaves exactly like Resolve-EntryPath).
+function Resolve-LiveEntryPath {
+    param([string]$Category, [string]$RelPath, [string]$SourceMachine)
+    $direct = Resolve-EntryPath $Category $RelPath
+    if (Test-Path -LiteralPath $direct) { return $direct }
+    if ($SourceMachine) {
+        $namespaced = Join-Path (Join-Path (Join-Path $HOME $SourceMachine) $Category) `
+            (Join-Path $script:MarkerFolderName $RelPath)
+        if (Test-Path -LiteralPath $namespaced) { return $namespaced }
+    }
+    return $direct   # neither exists -- return the direct path so the caller's own
+                      # missing-file message/path still points somewhere sensible
 }
 
 # --------------------------------------------------------------------- byte helpers
@@ -356,10 +390,24 @@ function Add-ManifestEntry {
     })
 }
 
+# Deletes every existing file in testdata/output matching $Pattern (a glob, e.g.
+# 'target_manifest_*.json') before a script writes its own new one(s) -- keeps output/
+# to just the latest run's evidence instead of every run's files piling up forever
+# (confirmed live 2026-10-23: 691's and 692's manifests/reports were still sitting there
+# together, un-pruned, two runs later).
+function Clear-PriorOutput {
+    param([string]$Pattern)
+    $outDir = Join-Path $PSScriptRoot 'output'
+    if (-not (Test-Path -LiteralPath $outDir)) { return }
+    Get-ChildItem -Path (Join-Path $outDir $Pattern) -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 function Save-Manifest {
     param([string]$Role)
     $outDir = Join-Path $PSScriptRoot 'output'
     [System.IO.Directory]::CreateDirectory($outDir) | Out-Null
+    Clear-PriorOutput "$Role`_manifest_*.json"
     $stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
     $stamped = Join-Path $outDir ("{0}_manifest_{1}.json" -f $Role, $stamp)
     $latest  = Join-Path $outDir ("{0}_manifest_latest.json" -f $Role)

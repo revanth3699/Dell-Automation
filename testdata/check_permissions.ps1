@@ -67,7 +67,7 @@ function Explicit-Portable { param($aces) @($aces | Where-Object { $_ -and -not 
 $results = @()
 foreach ($e in $permEntries) {
     $rel = if ($e.MarkerRel) { $e.MarkerRel } else { $e.RelPath }
-    $targetPath = Resolve-EntryPath $e.Category $rel
+    $targetPath = Resolve-LiveEntryPath $e.Category $rel $manifest.machine
 
     $diffs = @()
     $status = 'RETAINED'
@@ -129,6 +129,8 @@ $allOk = ($retained -eq $results.Count)
 Write-Head ("{0}/{1} retained" -f $retained, $results.Count)
 Write-Host $(if ($allOk) { 'PASS -- all permissions retained' } else { 'FAIL -- some permissions changed or files missing' }) `
     -ForegroundColor $(if ($allOk) { 'Green' } else { 'Red' })
+
+if (-not $NoJson -or -not $NoHtml) { Clear-PriorOutput 'permission_check_*.*' }
 
 if (-not $NoJson) {
     $outDir = Join-Path $PSScriptRoot 'output'

@@ -61,8 +61,9 @@ foreach ($m in @($SourceManifest, $TargetManifest)) {
 # edge-perms is validated separately by check_permissions.ps1; everything else is here.
 # -Encoding UTF8 matters: the manifests are UTF-8 and contain unicode filenames (accents,
 # emoji); PS 5.1's Get-Content defaults to ANSI and would mangle them into path mismatches.
-$src = (Get-Content -LiteralPath $SourceManifest -Raw -Encoding UTF8 | ConvertFrom-Json).entries |
-    Where-Object { $_.Class -ne 'edge-perms' -and $_.MarkerRel }
+$srcManifestObj = Get-Content -LiteralPath $SourceManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$srcMachine = $srcManifestObj.machine   # see Resolve-LiveEntryPath's docstring in _common.ps1
+$src = $srcManifestObj.entries | Where-Object { $_.Class -ne 'edge-perms' -and $_.MarkerRel }
 $tgt = (Get-Content -LiteralPath $TargetManifest -Raw -Encoding UTF8 | ConvertFrom-Json).entries |
     Where-Object { $_.Class -ne 'edge-perms' -and $_.MarkerRel }
 
@@ -86,9 +87,12 @@ function Live-Hash { param($Path)
 
 # Compares a live file/folder to a manifest entry. Returns a status string; for files it
 # prefers hash, falls back to size (large files), then to existence (long-path entries
-# whose hash/size could not be captured at seed time).
-function Compare-To-Entry { param($Entry, $OkStatus, $MissingStatus, $ChangedStatus)
-    $path = Resolve-EntryPath $Entry.Category $Entry.MarkerRel
+# whose hash/size could not be captured at seed time). $SourceMachine (Source-only/edge
+# entries only -- see call site) lets this find a copy Dell renamed under a whole-folder
+# collision instead of reporting it NOT-MIGRATED; omitted for Target-only entries, which
+# are never renamed, so it behaves exactly like a plain Resolve-EntryPath there.
+function Compare-To-Entry { param($Entry, $OkStatus, $MissingStatus, $ChangedStatus, [string]$SourceMachine = '')
+    $path = Resolve-LiveEntryPath $Entry.Category $Entry.MarkerRel $SourceMachine
     $folder = Is-Folder $Entry
     if (-not (Live-Exists $path $folder)) { return $MissingStatus }
     if ($folder) { return $OkStatus }
@@ -107,6 +111,17 @@ $results = @()
 $handled = @{}
 
 # --- 1) present on BOTH PCs: identical integrity, or conflict winner ------------------
+# KNOWN GAP (confirmed live 2026-10-23, run 692): when the whole DellMigrateTest folder
+# itself collides (seed_target_data pre-seeds Documents/Desktop/Pictures), Dell renames
+# the entire incoming Source folder elsewhere (see Resolve-LiveEntryPath in _common.ps1)
+# rather than merging file-by-file -- so for a "conflict" entry in one of those three
+# categories, Target's own file is left untouched at $path below AND Source's version
+# sits, unmerged, under the renamed copy. That is genuinely a different outcome than this
+# section's "one winner, same path" model assumes; it is NOT fixed by swapping in
+# Resolve-LiveEntryPath here, which would just silently pick up Source's renamed copy and
+# report a misleading "winner=source" while ignoring that Target's own file is still
+# sitting there too. Left as a single-path check (matching Target's own, never-renamed
+# copy) until this gets its own status rather than being force-fit into Winner semantics.
 foreach ($rel in $srcByRel.Keys) {
     if (-not $tgtByRel.ContainsKey($rel)) { continue }
     $s = $srcByRel[$rel]; $t = $tgtByRel[$rel]; $handled[$rel] = $true
@@ -164,7 +179,7 @@ foreach ($rel in $srcByRel.Keys) {
     $s = $srcByRel[$rel]
     $folder = Is-Folder $s
     $okStatus = if ($folder) { 'FOLDER-MIGRATED' } else { 'MIGRATED-OK' }
-    $status = Compare-To-Entry $s $okStatus 'NOT-MIGRATED' 'MIGRATED-CHANGED'
+    $status = Compare-To-Entry $s $okStatus 'NOT-MIGRATED' 'MIGRATED-CHANGED' $srcMachine
     # Plain source-only files are the ones expected to always migrate; edge cases may be
     # skipped by policy, so only source-only drives a failure under -RequireMigrated.
     $fail = $RequireMigrated -and $s.Class -eq 'source-only' -and $status -eq 'NOT-MIGRATED'
@@ -187,6 +202,8 @@ Write-Head ("{0} failures (data loss / corruption); {1} conflicts resolved" -f $
 foreach ($c in $conflicts) { Write-Step ("conflict {0} -> {1}" -f $c.Rel, $c.Winner) }
 Write-Host $(if ($allOk) { 'PASS -- no data loss or corruption' } else { 'FAIL -- see red rows above' }) `
     -ForegroundColor $(if ($allOk) { 'Green' } else { 'Red' })
+
+if (-not $NoJson -or -not $NoHtml) { Clear-PriorOutput 'collision_check_*.*' }
 
 if (-not $NoJson) {
     $outDir = Join-Path $PSScriptRoot 'output'

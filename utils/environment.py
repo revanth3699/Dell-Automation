@@ -141,6 +141,17 @@ def enable_network(ctx, args=None) -> None:
         time.sleep(3.0)  # give the adapter a moment to come up before asking it to join
         _powershell(f'netsh wlan connect name="{profile}" ssid="{ssid}" interface="{name}"')
         ctx.log.info(f"environment: reconnected {name!r} to its previous WiFi profile {profile!r}")
+        # Consumed -- a later enable_network call (teardown's always runs, even when the
+        # adapter was never disabled again after this) must not redundantly repeat this
+        # netsh command: that forces Windows to drop and rejoin the SAME network it's
+        # already on, a real disconnect/reconnect of its own. Confirmed live (2026-10-23,
+        # run 692) via the Microsoft-Windows-NetworkProfile event log: a Network
+        # Disconnected event fired at the exact moment teardown's enable_network re-ran
+        # this on an adapter that had already been connected and untouched for 4+
+        # minutes, well after the migration itself had completed -- looking, to someone
+        # watching the taskbar, exactly like "the network disconnected after migration."
+        ctx.scratch["network_profile"] = None
+        ctx.scratch["network_ssid"] = None
 
 
 def set_network_public(ctx, args=None) -> None:
@@ -366,6 +377,21 @@ def publish_source_manifest(ctx, args=None) -> None:
     ctx.log.success(f"environment: published source manifest ({len(content)} bytes) as {key!r}")
 
 
+def _fetch_incoming_manifest(ctx, key: str, fetch_timeout: float) -> Path:
+    """Fetches the Source manifest from the Coordination Service and writes it to
+    testdata/output/, pruning any previous incoming_source_manifest_*.json first -- keeps
+    this to the latest run's copy instead of one file per run_id piling up forever."""
+    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
+    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
+    out_dir = _TESTDATA_DIR / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("incoming_source_manifest_*.json"):
+        old.unlink(missing_ok=True)
+    incoming = out_dir / f"incoming_source_manifest_{ctx.run_id}.json"
+    incoming.write_text(content, encoding="utf-8")
+    return incoming
+
+
 def check_permissions(ctx, args=None) -> None:
     """Target: fetches the Source manifest from the Coordination Service and runs
     testdata/check_permissions.ps1 against the migrated files on this PC. Run after the
@@ -376,11 +402,7 @@ def check_permissions(ctx, args=None) -> None:
     fetch_timeout = float(args.get("fetch_timeout") or 300)
     fail_on_change = args.get("fail_on_change", True)
 
-    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
-    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
-    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
-    incoming.parent.mkdir(parents=True, exist_ok=True)
-    incoming.write_text(content, encoding="utf-8")
+    incoming = _fetch_incoming_manifest(ctx, key, fetch_timeout)
 
     try:
         _run_testdata_script(ctx, "check_permissions.ps1",
@@ -405,11 +427,7 @@ def check_collisions(ctx, args=None) -> None:
     fetch_timeout = float(args.get("fetch_timeout") or 300)
     fail_on_change = args.get("fail_on_change", True)
 
-    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
-    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
-    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
-    incoming.parent.mkdir(parents=True, exist_ok=True)
-    incoming.write_text(content, encoding="utf-8")
+    incoming = _fetch_incoming_manifest(ctx, key, fetch_timeout)
 
     target_manifest = _TESTDATA_DIR / "output" / "target_manifest_latest.json"
     if not target_manifest.is_file():
