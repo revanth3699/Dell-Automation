@@ -1,0 +1,115 @@
+name: transfer_with_data_and_network_drop
+description: >
+  One full PC-to-PC migration, end to end, driven entirely from this file:
+    1. Each PC seeds its own migration test data first (testdata/seed_*.ps1) -- the Source
+       lays down everything to be migrated plus the edge/permission cases, the Target lays
+       down the pre-existing/colliding data. All seeding input (profile, counts, etc.) is
+       in the `args:` of the seed_*_data steps below.
+    2. Sign in, pair, and start a single transfer of everything.
+    3. Mid-transfer the TARGET drops its own network adapter (disable_network), waits for
+       the no-network overlay, re-enables it, and the transfer must resume on its own.
+    4. The run finishes, validates the migration report against this PC, and tears down:
+       the seeded data is removed (clean_test_data) and the network is restored.
+
+  Needs an ELEVATED run on both PCs (network adapter + seeding). DDA_NETWORK_ADAPTER_NAME
+  may be set to pick the adapter. To change the data volume, edit the seed step args
+  (profile: Minimal | Standard | Stress) -- keep the two roles' profiles the same so the
+  conflict / identical / same-folder cases line up. Based on network_drop_target.yaml.
+launch: exe
+roles:
+  target:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    teardown: [enable_network, clean_test_data]
+    steps:
+      - at: [welcome, welcomeSignedOut]
+        env: seed_target_data
+        args: {profile: Standard, script_timeout: 1800}
+        timeout: 1800
+        note: >
+          lay down the Target's pre-existing/colliding data before anything else. Other
+          args you can add: many_small_count, big_file_mb, dry_run.
+      - at: [welcome, welcomeSignedOut]
+        do: continue
+        timeout: 120
+      - at: signIn
+        do: sign_in
+        optional: true
+        timeout: 300
+        note: skipped when a cached login goes straight to checkPrerequisites; UAC is approved by hand
+      - at: connectOldPc
+        do: publish
+        args: {value: connectOldPc}
+        optional: true
+        timeout: 900
+      - at: enterCode
+        do: type_code
+        args: {timeout: 600, attempts: 5, confirm_timeout: 30}
+        timeout: 900
+      - at: chooseWhatToMove
+        do: migrate_now
+        timeout: 600
+      - at: migrating
+        do: publish
+        args: {value: migrating}
+        timeout: 180
+      - at: migrating
+        env: disable_network
+        wait_before: 30
+        note: the network drop "in between" -- wait_before is how long into the transfer it happens
+      - at: noNetwork
+        timeout: 180
+        note: the no-network overlay must appear after the adapter goes down
+      - at: noNetwork
+        env: enable_network
+        wait_before: 20
+      - at: migrating
+        timeout: 600
+        note: the overlay must clear by itself once the engine reports the network back
+      - at: resultsSummary
+        timeout: 7200
+      - at: resultsSummary
+        do: finish
+      - at: migrationDone
+        do: download_pdf
+      - at: migrationDone
+        env: validate_migration_report
+        note: validation/validate_migration.py against the newest report -- fails the run on a mismatch
+      - at: migrationDone
+        do: transfer_more_data
+      - at: welcome
+        timeout: 180
+        done: true
+  source:
+    defaults: {step_timeout: 300, tick: 0.5}
+    policies: {base: happy_path}
+    teardown: [clean_test_data]
+    steps:
+      - at: welcome
+        env: seed_source_data
+        args: {profile: Standard, script_timeout: 1800}
+        timeout: 1800
+        note: >
+          lay down the Source's data to be migrated (edge + permission cases included).
+          Add include_locked: true to also create a genuinely in-use file.
+      - at: welcome
+        do: lets_get_started
+        timeout: 120
+      - at: pairingCode
+        do: publish_code
+        args: {timeout: 600}
+        timeout: 900
+      - at: [linkedSuccess, readyToMigrate]
+        timeout: 300
+      - at: migrating
+        do: announce
+        timeout: 1800
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: wait_for_peer
+        args: {state: [finished, failed], timeout: 7200}
+        timeout: 7260
+        note: keep the Source app open until the Target script has ended
+      - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
+        do: close_app
+        timeout: 7200
+        done: true

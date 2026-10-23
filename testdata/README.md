@@ -151,8 +151,30 @@ What it compares:
 - `clean.ps1` resets ACLs (`icacls /reset`) and uses a robocopy mirror-empty pass so it can
   delete the >260-char tree, the read-only/system files, and the Deny-ACE/protected-ACL
   permission files that plain `Remove-Item` cannot.
-- These are standalone setup scripts. If you want them driven from the state-machine
-  scenario runner's `setup:` / `teardown:`, they can be wrapped as steps in
-  [`utils/environment.py`](../utils/environment.py) — ask and I'll add `seed_source_data`
-  / `seed_target_data` / `clean_test_data` entries.
+## Driving it from a scenario
+
+These scripts are also wired into the state-machine scenario runner as environment steps
+in [`utils/environment.py`](../utils/environment.py): `seed_source_data`, `seed_target_data`,
+and `clean_test_data`. A scenario step passes the seed parameters straight through from its
+`args:` map, so all seeding input lives in the YAML:
+
+```yaml
+- at: welcome
+  env: seed_source_data
+  args: {profile: Standard, many_small_count: 500, include_locked: true, script_timeout: 1800}
+```
+
+Recognised `args` keys: `profile`, `many_small_count`, `big_file_mb`, `include_locked`,
+`lock_minutes`, `dry_run`, `script_timeout`. Put `clean_test_data` in the role's
+`teardown:` so the data is removed even if the run fails.
+
+A complete example ships as
+[`scenarios/transfer_with_data_and_network_drop.yaml`](../scenarios/transfer_with_data_and_network_drop.yaml):
+it seeds both PCs, runs one full migration, drops the Target's network mid-transfer, then
+validates and cleans up. Run it with:
+
+```
+python -m orchestration.scenario_runner --role target --run-id <id> --scenario transfer_with_data_and_network_drop
+python -m orchestration.scenario_runner --role source --run-id <id> --scenario transfer_with_data_and_network_drop
+```
 ```
