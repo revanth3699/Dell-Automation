@@ -67,7 +67,8 @@ roles:
         timeout: 600
         note: the overlay must clear by itself once the engine reports the network back
       - at: resultsSummary
-        timeout: 7200
+        timeout: 21600
+        note: up to 6h -- a large transfer (e.g. the 10 GB file) can take a long time to complete
       - at: resultsSummary
         do: finish
       - at: migrationDone
@@ -119,10 +120,10 @@ roles:
         timeout: 1800
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: wait_for_peer
-        args: {state: [finished, failed], timeout: 7200}
-        timeout: 7260
-        note: keep the Source app open until the Target script has ended
+        args: {state: [finished, failed], timeout: 21600}
+        timeout: 21660
+        note: keep the Source app open until the Target script has ended (up to 6h for a large transfer)
       - at: [migrationComplete, migrationPartialSummary, migrationPartialTryAgain, migrationError, cancelledByOtherPc]
         do: close_app
-        timeout: 7200
+        timeout: 21600
         done: true
