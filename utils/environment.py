@@ -20,6 +20,7 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 PS_TIMEOUT_SECONDS = 60
 
@@ -42,14 +43,14 @@ def _powershell(command: str, timeout: int = PS_TIMEOUT_SECONDS) -> str:
 
 # --------------------------------------------------------------------- applications
 
-def open_notepad(ctx) -> None:
+def open_notepad(ctx, args=None) -> None:
     """Gives the close-applications precheck something to find."""
     subprocess.Popen(["notepad.exe"])
     time.sleep(2.0)
     ctx.log.info("environment: started notepad.exe so the Close applications dialog has something to close")
 
 
-def close_notepad(ctx) -> None:
+def close_notepad(ctx, args=None) -> None:
     _powershell("Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force")
     ctx.log.info("environment: notepad.exe stopped")
 
@@ -71,33 +72,33 @@ def _adapter_name(ctx) -> str:
     return name
 
 
-def disable_network(ctx) -> None:
+def disable_network(ctx, args=None) -> None:
     """Drops this PC's network -- raises the noNetwork overlay. Needs admin."""
     name = _adapter_name(ctx)
     _powershell(f"Disable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.warning(f"environment: network adapter {name!r} DISABLED")
 
 
-def enable_network(ctx) -> None:
+def enable_network(ctx, args=None) -> None:
     name = ctx.scratch.get("network_adapter") or _adapter_name(ctx)
     _powershell(f"Enable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.info(f"environment: network adapter {name!r} enabled")
 
 
-def set_network_public(ctx) -> None:
+def set_network_public(ctx, args=None) -> None:
     """Makes the trust-network precheck fail (TrustRequired). Needs admin."""
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Public")
     ctx.log.warning("environment: network profile set to Public")
 
 
-def set_network_private(ctx) -> None:
+def set_network_private(ctx, args=None) -> None:
     _powershell("Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private")
     ctx.log.info("environment: network profile set to Private")
 
 
 # --------------------------------------------------------------------- region
 
-def set_region_unsupported(ctx) -> None:
+def set_region_unsupported(ctx, args=None) -> None:
     """Sets the Windows home location to one the app's supported-region list does not
     include (GeoId 4 = Afghanistan) -- raises localeNotSupported. The previous value is
     kept in scratch for restore_region()."""
@@ -106,7 +107,7 @@ def set_region_unsupported(ctx) -> None:
     ctx.log.warning("environment: Windows home location set to an unsupported region")
 
 
-def restore_region(ctx) -> None:
+def restore_region(ctx, args=None) -> None:
     geo = ctx.scratch.get("geo_id") or ctx.env.get("DDA_HOME_GEOID", "244")  # 244 = United States
     _powershell(f"Set-WinHomeLocation -GeoId {geo}")
     ctx.log.info(f"environment: Windows home location restored to GeoId {geo}")
@@ -114,7 +115,7 @@ def restore_region(ctx) -> None:
 
 # --------------------------------------------------------------------- validation
 
-def validate_migration_report(ctx) -> None:
+def validate_migration_report(ctx, args=None) -> None:
     """Runs validation/validate_migration.py against the newest MigrationReport PDF on
     this (Target) PC: every file the report claims was copied must exist, and every
     registry-backed setting must match. Writes the usual validation/output HTML and
@@ -135,7 +136,7 @@ def validate_migration_report(ctx) -> None:
 BENCHMARK_STOP_WAIT_SECONDS = 15
 
 
-def start_benchmark(ctx) -> None:
+def start_benchmark(ctx, args=None) -> None:
     """Target setup: launches the benchmark resource sampler as its own subprocess (see
     benchmark/resource_sampler.py, BENCHMARKING_PLAN.md). Never blocks and never raises: a
     sampler that fails to start only costs the report its resource tabs."""
@@ -163,7 +164,7 @@ def start_benchmark(ctx) -> None:
         ctx.log.warning(f"benchmark: could not start the resource sampler: {exc}")
 
 
-def stop_benchmark_report(ctx) -> None:
+def stop_benchmark_report(ctx, args=None) -> None:
     """Target teardown: stops the sampler, harvests CDM.db / the rclone log / the samples and
     renders benchmark/output/<run_id>/report_<role>.html. MUST NEVER RAISE -- it runs in the
     scenario's guaranteed teardown, so every failure is logged and swallowed."""
@@ -211,6 +212,119 @@ def _stop_sampler(ctx, state: dict) -> None:
         ctx.log.warning(f"benchmark: error while stopping the sampler: {exc}")
 
 
+# --------------------------------------------------------------------- test data
+
+# The PowerShell seeding scripts under testdata/ (see testdata/README.md). These steps
+# wrap them so a scenario can generate its own migration test data from the YAML, and
+# clean it up in teardown. Each step's YAML `args:` map is translated into script
+# parameters, so all seeding input lives in the scenario file.
+_TESTDATA_DIR = Path(__file__).resolve().parent.parent / "testdata"
+TESTDATA_DEFAULT_TIMEOUT_SECONDS = 1800  # a Stress profile (2 GB + 5000 files) takes a while
+
+
+def _run_testdata_script(ctx, script_name: str, script_args: list[str], timeout: int) -> None:
+    script = _TESTDATA_DIR / script_name
+    if not script.is_file():
+        raise EnvironmentStepError(f"test-data script not found: {script}")
+    cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *script_args]
+    ctx.log.info("environment: " + " ".join(cmd))
+    try:
+        completed = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise EnvironmentStepError(f"{script_name} timed out after {timeout}s") from exc
+    tail = "\n".join((completed.stdout or "").strip().splitlines()[-8:])
+    if tail:
+        ctx.log.info(f"{script_name} output (tail):\n{tail}")
+    if completed.returncode != 0:
+        raise EnvironmentStepError(
+            f"{script_name} failed ({completed.returncode}): {(completed.stderr or completed.stdout).strip()}"
+        )
+
+
+def _seed_script_args(args: dict | None) -> list[str]:
+    """Translates a scenario step's args map into seed_*.ps1 parameters.
+    Recognised keys: profile, many_small_count, big_file_mb, include_locked,
+    lock_minutes, dry_run."""
+    args = args or {}
+    out: list[str] = []
+    if args.get("profile"):            out += ["-Profile", str(args["profile"])]
+    if args.get("many_small_count") is not None: out += ["-ManySmallCount", str(int(args["many_small_count"]))]
+    if args.get("big_file_mb") is not None:      out += ["-BigFileMB", str(args["big_file_mb"])]
+    if args.get("include_locked"):     out += ["-IncludeLocked"]
+    if args.get("lock_minutes") is not None:     out += ["-LockMinutes", str(int(args["lock_minutes"]))]
+    if args.get("dry_run"):            out += ["-DryRun"]
+    return out
+
+
+def _testdata_timeout(args: dict | None) -> int:
+    args = args or {}
+    return int(args.get("script_timeout") or TESTDATA_DEFAULT_TIMEOUT_SECONDS)
+
+
+def seed_source_data(ctx, args=None) -> None:
+    """Seeds the SOURCE PC's migration test data (testdata/seed_source.ps1)."""
+    _run_testdata_script(ctx, "seed_source.ps1", _seed_script_args(args), _testdata_timeout(args))
+    ctx.log.success("environment: source test data seeded")
+
+
+def seed_target_data(ctx, args=None) -> None:
+    """Seeds the TARGET PC's pre-existing/colliding test data (testdata/seed_target.ps1)."""
+    _run_testdata_script(ctx, "seed_target.ps1", _seed_script_args(args), _testdata_timeout(args))
+    ctx.log.success("environment: target test data seeded")
+
+
+def clean_test_data(ctx, args=None) -> None:
+    """Removes all seeded DellMigrateTest data (testdata/clean.ps1 -Force). Teardown-safe."""
+    _run_testdata_script(ctx, "clean.ps1", ["-Force"], _testdata_timeout(args))
+    ctx.log.info("environment: test data cleaned")
+
+
+# Coordination key the Source manifest is published under so the Target can fetch it and
+# run the permission-retention check without a manual file copy between the two PCs.
+SOURCE_MANIFEST_KEY = "source_perm_manifest"
+
+
+def publish_source_manifest(ctx, args=None) -> None:
+    """Source: publishes its seeding manifest (which holds every permission file's captured
+    security state) through the Coordination Service, so the Target's check_permissions step
+    can fetch it. Run after seed_source_data. args: key, manifest_path."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    manifest = Path(args.get("manifest_path") or (_TESTDATA_DIR / "output" / "source_manifest_latest.json"))
+    if not manifest.is_file():
+        raise EnvironmentStepError(f"source manifest not found: {manifest} (run seed_source_data first)")
+    content = manifest.read_text(encoding="utf-8")
+    ctx.coordination.publish(ctx.run_id, key, content)
+    ctx.log.success(f"environment: published source manifest ({len(content)} bytes) as {key!r}")
+
+
+def check_permissions(ctx, args=None) -> None:
+    """Target: fetches the Source manifest from the Coordination Service and runs
+    testdata/check_permissions.ps1 against the migrated files on this PC. Run after the
+    migration completes, before clean_test_data. args: key, fetch_timeout, script_timeout,
+    fail_on_change (default true -- a changed/missing permission fails the scenario)."""
+    args = args or {}
+    key = args.get("key") or SOURCE_MANIFEST_KEY
+    fetch_timeout = float(args.get("fetch_timeout") or 300)
+    fail_on_change = args.get("fail_on_change", True)
+
+    ctx.log.info(f"environment: waiting for the source manifest ({key!r}) from the peer")
+    content = ctx.coordination.wait_for(ctx.run_id, key, timeout=fetch_timeout)
+    incoming = _TESTDATA_DIR / "output" / f"incoming_source_manifest_{ctx.run_id}.json"
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    incoming.write_text(content, encoding="utf-8")
+
+    try:
+        _run_testdata_script(ctx, "check_permissions.ps1",
+                             ["-SourceManifest", str(incoming)], _testdata_timeout(args))
+        ctx.log.success("environment: permission retention check PASSED")
+    except EnvironmentStepError:
+        if fail_on_change:
+            raise
+        ctx.log.warning("environment: permission retention check reported changes "
+                        "(fail_on_change=false) -- see testdata/output/permission_check_*.json")
+
+
 # --------------------------------------------------------------------- registry
 
 STEPS: dict[str, Callable] = {
@@ -225,6 +339,11 @@ STEPS: dict[str, Callable] = {
     "validate_migration_report": validate_migration_report,
     "start_benchmark": start_benchmark,
     "stop_benchmark_report": stop_benchmark_report,
+    "seed_source_data": seed_source_data,
+    "seed_target_data": seed_target_data,
+    "clean_test_data": clean_test_data,
+    "publish_source_manifest": publish_source_manifest,
+    "check_permissions": check_permissions,
 }
 
 

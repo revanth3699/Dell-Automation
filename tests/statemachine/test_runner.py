@@ -348,9 +348,20 @@ def test_env_step_runs_registered_environment_function(monkeypatch):
     from utils import environment
     calls, observer = Calls(), ScriptedObserver(obs("A"))
     model = make_model(calls, observer)
-    monkeypatch.setitem(environment.STEPS, "fake_env", lambda ctx: calls.performed.append("env"))
+    # env steps receive the step's YAML args as a second argument, same as model actions
+    monkeypatch.setitem(environment.STEPS, "fake_env", lambda ctx, a: calls.performed.append("env"))
     run(model, [Step("A", env="fake_env", index=0), Step("A", done=True, index=1)], observer)
     assert calls.performed == ["env"]
+
+
+def test_env_step_receives_yaml_args(monkeypatch):
+    from utils import environment
+    calls, observer = Calls(), ScriptedObserver(obs("A"))
+    model = make_model(calls, observer)
+    seen = {}
+    monkeypatch.setitem(environment.STEPS, "fake_env", lambda ctx, a: seen.update(a))
+    run(model, [Step("A", env="fake_env", args={"profile": "Stress"}, index=0), Step("A", done=True, index=1)], observer)
+    assert seen == {"profile": "Stress"}
 
 
 def test_wait_before_pauses_then_acts():

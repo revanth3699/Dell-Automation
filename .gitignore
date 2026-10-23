@@ -39,6 +39,8 @@ coordination_service/state.json
 !/TEST_SCENARIOS.md
 !/FULL_TRANSFER_FLOW.md
 !/TARGET_STATE_MACHINE.md
+# testdata seeding usage guide -- pushed so it ships with the scripts.
+!/testdata/README.md
 !/BENCHMARKING_PLAN.md
 
 # Dev/debug scripts used only for building this framework locally (manual, piecemeal
@@ -54,3 +56,8 @@ tracking/
 # Migration benchmark output (benchmark/output/<run_id>/)
 benchmark/output/*
 !benchmark/output/.gitkeep
+
+# Test-data seeding manifests + lock-holder PID (testdata/seed_*.ps1 generate these at
+# runtime, per-machine -- never committed, same reasoning as the output folders above).
+testdata/output/*
+!testdata/output/.gitkeep
