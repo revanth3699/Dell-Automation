@@ -17,6 +17,7 @@ each one a matching undo so a scenario's teardown can restore the machine.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -72,9 +73,35 @@ def _adapter_name(ctx) -> str:
     return name
 
 
+def _wifi_profile_for_adapter(ctx, name: str) -> tuple[str, str] | None:
+    """(profile, ssid) netsh needs to rejoin `name` to whatever WiFi network it's currently
+    on, or None if `name` isn't a WiFi interface (e.g. Ethernet -- there's nothing to
+    capture, and Enable-NetAdapter alone is already the right fix). Never raises: a machine
+    with no WLAN service/adapter at all must not break disable_network on a wired PC."""
+    try:
+        output = _powershell("netsh wlan show interfaces")
+    except EnvironmentStepError:
+        return None
+    for block in re.split(r"\r?\n\s*\r?\n", output.strip()):
+        fields = dict(line.split(":", 1) for line in block.splitlines() if ":" in line)
+        fields = {k.strip(): v.strip() for k, v in fields.items()}
+        if fields.get("Name") == name:
+            profile, ssid = fields.get("Profile"), fields.get("SSID")
+            return (profile, ssid) if profile and ssid else None
+    return None
+
+
 def disable_network(ctx, args=None) -> None:
-    """Drops this PC's network -- raises the noNetwork overlay. Needs admin."""
+    """Drops this PC's network -- raises the noNetwork overlay. Needs admin. If `name` is
+    currently-connected WiFi, captures its profile/SSID first so enable_network can rejoin
+    the SAME network explicitly rather than relying on Windows' own auto-reconnect (which
+    silently does nothing if "Connect automatically" is off for that profile, and isn't
+    guaranteed to pick the same network back when more than one known network is in range)."""
     name = _adapter_name(ctx)
+    wifi = _wifi_profile_for_adapter(ctx, name)
+    ctx.scratch["network_profile"], ctx.scratch["network_ssid"] = wifi or (None, None)
+    if wifi:
+        ctx.log.info(f"environment: captured current WiFi profile {wifi[0]!r} (SSID {wifi[1]!r}) on {name!r}")
     _powershell(f"Disable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.warning(f"environment: network adapter {name!r} DISABLED")
 
@@ -83,6 +110,11 @@ def enable_network(ctx, args=None) -> None:
     name = ctx.scratch.get("network_adapter") or _adapter_name(ctx)
     _powershell(f"Enable-NetAdapter -Name '{name}' -Confirm:$false")
     ctx.log.info(f"environment: network adapter {name!r} enabled")
+    profile, ssid = ctx.scratch.get("network_profile"), ctx.scratch.get("network_ssid")
+    if profile:
+        time.sleep(3.0)  # give the adapter a moment to come up before asking it to join
+        _powershell(f'netsh wlan connect name="{profile}" ssid="{ssid}" interface="{name}"')
+        ctx.log.info(f"environment: reconnected {name!r} to its previous WiFi profile {profile!r}")
 
 
 def set_network_public(ctx, args=None) -> None:
