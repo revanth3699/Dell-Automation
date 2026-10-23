@@ -111,17 +111,38 @@ foreach ($rel in $srcByRel.Keys) {
     $s = $srcByRel[$rel]; $t = $tgtByRel[$rel]; $handled[$rel] = $true
     $path = Resolve-EntryPath $t.Category $rel
     $exists = Live-Exists $path $false
-    $live = if ($exists) { Live-Hash $path } else { $null }
-    if ($s.Sha256 -eq $t.Sha256) {
-        if (-not $exists)            { $status = 'IDENTICAL-LOST';    $fail = $true }
-        elseif ($live -eq $s.Sha256) { $status = 'IDENTICAL-OK';      $fail = $false }
-        else                         { $status = 'IDENTICAL-CORRUPT'; $fail = $true }
+
+    # Prefer hashes to decide same-vs-different content; fall back to size when either
+    # side is a size-only record (a large file past MaxHashBytes has Sha256 = $null, so
+    # $null -eq $null must NOT be mistaken for "identical").
+    $bothHashed = [bool]$s.Sha256 -and [bool]$t.Sha256
+    if ($bothHashed) { $sameContent = ($s.Sha256 -eq $t.Sha256) }
+    else             { $sameContent = ($null -ne $s.Size -and $s.Size -eq $t.Size) }
+
+    if ($sameContent) {
+        if (-not $exists) { $status = 'IDENTICAL-LOST'; $fail = $true }
+        else {
+            if ($bothHashed) { $intact = ((Live-Hash $path) -eq $s.Sha256) }
+            else             { $intact = ((Live-Size $path) -eq $s.Size) }
+            if ($intact) { $status = 'IDENTICAL-OK'; $fail = $false }
+            else         { $status = 'IDENTICAL-CORRUPT'; $fail = $true }
+        }
         $results += [pscustomobject]@{ Class=$s.Class; Rel=$rel; Status=$status; Winner=$null; Fail=$fail }
     } else {
-        if     (-not $exists)        { $winner = 'missing' }
-        elseif ($live -eq $s.Sha256) { $winner = 'source' }
-        elseif ($live -eq $t.Sha256) { $winner = 'target' }
-        else                         { $winner = 'other' }
+        if (-not $exists) {
+            $winner = 'missing'
+        } elseif ($bothHashed) {
+            $live = Live-Hash $path
+            if     ($live -eq $s.Sha256) { $winner = 'source' }
+            elseif ($live -eq $t.Sha256) { $winner = 'target' }
+            else                         { $winner = 'other' }
+        } else {
+            # size-only sides: a winner is only distinguishable when the two sizes differ
+            $live = Live-Size $path
+            if     ($s.Size -ne $t.Size -and $live -eq $s.Size) { $winner = 'source' }
+            elseif ($s.Size -ne $t.Size -and $live -eq $t.Size) { $winner = 'target' }
+            else                                                { $winner = 'other' }
+        }
         $fail = ($winner -eq 'missing') -or ($ExpectedConflictWinner -and $winner -ne $ExpectedConflictWinner)
         $results += [pscustomobject]@{ Class=$s.Class; Rel=$rel; Status="CONFLICT-$($winner.ToUpper())"; Winner=$winner; Fail=$fail }
     }

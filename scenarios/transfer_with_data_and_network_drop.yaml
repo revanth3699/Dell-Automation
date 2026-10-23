@@ -32,8 +32,10 @@ roles:
         args: {profile: Standard, script_timeout: 1800}
         timeout: 1800
         note: >
-          lay down the Target's pre-existing/colliding data before anything else. Other
-          args you can add: many_small_count, big_file_mb, dry_run.
+          lay down the Target's pre-existing/colliding data before anything else. The
+          Target has only the fixed collision files (no bulk data), so seed_target.ps1
+          accepts only profile and dry_run -- the volume args (many_small_count,
+          big_file_mb) apply to seed_source_data, not here.
       - at: [welcome, welcomeSignedOut]
         do: continue
         timeout: 120
